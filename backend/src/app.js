@@ -7,6 +7,7 @@ const db = require('./db');
 const log = require('./logger');
 const { ApiError } = require('./errors');
 const { checkOrigin } = require('./middleware/origin');
+const { requireUser } = require('./middleware/auth');
 
 function createApp({ mqttConnected = () => false } = {}) {
   const app = express();
@@ -33,6 +34,11 @@ function createApp({ mqttConnected = () => false } = {}) {
   // Route modules (docs/API.md §1–§9), mounted as they are built.
   api.use('/auth', require('./routes/auth'));
   api.use('/me', require('./routes/me'));
+  api.use('/devices', require('./routes/devices').router);
+  const admin = express.Router();
+  admin.use(requireUser);
+  admin.use(require('./routes/admin/devices'));
+  api.use('/admin', admin);
 
   api.use((req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such endpoint' } });

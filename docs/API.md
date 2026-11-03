@@ -106,7 +106,7 @@ Screens: **My devices**, **Live view**, **Add device**, **Device settings**.
 | 3.7 | PATCH | `/devices/:id/sensor-settings` | `settings.edit` | `{exitS?, liveS?, idleS?, struggle?, unattended?, unattMin?}` → `{settings: sensorSettings}`. Sent to the sensor at once if it's online, otherwise when it reconnects (retained message). Ranges follow the DB checks, e.g. `exitS` 30–3600 (`400 VALIDATION`). |
 | 3.8 | POST | `/devices/:id/wifi-setup` | `settings.edit` | → `202 {commandId, status}`. Sends the `config_mode` command ("Change Wi-Fi network"). **Expires after 30 s** if the sensor is offline (D4): `status` comes back as `"sent"` or `"expired"`. |
 | 3.9 | DELETE | `/devices/:id` | owner only | `{confirmName}` → `204`. "Remove device": owner removed, shares, invites, **sleep sessions, alerts and rules deleted**, `unclaimed` event. The old QR stops working, and support issues a new code (8.6) so a resold sensor can't be re-claimed by the old owner. 422 `CONFIRM_MISMATCH` if `confirmName` isn't the device name. |
-| 3.10 | DELETE | `/devices/:id/me` | a share (not the owner) | → `204`. "Leave shared device". |
+| 3.10 | DELETE | `/devices/:id/me` | a share (not the owner) | → `204`. "Leave shared device" (also clears your mute for it). The owner gets `422 OWNER_CANNOT_LEAVE` (they remove the device instead, 3.9). |
 
 **`deviceCard`:**
 ```json
@@ -249,16 +249,16 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
 | 8.1 | GET | `/admin/dashboard` | any staff | → `{counts: {registered, online, offline, unclaimed, disabled, customers, registeredThisWeek, customersThisWeek, rolloutsRunning}, onlineHourly: [{hour, online}] (24), fwVersions: [{version, count}], recentAudit: [...5]}`. `recentAudit` is only included with `audit.view`. |
-| 8.2 | GET | `/admin/devices?q&status&fw&tz&registeredFrom&limit&cursor` | `devices.view` | `q` matches serial, MAC (with or without colons), device name, or owner name or phone. `status` is `online`, `offline`, `unclaimed` or `disabled`. → `{items: [{id, serial, name, owner: {id, fullName} \| null, online, tz, fw, chip, lastSeenAt, createdAt}], total, nextCursor}`. "Registered today" on the Register screen uses `registeredFrom`. |
+| 8.2 | GET | `/admin/devices?q&status&fw&tz&registeredFrom&limit&cursor` | `devices.view` | `q` matches serial, MAC (with or without colons, 4+ hex digits), device name, or owner name or phone. `status` is `online`, `offline`, `unclaimed` or `disabled`. `registeredFrom` is `YYYY-MM-DD`. → `{items: [{id, serial, mac, name, owner: {id, fullName} \| null, online, isDisabled, tz, fw, chip, lastSeenAt, createdAt}], total, nextCursor}`, newest first. "Registered today" on the Register screen uses `registeredFrom`. |
 | 8.3 | GET | `/admin/devices/:id` | `devices.view` | → `{hardware: {mac, chip, radar: "DFRobot C1001", hwModel, batch, manufacturedAt, fwAtRegister, registeredAt, registeredBy}, connection: {online, lastSeenAt, ip, wifiSsid, rssi, uptimeS, fw, radarOk}, tz, place, sleepCutoff, isDisabled, disabledReason, owner, shares[], claimCodeActive, sensorSettings}` |
-| 8.4 | POST | `/admin/devices` | `devices.register` | `{mac, chip, hwModel, batch?, manufacturedAt?, fwOnBoard?}` → `201 {device, serial, claimCode, qrPayload, qrPngBase64, stickerHtml}`. **`claimCode` is shown only in this response.** The serial is generated under an advisory lock so two registrations never get the same one (format open, D8). The MQTT username is the MAC as 12 lowercase hex characters. Nothing is written to the board (MAC-only login). 409 `MAC_EXISTS`. The MAC and chip are read in the browser with Web Serial (esptool-js), as in Water Tank. |
-| 8.5 | PATCH | `/admin/devices/:id` | `devices.command` | `{isDisabled, disabledReason?}` → device. Disabling refuses MQTT login and kicks the sensor off the broker. |
-| 8.6 | POST | `/admin/devices/:id/claim-code` | `devices.register` | → `{serial, claimCode, qrPayload, qrPngBase64, stickerHtml}`. A new code; the old one stops working. For a lost sticker or a resold device. |
-| 8.7 | POST | `/admin/devices/:id/unclaim` | `customers.edit` | `{reason}` → `204`. Same effect as 3.9 (history deleted). |
+| 8.4 | POST | `/admin/devices` | `devices.register` | `{mac, chip, hwModel, batch?, manufacturedAt?, fwOnBoard?}` → `201 {device: {id, serial, mac, chip, registeredAt}, serial, claimCode, qrPayload, qrPngBase64}`. `claimCode` = `XXXX-XXXX-XXXX`, `qrPayload` = `ARG1:<code without dashes>`; **both are shown only in this response** (only the HMAC is stored). `qrPngBase64` is optional for the UI (the web draws the QR itself). The serial is generated under an advisory lock so two registrations never get the same one: `ARG-<YY><letter><4 digits>`, e.g. `ARG-26A0001` (format still open, D8). The MQTT username is the MAC as 12 lowercase hex characters. Nothing is written to the board (MAC-only login). 409 `MAC_EXISTS`. Bulk registration = one call per CSV line (no bulk route in v1). The MAC and chip are read in the browser with Web Serial (esptool-js), as in Water Tank. |
+| 8.5 | PATCH | `/admin/devices/:id` | `devices.command` | `{isDisabled, disabledReason?}` → `{id, serial, isDisabled, disabledReason}`. A reason is required when disabling (`400 VALIDATION`). Disabling refuses new MQTT logins at once; an already-connected sensor loses topic access within about 60 s (the broker's ACL cache). |
+| 8.6 | POST | `/admin/devices/:id/claim-code` | `devices.register` | → `{serial, claimCode, qrPayload, qrPngBase64}`. A new code; the old one stops working. For a lost sticker or a resold device. On a device that still has an owner the code only works after unclaim (claim gives `409 ALREADY_CLAIMED`). |
+| 8.7 | POST | `/admin/devices/:id/unclaim` | `customers.edit` | `{reason}` → `204`. Same effect as 3.9 (history deleted). `409 NOT_CLAIMED` if it has no owner. |
 | 8.8 | POST | `/admin/devices/:id/commands` | `devices.command` | `{type: "reboot" \| "config_mode" \| "ota_check" \| "logs"}` → `202 {commandId, status: "sent" \| "queued"}`. Offline sensors: `config_mode` expires after 30 s, the others **wait up to 24 h** (D4) and are sent when the sensor reconnects. |
 | 8.9 | GET | `/admin/devices/:id/commands?limit&cursor` | `devices.view` | → `{items: [{id, type, requestedBy, status, error, createdAt, sentAt, ackedAt}]}` |
 | 8.10 | GET | `/admin/devices/:id/logs` | `devices.view` | → `{items: [{id, createdAt, content}]}`. The last 5 uploads from the `logs` command. |
-| 8.11 | GET | `/admin/devices/:id/events?limit&cursor` | `devices.view` | → `device_events` rows |
+| 8.11 | GET | `/admin/devices/:id/events?limit&cursor` | `devices.view` | → `{items: [{id, type, detail, createdAt}], nextCursor}`, newest first. |
 | 8.12 | DELETE | `/admin/devices/:id` | `devices.register` | → `204`. Only for a device that was **never claimed** (e.g. a mistyped MAC); otherwise 409 `DEVICE_IN_USE`. |
 
 ## 9. Admin: firmware, team, audit, sleep rules
@@ -271,7 +271,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | 9.3 | PATCH | `/admin/firmware/:id` | `firmware.upload` | `{channel?, notes?}` → release |
 | 9.4 | DELETE | `/admin/firmware/:id` | `firmware.upload` | → `204`. Refused while a rollout uses it (409). |
 | 9.5 | POST | `/admin/ota/rollouts` | `firmware.rollout` | `{releaseId, target: "all" \| "percent" \| "serials" \| "from_version", percent?, serials?[], fromVersion?, installWindow: {from: "10:00", to: "18:00"} \| null}` → `201 {rolloutId, devices: n}`. The device list is fixed now. Devices with `autoUpdate = false` are left out unless listed by serial. |
-| 9.6 | GET | `/admin/ota/rollouts` | `firmware.view` | → `{items: [{id, version, target, createdBy, createdAt, status, counts: {done, downloading, waiting, failed}}]}` |
+| 9.6 | GET | `/admin/ota/rollouts` | `firmware.view` | → `{items: [{id, version, target, createdBy, createdAt, status, counts: {done, downloading, waiting, failed}}]}`. `status` is `running`, `paused`, `finished` or `cancelled`. |
 | 9.7 | GET | `/admin/ota/rollouts/:id` | `firmware.view` | → rollout + `devices[{deviceId, serial, status, fromVersion, error, updatedAt}]` |
 | 9.8 | POST | `/admin/ota/rollouts/:id/pause` · `/resume` · `/cancel` · `/retry` | `firmware.rollout` | → `204`. Pause stops new sends; devices already updated keep the new version. Cancel marks `pending` devices as `skipped`. Retry re-sends to `failed` devices. |
 | 9.9 | GET | `/fw/:releaseId.bin?t=<token>` | device | Firmware download for OTA, outside `/api/v1`. The token is in the MQTT `ota` message and lasts 10 min. Responses include `Content-Length` and `x-MD5`. |
@@ -294,7 +294,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 ### Audit log and sleep rules
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
-| 9.19 | GET | `/admin/audit?q&action&actorId&targetType&targetId&from&to&limit&cursor` | `audit.view` | `action` is a prefix (`device`, `ota`, `firmware`, `share`, `customer`, `team`). → `{items: [{id, at, actorName, action, targetType, targetLabel, detail}]}`. Read-only. |
+| 9.19 | GET | `/admin/audit?q&action&actorId&targetType&targetId&from&to&limit&cursor` | `audit.view` | `action` is a prefix (`device`, `ota`, `firmware`, `share`, `customer`, `team`). → `{items: [{id, at, actorName, action, targetType, targetLabel, detail}]}`. Read-only. `from` / `to` are `YYYY-MM-DD`, inclusive, in UTC. |
 | 9.20 | GET | `/admin/platform-settings` | `platform.settings` | → `{mergeGapMin: 30, minSessionMin: 25, defaultSleepCutoff: "12:00"}` |
 | 9.21 | PATCH | `/admin/platform-settings` | `platform.settings` | same fields → saved. History regroups on the next read. The default cut-off applies only to devices claimed afterwards. |
 
@@ -314,7 +314,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | server → client | `device:live` | `{deviceId, serial, pr, bed, ss, hr, br, bs, mv, mr, dist, rssi, at}` | live subscribers only; every live message (5 s in bed / 60 s idle). **Never stored.** |
 | server → client | `settings:sync` | `{deviceId, version, appliedVersion, sync}` | the device room ("Saved on device ✓") |
 | server → client | `command:status` | `{commandId, deviceId, serial, type, status, error}` | the sender, plus `admin:devices` |
-| server → client | `rollout:progress` | `{rolloutId, counts, deviceId, status}` | `admin:rollouts` |
+| server → client | `rollout:progress` | `{rolloutId, status, counts, deviceId, deviceStatus}` (`status` = the rollout's `running \| paused \| finished \| cancelled`; `deviceStatus` = that device's OTA status) | `admin:rollouts` |
 | server → client | `alert:new` | `{alertId, deviceId, serial, type, severity, title, at}` | users with `alerts.receive` on that device |
 | server → client | `alert:ended` | `{alertId, deviceId, endedAt}` | the same users |
 | server → client | `access:changed` | `{deviceId, myPermissions[] \| null}` | the affected user, when a share is added, changed or removed |
@@ -360,8 +360,8 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 | 401 | `NOT_LOGGED_IN`, `TOKEN_EXPIRED`, `REFRESH_INVALID`, `BAD_CREDENTIALS` |
 | 403 | `FORBIDDEN` (staff permission missing), `USER_DISABLED`, `DEVICE_DISABLED`, `BAD_ORIGIN` |
 | 404 | `NOT_FOUND` (also used when you have no access to a device), `INVALID_CODE`, `INVITE_INVALID` |
-| 409 | `PHONE_TAKEN`, `ALREADY_CLAIMED`, `ALREADY_SHARED`, `ALREADY_STAFF`, `MAC_EXISTS`, `VERSION_EXISTS`, `ROLE_EXISTS`, `ROLE_LOCKED`, `ROLE_IN_USE`, `DEVICE_IN_USE` |
-| 422 | `INVALID_TIMEZONE`, `BAD_PERMISSION`, `BAD_RULE`, `CONFIRM_MISMATCH`, `OWN_ROLE`, `LAST_OWNER`, `NOT_ESP_IMAGE` |
+| 409 | `PHONE_TAKEN`, `ALREADY_CLAIMED`, `ALREADY_SHARED`, `ALREADY_STAFF`, `NOT_CLAIMED`, `MAC_EXISTS`, `VERSION_EXISTS`, `ROLE_EXISTS`, `ROLE_LOCKED`, `ROLE_IN_USE`, `DEVICE_IN_USE` |
+| 422 | `INVALID_TIMEZONE`, `BAD_PERMISSION`, `BAD_RULE`, `CONFIRM_MISMATCH`, `OWN_ROLE`, `LAST_OWNER`, `NOT_ESP_IMAGE`, `OWNER_CANNOT_LEAVE` |
 | 429 | `RATE_LIMITED` (+`retryAfterS`) |
 | 501 | `NOT_ENABLED` (OTP / SMS and push subscriptions in v1) |
 

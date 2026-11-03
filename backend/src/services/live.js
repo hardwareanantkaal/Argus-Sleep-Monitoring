@@ -108,11 +108,14 @@ async function onStatus(mac, payload) {
   }
 }
 
-async function onInfo(mac, payload) {
+async function onInfo(mac, payload, packet) {
   const d = await entry(mac);
   const info = parseJson(payload);
   if (!d || !info) return;
-  await seen(mac, d);
+  // A RETAINED info is the broker replaying an old message (e.g. after a
+  // backend restart): it says nothing about whether the device is online.
+  // Only the retained status message decides that.
+  if (!packet?.retain) await seen(mac, d);
   const radarOk = info.radar === undefined ? null : Number(info.radar) === 1;
   const prev = await db.one('SELECT radar_ok FROM device_state WHERE device_id = $1', [d.deviceId]);
   d.fw = typeof info.fw === 'string' ? info.fw.slice(0, 40) : d.fw;
@@ -167,7 +170,7 @@ const liveListeners = [];
 
 function start() {
   mqtt.on('status', (mac, p) => withLock(mac, () => onStatus(mac, p)));
-  mqtt.on('info', (mac, p) => withLock(mac, () => onInfo(mac, p)));
+  mqtt.on('info', (mac, p, packet) => withLock(mac, () => onInfo(mac, p, packet)));
   mqtt.on('state', (mac, p) => withLock(mac, () => onState(mac, p)));
   setInterval(() => sweep().catch((err) => log.error({ err }, 'stale sweep failed')), SWEEP_MS).unref();
 }

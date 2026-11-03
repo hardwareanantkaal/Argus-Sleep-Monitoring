@@ -107,6 +107,21 @@ function mqttConnect(username, { clientId = username, password = 'x', will = fal
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A logged-in staff member with the given role (Owner, Developer, Manufacturing, Support).
+async function staff(role = 'Owner') {
+  const r = await registered();
+  await db.query('UPDATE users SET staff_role_id = (SELECT id FROM staff_roles WHERE name = $2) WHERE id = $1', [r.user.id, role]);
+  return r;
+}
+
+// Register a device through the admin API (as a real factory would). Returns the 201 body.
+async function registerDevice(adminClient, extra = {}) {
+  const mac = randomMac();
+  const r = await adminClient.post('/admin/devices', { mac: mac.match(/.{2}/g).join(':'), chip: 'ESP32-S3', hwModel: 'ARG-S1 rev B', ...extra });
+  if (r.status !== 201) throw new Error(`register device failed: ${r.status} ${JSON.stringify(r.body)}`);
+  return { ...r.body, mac };
+}
+
 // ---- Socket.IO ---------------------------------------------------------
 // Open a socket as the logged-in `client` (sends its argus_at cookie and our
 // Origin, like the browser). Resolves on connect, rejects on connect_error.
@@ -138,4 +153,4 @@ function nextEvent(socket, event, pred = () => true, timeoutMs = 4000) {
 // emitWithAck with a timeout.
 const ask = (socket, event, payload) => socket.timeout(4000).emitWithAck(event, payload);
 
-module.exports = { BASE, ORIGIN, db, Client, phone, registered, MQTT_URL, MQTT_BACKEND, randomMac, insertDevice, mqttConnect, sleep, socketConnect, nextEvent, ask };
+module.exports = { BASE, ORIGIN, db, Client, phone, registered, MQTT_URL, MQTT_BACKEND, randomMac, insertDevice, mqttConnect, sleep, socketConnect, nextEvent, ask, staff, registerDevice };
