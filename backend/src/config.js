@@ -1,0 +1,47 @@
+// All environment variables are read here and nowhere else.
+// Outside production a missing value falls back to a dev default;
+// in production a missing required value stops the server at boot.
+require('dotenv').config();
+
+const isProd = process.env.NODE_ENV === 'production';
+
+function required(name, devDefault) {
+  const v = process.env[name];
+  if (v !== undefined && v !== '') return v;
+  if (isProd) throw new Error(`Missing required env var ${name}`);
+  return devDefault;
+}
+
+function int(name, def) {
+  const v = process.env[name];
+  return v === undefined || v === '' ? def : parseInt(v, 10);
+}
+
+module.exports = {
+  isProd,
+  port: int('BACKEND_PORT', 3100),
+  logLevel: process.env.LOG_LEVEL || 'info',
+  logPretty: process.env.LOG_PRETTY === 'true',
+  trustProxy: int('TRUST_PROXY', 0),
+  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3101')
+    .split(',').map((s) => s.trim()).filter(Boolean),
+
+  databaseUrl: required('DATABASE_URL', 'postgres://argus:argus@localhost:5434/argus'),
+  migrationsDir: process.env.MIGRATIONS_DIR || require('path').join(__dirname, '../../database/migrations'),
+
+  jwtSecret: required('JWT_SECRET', 'dev-only-jwt-secret-change-me'),
+  hashPepper: required('HASH_PEPPER', 'dev-only-pepper-change-me'),
+  accessTokenTtlS: int('ACCESS_TOKEN_TTL_S', 15 * 60),
+  refreshTokenTtlDays: int('REFRESH_TOKEN_TTL_DAYS', 30),
+
+  mqtt: {
+    url: required('MQTT_URL', 'mqtt://localhost:1885'),
+    username: required('MQTT_BACKEND_USERNAME', 'argus-backend'),
+    password: required('MQTT_BACKEND_PASSWORD', 'dev-only-mqtt-password'),
+    clientId: process.env.MQTT_CLIENT_ID || 'argus-backend',
+    topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'argus',
+  },
+
+  deviceStaleS: int('DEVICE_STALE_S', 90),
+  commandTtlS: int('COMMAND_TTL_S', 30),
+};

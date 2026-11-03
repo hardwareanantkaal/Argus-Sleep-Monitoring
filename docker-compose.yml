@@ -1,0 +1,46 @@
+# Argus DEV stack. Ports avoid the water and magic-outline stacks,
+# which already use 3000, 1883, 5432, 5433 and 5050 on this PC.
+#   backend  127.0.0.1:3100
+#   postgres 127.0.0.1:5434
+# Mosquitto (1885) and pgAdmin (5051) are added in the next build step.
+name: argus
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-argus}
+      POSTGRES_USER: ${POSTGRES_USER:-argus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argus}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-argus} -d ${POSTGRES_DB:-argus}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: dev
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-argus}:${POSTGRES_PASSWORD:-argus}@postgres:5432/${POSTGRES_DB:-argus}
+      MIGRATIONS_DIR: /app/database/migrations
+      BACKEND_PORT: 3100
+      LOG_LEVEL: debug
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/scripts:/app/backend/scripts
+      - ./database/migrations:/app/database/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
