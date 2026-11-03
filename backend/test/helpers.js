@@ -70,4 +70,38 @@ async function registered(extra = {}) {
   return { c, phone: p, user: r.body.user, password: extra.password || 'sleepwell24' };
 }
 
-module.exports = { BASE, ORIGIN, db, Client, phone, registered };
+// ---- devices and MQTT ------------------------------------------------
+const MQTT_URL = process.env.TEST_MQTT_URL || 'mqtt://localhost:1885';
+const MQTT_BACKEND = { username: process.env.MQTT_BACKEND_USERNAME || 'argus-backend',
+  password: process.env.MQTT_BACKEND_PASSWORD || 'dev-only-mqtt-password' };
+
+function randomMac() {
+  return Array.from({ length: 6 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+}
+
+// Insert a registered (unclaimed) device straight into the DB. Returns {id, mac, serial}.
+async function insertDevice({ disabled = false, ownerId = null } = {}) {
+  const mac = randomMac();
+  const serial = `ARG-T${mac.slice(6).toUpperCase()}`;
+  const { rows: [d] } = await db.query(
+    `INSERT INTO devices (serial_no, mac, mqtt_username, chip_model, hw_model, is_disabled, owner_id, claimed_at)
+     VALUES ($1, $2::macaddr, $3, 'ESP32-S3', 'ARG-S1', $4, $5, CASE WHEN $5::uuid IS NULL THEN NULL ELSE now() END)
+     RETURNING id`, [serial, mac, mac, disabled, ownerId]);
+  await db.query('INSERT INTO device_settings (device_id) VALUES ($1)', [d.id]);
+  return { id: d.id, mac, serial };
+}
+
+// Connect like a sensor (MQTT 3.1.1, MAC as username and client id).
+// Resolves with the client, rejects with the CONNACK error.
+function mqttConnect(username, { clientId = username, password = 'x' } = {}) {
+  const mqtt = require('mqtt');
+  return new Promise((resolve, reject) => {
+    const c = mqtt.connect(MQTT_URL, { username, clientId, password, protocolVersion: 4, reconnectPeriod: 0, connectTimeout: 5000 });
+    c.once('connect', () => resolve(c));
+    c.once('error', (err) => { c.end(true); reject(err); });
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+module.exports = { BASE, ORIGIN, db, Client, phone, registered, MQTT_URL, MQTT_BACKEND, randomMac, insertDevice, mqttConnect, sleep };

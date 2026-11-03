@@ -2,6 +2,7 @@
 // prefs, push subscriptions.
 const express = require('express');
 const db = require('../db');
+const config = require('../config');
 const { parse, z, f } = require('../lib/validate');
 const { hashPassword, checkPassword } = require('../lib/crypto');
 const { audit } = require('../lib/audit');
@@ -103,8 +104,14 @@ router.patch('/notification-prefs', async (req, res) => {
   res.json(prefsView(row));
 });
 
-// 2.7 / 2.8 Web Push subscriptions (stored as the subscription JSON).
+// 2.7 / 2.8 Web Push subscriptions. Alerts are in-app only in v1 (owner,
+// 3 Nov), so these answer 501 until WEB_PUSH_ENABLED=true; the code is kept.
+function pushEnabled() {
+  if (!config.webPushEnabled) throw E.notEnabled('Push notifications are not enabled yet');
+}
+
 router.post('/push-subscriptions', async (req, res) => {
+  pushEnabled();
   const body = parse(z.object({
     subscription: z.object({ endpoint: z.string().url().max(1000) }).passthrough(),
     platform: z.literal('web'),
@@ -118,6 +125,7 @@ router.post('/push-subscriptions', async (req, res) => {
 });
 
 router.delete('/push-subscriptions', async (req, res) => {
+  pushEnabled();
   const body = parse(z.object({ endpoint: z.string().url().max(1000) }), req.body);
   await db.query(`DELETE FROM push_tokens WHERE user_id = $1 AND token::jsonb->>'endpoint' = $2`,
     [req.user.id, body.endpoint]);

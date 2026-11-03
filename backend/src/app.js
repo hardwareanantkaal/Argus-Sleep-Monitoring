@@ -21,6 +21,9 @@ function createApp({ mqttConnected = () => false } = {}) {
     res.status(dbOk ? 200 : 503).json({ ok: dbOk, db: dbOk, mqtt: mqttOk });
   });
 
+  // Mosquitto go-auth hooks: private addresses only, outside /api/v1.
+  app.use('/mqtt', require('./routes/mqttAuth').router);
+
   const api = express.Router();
   api.use(cors({ origin: config.corsOrigins, credentials: true }));
   api.use(express.json({ limit: '200kb' }));

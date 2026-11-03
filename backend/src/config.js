@@ -36,6 +36,8 @@ module.exports = {
   // Secure cookies need https; on by default in production, off for http://localhost.
   cookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProd,
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:3101',
+  // Web Push for alerts: off in v1 (alerts are in-app only).
+  webPushEnabled: process.env.WEB_PUSH_ENABLED === 'true',
 
   mqtt: {
     url: required('MQTT_URL', 'mqtt://localhost:1885'),

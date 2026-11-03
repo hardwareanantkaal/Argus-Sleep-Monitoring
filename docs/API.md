@@ -86,10 +86,10 @@ Screens: **Profile**, and "How to reach me" on the Alerts screen.
 | 2.2 | PATCH | `/me` | user | `{fullName?, country?}` → `user`. The phone can't be changed (it's the login); the UI says "contact support". |
 | 2.3 | POST | `/me/password` | user | `{currentPassword, newPassword}` → `204`. Logs out every *other* session. 401 `BAD_CREDENTIALS`. |
 | 2.4 | DELETE | `/me` | user | `{password}` → `204`. Soft-deletes the account. **Every device the user owns is released**: owner removed, shares and invites deleted, **sleep sessions and alerts deleted** (D5), new claim code needed from support. Shares the user had on other people's devices are removed. |
-| 2.5 | GET | `/me/notification-prefs` | user | → `{pushEnabled, smsEnabled, quietEnabled, quietFrom, quietTo}` |
-| 2.6 | PATCH | `/me/notification-prefs` | user | the same fields → the saved prefs. `smsEnabled: true` → `422 SMS_NOT_ENABLED` in v1. |
-| 2.7 | POST | `/me/push-subscriptions` | user | `{subscription, platform: "web"}` → `204`. `subscription` is the browser's Web Push subscription JSON. Upsert; called after the browser grants permission. |
-| 2.8 | DELETE | `/me/push-subscriptions` | user | `{endpoint}` → `204`. Called on logout. |
+| 2.5 | GET | `/me/notification-prefs` | user | → `{quietEnabled, quietFrom, quietTo}`. In-app alert preferences: in quiet hours only `critical` alerts are shown as pop-ups (all alerts still appear in the list). |
+| 2.6 | PATCH | `/me/notification-prefs` | user | the same fields → the saved prefs. Quiet hours need both times (`400 VALIDATION`). Alerts are **in-app only** in v1 (owner decision 3 Nov), so there are no push or SMS switches. |
+| 2.7 | POST | `/me/push-subscriptions` | user | **v1: `501 NOT_ENABLED`** (alerts are in-app only). Kept for later: `{subscription, platform: "web"}` → `204`, where `subscription` is the browser's Web Push subscription JSON (upsert, called after the browser grants permission). |
+| 2.8 | DELETE | `/me/push-subscriptions` | user | **v1: `501 NOT_ENABLED`.** Kept for later: `{endpoint}` → `204`, called on logout. |
 
 ## 3. My devices
 
@@ -190,19 +190,19 @@ Screens: **Sleep history** and **Night detail**. All of this is computed from `s
 
 Screen: **Share access**.
 
-**Invites work only through their link.** The invite token in the link is the secret; matching the phone number alone is never enough (C3). There's no SMS in v1, so the owner sends the link themselves (WhatsApp, a normal SMS, or copy and paste).
+**Invites are link-only** (owner decision 3 Nov). An invite has no phone number: whoever opens the link and is logged in can accept it, once. The token in the link is the secret (256 bits, only its HMAC is stored). The owner sends the link themselves (WhatsApp, a normal SMS, or copy and paste). Link format: **`inviteUrl = PUBLIC_BASE_URL + /invite/<token>`**.
 
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
-| 5.1 | GET | `/devices/:id/shares` | `sharing.manage` | → `{owner: {fullName, phone}, shares: [{userId, fullName, phone, permissions[], status: "joined"}], invites: [{id, fullName, phone, permissions[], status: "invite_sent", expiresAt}]}` |
-| 5.2 | POST | `/devices/:id/invites` | `sharing.manage` | `{fullName, phone, permissions[]}` → `201 {invite, inviteUrl}`. `inviteUrl` = `https://<domain>/invite/<token>`, **shown only in this response** (only its hash is stored). Valid for 7 days. Only device permissions are allowed (`422 BAD_PERMISSION`). You can't give `sharing.manage` unless you're the owner. 409 `ALREADY_SHARED`. |
+| 5.1 | GET | `/devices/:id/shares` | `sharing.manage` | → `{owner: {fullName, phone}, shares: [{userId, fullName, phone, permissions[], status: "joined"}], invites: [{id, label, permissions[], status: "invite_sent", expiresAt}]}`. `label` is the owner's note, e.g. "Rohan (son)". |
+| 5.2 | POST | `/devices/:id/invites` | `sharing.manage` | `{label, permissions[]}` → `201 {invite: {id, label, permissions[], expiresAt}, inviteUrl, expiresAt}`. `label` 1–60 characters. `inviteUrl` = `PUBLIC_BASE_URL/invite/<token>`, **shown only in this response**. Valid for 7 days. Only device permissions are allowed (`422 BAD_PERMISSION`). You can't give `sharing.manage` unless you're the owner. |
 | 5.3 | DELETE | `/devices/:id/invites/:inviteId` | `sharing.manage` | → `204` (cancels it; the link stops working) |
 | 5.4 | PATCH | `/devices/:id/shares/:userId` | `sharing.manage` | `{permissions[]}` → share. An empty list → `422`; use 5.5 instead. |
 | 5.5 | DELETE | `/devices/:id/shares/:userId` | `sharing.manage` | → `204`. The person loses access at once (Socket.IO `access:changed`). |
-| 5.6 | GET | `/invites/:token` | public | → `{kind: "device" \| "staff", inviterName, deviceName?, roleName?, permissions[]?, phoneHint: "+91 ••••• •2345", expiresAt}`. The invite landing page uses this before log-in or sign-up. 404 `INVITE_INVALID` (unknown, expired, used or cancelled). |
-| 5.7 | POST | `/invites/:token/accept` | user | → `{device: deviceCard}` or `{role}`. **The logged-in phone must equal the invite phone** (`403 INVITE_PHONE_MISMATCH`). Single use: the invite is marked accepted in the same transaction. Works for both family and team invites. |
+| 5.6 | GET | `/invites/:token` | public | → `{kind: "device" \| "staff", inviterName, label, deviceName?, roleName?, permissions[]?, expiresAt}`. The invite landing page uses this before log-in or sign-up. 404 `INVITE_INVALID` (unknown, expired, used or cancelled). |
+| 5.7 | POST | `/invites/:token/accept` | user | → `{device: deviceCard}` or `{role}`. Needs only a session and a valid token (no phone check). Single use: the invite is marked accepted in the same transaction. Works for both family and team invites. 409 `ALREADY_SHARED` if you already own or share that device; 409 `ALREADY_STAFF` for a team invite when you already have a staff role. |
 
-**Accepting an invite:** the landing page offers "Log in" or "Create account". The phone field is pre-filled, and the page calls 5.7 right after log-in or sign-up.
+**Accepting an invite:** the landing page (`/invite/<token>`) shows who invited you and to what (5.6), offers "Log in" or "Create account", and calls 5.7 right after log-in or sign-up.
 
 ## 6. Alerts
 
@@ -227,7 +227,7 @@ Screen: **Alerts** (kept for v1, C2). Rules belong to the device; how you're rea
 **How alerts are checked and sent:**
 - The backend checks the rules on every live message. The sensor sends one every 5 s in bed, so a 30 s rule sees about 6 readings.
 - An open alert closes when the value is back to normal (`endedAt`).
-- **Delivery is Web Push only in v1.** In quiet hours only `critical` alerts are sent. Every alert also appears in the list (6.1) and on Socket.IO `alert:new`.
+- **Delivery is in-app only in v1** (owner decision 3 Nov; replaces A5): every alert appears in the list (6.1) and on Socket.IO `alert:new` to users who are online. No Web Push, no SMS.
 - There's no read/unread state in v1 (§14).
 
 ## 7. Admin: customers
@@ -239,7 +239,7 @@ Screens: **Customers** and **Customer detail**. Every path starts with `/admin`,
 | 7.1 | GET | `/admin/customers?q&country&tz&status&limit&cursor` | `customers.view` | `q` matches name or phone. `tz` matches any of the customer's device time zones. `status` is `active` or `disabled`. → `{items: [{id, fullName, phone, country, deviceTimeZones[], deviceCount, familyCount, createdAt, lastActiveAt, status}], total, nextCursor}` |
 | 7.2 | GET | `/admin/customers/:id` | `customers.view` | → customer (incl. country) + `devices[{id, serial, name, tz, online, fw, lastSeenAt}]` + `family[{fullName, phone, deviceName}]` |
 | 7.3 | POST | `/admin/customers/:id/disable` | `customers.edit` | `{reason}` → `204`. Bumps `token_version` (logs them out at once). `/enable` → `204`. |
-| 7.4 | POST | `/admin/customers/:id/reset-link` | `customers.edit` | → `{resetUrl, expiresAt}`. A single-use link valid for 60 min (a purpose token tied to `token_version`), **shown once**. Support sends it to the customer. It replaces "Send password reset link by SMS" in v1. |
+| 7.4 | POST | `/admin/customers/:id/reset-link` | `customers.edit` | → `{resetUrl, expiresAt}` with **`resetUrl = PUBLIC_BASE_URL + /reset/<token>`**. A single-use link valid for 60 min (a purpose token tied to `token_version`), **shown once**. Support sends it to the customer. It replaces "Send password reset link by SMS" in v1. |
 | 7.5 | POST | `/admin/customers/:id/logout-all` | `customers.edit` | → `204` |
 
 ## 8. Admin: devices and factory
@@ -281,8 +281,8 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 ### Team and roles (screen: Team & permissions)
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
-| 9.10 | GET | `/admin/team` | `team.manage` | → `{members: [{userId, fullName, phone, role: {id, name}, lastActiveAt}], invites: [{id, fullName, phone, role, expiresAt}]}` |
-| 9.11 | POST | `/admin/team/invites` | `team.manage` | `{fullName, phone, roleId}` → `201 {invite, inviteUrl}`. Link only, as in 5.2. Only the Owner can invite into the Owner role. |
+| 9.10 | GET | `/admin/team` | `team.manage` | → `{members: [{userId, fullName, phone, role: {id, name}, lastActiveAt}], invites: [{id, label, role: {id, name}, expiresAt}]}` |
+| 9.11 | POST | `/admin/team/invites` | `team.manage` | `{label, roleId}` → `201 {invite: {id, label, role, expiresAt}, inviteUrl, expiresAt}`. Link-only, as in 5.2 (`PUBLIC_BASE_URL/invite/<token>`, 7 days). Only the Owner can invite into the Owner role. |
 | 9.12 | DELETE | `/admin/team/invites/:id` | `team.manage` | → `204` |
 | 9.13 | PATCH | `/admin/team/:userId` | `team.manage` | `{roleId}` → member. You can't change your own role (`422 OWN_ROLE`), and the Owner role always keeps at least one member (`422 LAST_OWNER`). |
 | 9.14 | DELETE | `/admin/team/:userId` | `team.manage` | → `204`. Removes the staff role; the account stays as a customer. Bumps `token_version`. |
@@ -358,12 +358,12 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 |---|---|
 | 400 | `VALIDATION` (+`field`), `RESET_TOKEN_INVALID` |
 | 401 | `NOT_LOGGED_IN`, `TOKEN_EXPIRED`, `REFRESH_INVALID`, `BAD_CREDENTIALS` |
-| 403 | `FORBIDDEN` (staff permission missing), `USER_DISABLED`, `DEVICE_DISABLED`, `BAD_ORIGIN`, `INVITE_PHONE_MISMATCH` |
+| 403 | `FORBIDDEN` (staff permission missing), `USER_DISABLED`, `DEVICE_DISABLED`, `BAD_ORIGIN` |
 | 404 | `NOT_FOUND` (also used when you have no access to a device), `INVALID_CODE`, `INVITE_INVALID` |
-| 409 | `PHONE_TAKEN`, `ALREADY_CLAIMED`, `ALREADY_SHARED`, `MAC_EXISTS`, `VERSION_EXISTS`, `ROLE_EXISTS`, `ROLE_LOCKED`, `ROLE_IN_USE`, `DEVICE_IN_USE` |
-| 422 | `INVALID_TIMEZONE`, `BAD_PERMISSION`, `BAD_RULE`, `CONFIRM_MISMATCH`, `OWN_ROLE`, `LAST_OWNER`, `NOT_ESP_IMAGE`, `SMS_NOT_ENABLED` |
+| 409 | `PHONE_TAKEN`, `ALREADY_CLAIMED`, `ALREADY_SHARED`, `ALREADY_STAFF`, `MAC_EXISTS`, `VERSION_EXISTS`, `ROLE_EXISTS`, `ROLE_LOCKED`, `ROLE_IN_USE`, `DEVICE_IN_USE` |
+| 422 | `INVALID_TIMEZONE`, `BAD_PERMISSION`, `BAD_RULE`, `CONFIRM_MISMATCH`, `OWN_ROLE`, `LAST_OWNER`, `NOT_ESP_IMAGE` |
 | 429 | `RATE_LIMITED` (+`retryAfterS`) |
-| 501 | `NOT_ENABLED` (OTP / SMS in v1) |
+| 501 | `NOT_ENABLED` (OTP / SMS and push subscriptions in v1) |
 
 ## 13. Screen → API map
 
@@ -379,7 +379,7 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 | Add device | 3.2, 3.3 |
 | Share access | 5.1–5.5 |
 | Device settings | 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, socket `settings:sync` |
-| Alerts | 6.1, 6.2, 6.3, 2.5, 2.6, 2.7, socket `alert:new` |
+| Alerts | 6.1, 6.2, 6.3, socket `alert:new` |
 | Profile | 2.1–2.4, 3.10, 1.4 |
 | Admin dashboard | 8.1, socket `device:status` |
 | Admin devices / detail | 8.2, 8.3, 8.5–8.12, socket `command:status` |
@@ -398,7 +398,7 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 | A2 | **QR content** | The code only (`ARG1:<12-char code>`), as in Water Tank. Typing in the app needs the code only, and the serial is optional. This differs slightly from D2 ("serial + code"); the code alone is safe at 12 characters. |
 | A3 | **New `info` message** on connect (§11) | Add it to DEVICE-DATA.md. Without it, the IP, Wi-Fi name and radar status on the settings and admin screens stay empty. |
 | A4 | **Sensor options in the UI** | SCREENS.md still lists mockup placeholders (mounting, range, night LED). The real settings are those in DEVICE-DATA.md §5 (bed-exit timeout, rates, struggle, unattended). The UI thread should switch. |
-| A5 | **Push technology** | **Web Push (VAPID keys)** directly from the backend, with no Firebase account. Works in Chrome, Edge and Firefox, and on iPhone once the site is added to the home screen. |
+| A5 | **Push technology** | ~~Web Push (VAPID keys)~~ **Replaced 3 Nov by the owner: alerts are in-app only in v1.** Endpoints 2.7/2.8 return 501; Web Push can be switched on later without an API change. |
 | A6 | **Alert read/unread** | Not in v1 (no unread badge). Adding it later is one small table. |
 | A7 | **Forgot password** | v1: support sends a reset link (7.4). Self-service reset arrives with SMS later. |
 | A8 | **Firmware size limit** | 4 MB (ESP32-S3 app partitions are 1.5–3 MB). Nginx `client_max_body_size` must match. |

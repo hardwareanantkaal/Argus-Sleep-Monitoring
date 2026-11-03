@@ -184,13 +184,12 @@ test('notification prefs: defaults, validation, no SMS in v1', async () => {
   assert.deepEqual([ok.status, ok.body.quietFrom, ok.body.quietTo], [200, '22:00', '07:00']);
 });
 
-test('push subscriptions can be added and removed', async () => {
+test('push subscriptions answer 501 in v1 (alerts are in-app only)', async () => {
   const { c, user } = await registered();
-  const endpoint = `https://push.example/${user.id}`;
-  const sub = { endpoint, keys: { p256dh: 'k', auth: 'a' } };
-  assert.equal((await c.post('/me/push-subscriptions', { subscription: sub, platform: 'web' })).status, 204);
-  assert.equal((await db.query('SELECT 1 FROM push_tokens WHERE user_id = $1', [user.id])).rowCount, 1);
-  assert.equal((await c.del('/me/push-subscriptions', { endpoint })).status, 204);
+  const sub = { endpoint: `https://push.example/${user.id}`, keys: { p256dh: 'k', auth: 'a' } };
+  const add = await c.post('/me/push-subscriptions', { subscription: sub, platform: 'web' });
+  assert.deepEqual([add.status, add.body.error.code], [501, 'NOT_ENABLED']);
+  assert.equal((await c.del('/me/push-subscriptions', { endpoint: sub.endpoint })).status, 501);
   assert.equal((await db.query('SELECT 1 FROM push_tokens WHERE user_id = $1', [user.id])).rowCount, 0);
 });
 

@@ -3,6 +3,7 @@ const config = require('./config');
 const db = require('./db');
 const log = require('./logger');
 const { createApp } = require('./app');
+const mqtt = require('./services/mqtt');
 
 async function main() {
   if (!(await db.ping())) {
@@ -11,14 +12,19 @@ async function main() {
   }
 
   // Boot order (same as Water Tank): DB → app → Socket.IO → live → MQTT → scheduler.
-  // Socket.IO, MQTT and the scheduler are added in the next build steps.
-  const app = createApp();
+  // Socket.IO, live state and the scheduler are added in the next build steps.
+  // The HTTP server starts before MQTT because the broker's login hook
+  // (/mqtt/user) has to answer the backend's own MQTT login.
+  const app = createApp({ mqttConnected: mqtt.isConnected });
   const server = http.createServer(app);
-  server.listen(config.port, () => log.info({ port: config.port }, 'argus backend listening'));
+  server.listen(config.port, () => {
+    log.info({ port: config.port }, 'argus backend listening');
+    mqtt.start();
+  });
 
   const shutdown = (signal) => {
     log.info({ signal }, 'shutting down');
-    server.close(() => db.pool.end().finally(() => process.exit(0)));
+    server.close(() => mqtt.stop().finally(() => db.pool.end().finally(() => process.exit(0))));
     setTimeout(() => process.exit(1), 10_000).unref();
   };
   process.on('SIGTERM', shutdown);

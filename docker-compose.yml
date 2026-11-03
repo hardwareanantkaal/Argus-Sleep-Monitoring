@@ -1,8 +1,8 @@
 # Argus DEV stack. Ports avoid the water and magic-outline stacks,
 # which already use 3000, 1883, 5432, 5433 and 5050 on this PC.
-#   backend  127.0.0.1:3100
-#   postgres 127.0.0.1:5434
-# Mosquitto (1885) and pgAdmin (5051) are added in the next build step.
+#   backend   127.0.0.1:3100
+#   postgres  127.0.0.1:5434
+#   mosquitto 127.0.0.1:1885  (plain MQTT, dev only; production adds TLS 8883)
 name: argus
 
 services:
@@ -32,6 +32,9 @@ services:
       MIGRATIONS_DIR: /app/database/migrations
       BACKEND_PORT: 3100
       LOG_LEVEL: debug
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_BACKEND_USERNAME: ${MQTT_BACKEND_USERNAME:-argus-backend}
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:-dev-only-mqtt-password}
     ports:
       - "127.0.0.1:3100:3100"
     volumes:
@@ -42,5 +45,19 @@ services:
       postgres:
         condition: service_healthy
 
+  # The broker asks the backend (/mqtt/user, /mqtt/acl) who may log in and
+  # which topics they may use. If the backend is down, new logins are refused
+  # until it's back; the backend's MQTT client reconnects by itself.
+  mosquitto:
+    image: iegomez/mosquitto-go-auth:3.0.0-mosquitto_2.0.18
+    ports:
+      - "127.0.0.1:1885:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro
+      - mqttdata:/mosquitto/data
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
+  mqttdata:
