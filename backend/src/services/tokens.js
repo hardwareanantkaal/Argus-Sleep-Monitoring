@@ -101,9 +101,9 @@ async function startSession(res, req, user, q = db) {
   setAuthCookies(res, signAccess(user.id, user.token_version, refresh.id), refresh.token);
 }
 
-// One-time password reset token (API.md 1.6 / 7.4). Bound to token_version,
+// One-time password reset token (API.md 1.6 / 7.4), 24 h. Bound to token_version,
 // so it stops working after one successful reset (the reset bumps it).
-function signReset(userId, tokenVersion, ttlS = 3600) {
+function signReset(userId, tokenVersion, ttlS = 24 * 3600) {
   return jwt.sign({ sub: userId, tv: tokenVersion }, config.jwtSecret,
     { algorithm: 'HS256', expiresIn: ttlS, audience: 'pwreset' });
 }

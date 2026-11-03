@@ -93,10 +93,13 @@ async function insertDevice({ disabled = false, ownerId = null } = {}) {
 
 // Connect like a sensor (MQTT 3.1.1, MAC as username and client id).
 // Resolves with the client, rejects with the CONNACK error.
-function mqttConnect(username, { clientId = username, password = 'x' } = {}) {
+// `will: true` sets the firmware's last will (retained "offline" on <p>/<mac>/status).
+function mqttConnect(username, { clientId = username, password = 'x', will = false } = {}) {
   const mqtt = require('mqtt');
   return new Promise((resolve, reject) => {
-    const c = mqtt.connect(MQTT_URL, { username, clientId, password, protocolVersion: 4, reconnectPeriod: 0, connectTimeout: 5000 });
+    const opts = { username, clientId, password, protocolVersion: 4, reconnectPeriod: 0, connectTimeout: 5000 };
+    if (will) opts.will = { topic: `argus/${username}/status`, payload: Buffer.from('offline'), qos: 1, retain: true };
+    const c = mqtt.connect(MQTT_URL, opts);
     c.once('connect', () => resolve(c));
     c.once('error', (err) => { c.end(true); reject(err); });
   });
@@ -104,4 +107,35 @@ function mqttConnect(username, { clientId = username, password = 'x' } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-module.exports = { BASE, ORIGIN, db, Client, phone, registered, MQTT_URL, MQTT_BACKEND, randomMac, insertDevice, mqttConnect, sleep };
+// ---- Socket.IO ---------------------------------------------------------
+// Open a socket as the logged-in `client` (sends its argus_at cookie and our
+// Origin, like the browser). Resolves on connect, rejects on connect_error.
+function socketConnect(client, { origin = ORIGIN } = {}) {
+  const { io } = require('socket.io-client');
+  return new Promise((resolve, reject) => {
+    const headers = {};
+    if (origin) headers.origin = origin;
+    const cookie = client ? client.cookieHeader('/socket.io/') : '';
+    if (cookie) headers.cookie = cookie;
+    const s = io(BASE, { transports: ['websocket'], extraHeaders: headers, reconnection: false, timeout: 5000 });
+    s.once('connect', () => resolve(s));
+    s.once('connect_error', (err) => { s.close(); reject(err); });
+  });
+}
+
+// Wait for the next `event` on a socket that matches `pred` (default: any).
+function nextEvent(socket, event, pred = () => true, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { socket.off(event, h); reject(new Error(`timeout waiting for ${event}`)); }, timeoutMs);
+    function h(payload) {
+      if (!pred(payload)) return;
+      clearTimeout(t); socket.off(event, h); resolve(payload);
+    }
+    socket.on(event, h);
+  });
+}
+
+// emitWithAck with a timeout.
+const ask = (socket, event, payload) => socket.timeout(4000).emitWithAck(event, payload);
+
+module.exports = { BASE, ORIGIN, db, Client, phone, registered, MQTT_URL, MQTT_BACKEND, randomMac, insertDevice, mqttConnect, sleep, socketConnect, nextEvent, ask };

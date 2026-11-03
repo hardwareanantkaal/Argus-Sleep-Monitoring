@@ -128,7 +128,7 @@ Screens: **My devices**, **Live view**, **Add device**, **Device settings**.
   "sensorSync": { "version": 4, "appliedVersion": 4, "sync": "applied" } }
 ```
 - `sync` is `"applied"`, `"sending"` (online and waiting for the ack) or `"queued_offline"`. It drives the "Saved on device ✓" badge.
-- `connection` and `sensorSync` are only included with `settings.edit`.
+- `connection.fw` is included with `live.view` (the Live view shows it); the rest of `connection` and `sensorSync` only with `settings.edit`.
 
 **`sensorSettings`:** `{exitS: 300, liveS: 5, idleS: 60, struggle: true, unattended: false, unattMin: 30, version, appliedVersion, sync}`
 
@@ -190,7 +190,7 @@ Screens: **Sleep history** and **Night detail**. All of this is computed from `s
 
 Screen: **Share access**.
 
-**Invites are link-only** (owner decision 3 Nov). An invite has no phone number: whoever opens the link and is logged in can accept it, once. The token in the link is the secret (256 bits, only its HMAC is stored). The owner sends the link themselves (WhatsApp, a normal SMS, or copy and paste). Link format: **`inviteUrl = PUBLIC_BASE_URL + /invite/<token>`**.
+**Invites are link-only** (owner decision 3 Nov). Only the token's hash is stored, so **the link is shown once, at creation**: lists (5.1, 9.10) never contain a URL; to re-send, cancel the invite and create a new one. An invite has no phone number: whoever opens the link and is logged in can accept it, once. The token in the link is the secret (256 bits, only its HMAC is stored). The owner sends the link themselves (WhatsApp, a normal SMS, or copy and paste). Link format: **`inviteUrl = PUBLIC_BASE_URL + /invite/<token>`**.
 
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
@@ -199,7 +199,7 @@ Screen: **Share access**.
 | 5.3 | DELETE | `/devices/:id/invites/:inviteId` | `sharing.manage` | → `204` (cancels it; the link stops working) |
 | 5.4 | PATCH | `/devices/:id/shares/:userId` | `sharing.manage` | `{permissions[]}` → share. An empty list → `422`; use 5.5 instead. |
 | 5.5 | DELETE | `/devices/:id/shares/:userId` | `sharing.manage` | → `204`. The person loses access at once (Socket.IO `access:changed`). |
-| 5.6 | GET | `/invites/:token` | public | → `{kind: "device" \| "staff", inviterName, label, deviceName?, roleName?, permissions[]?, expiresAt}`. The invite landing page uses this before log-in or sign-up. 404 `INVITE_INVALID` (unknown, expired, used or cancelled). |
+| 5.6 | GET | `/invites/:token` | public | → `{kind: "device" \| "staff", inviterName, label, deviceName?, roleName?, permissions[], expiresAt}`. `permissions` = the device permissions offered, or for a staff invite the role's permission codes. The invite landing page uses this before log-in or sign-up. 404 `INVITE_INVALID` (unknown, expired, used or cancelled). |
 | 5.7 | POST | `/invites/:token/accept` | user | → `{device: deviceCard}` or `{role}`. Needs only a session and a valid token (no phone check). Single use: the invite is marked accepted in the same transaction. Works for both family and team invites. 409 `ALREADY_SHARED` if you already own or share that device; 409 `ALREADY_STAFF` for a team invite when you already have a staff role. |
 
 **Accepting an invite:** the landing page (`/invite/<token>`) shows who invited you and to what (5.6), offers "Log in" or "Create account", and calls 5.7 right after log-in or sign-up.
@@ -239,7 +239,7 @@ Screens: **Customers** and **Customer detail**. Every path starts with `/admin`,
 | 7.1 | GET | `/admin/customers?q&country&tz&status&limit&cursor` | `customers.view` | `q` matches name or phone. `tz` matches any of the customer's device time zones. `status` is `active` or `disabled`. → `{items: [{id, fullName, phone, country, deviceTimeZones[], deviceCount, familyCount, createdAt, lastActiveAt, status}], total, nextCursor}` |
 | 7.2 | GET | `/admin/customers/:id` | `customers.view` | → customer (incl. country) + `devices[{id, serial, name, tz, online, fw, lastSeenAt}]` + `family[{fullName, phone, deviceName}]` |
 | 7.3 | POST | `/admin/customers/:id/disable` | `customers.edit` | `{reason}` → `204`. Bumps `token_version` (logs them out at once). `/enable` → `204`. |
-| 7.4 | POST | `/admin/customers/:id/reset-link` | `customers.edit` | → `{resetUrl, expiresAt}` with **`resetUrl = PUBLIC_BASE_URL + /reset/<token>`**. A single-use link valid for 60 min (a purpose token tied to `token_version`), **shown once**. Support sends it to the customer. It replaces "Send password reset link by SMS" in v1. |
+| 7.4 | POST | `/admin/customers/:id/reset-link` | `customers.edit` | → `{resetUrl, expiresAt}` with **`resetUrl = PUBLIC_BASE_URL + /reset/<token>`**. A single-use link valid for **24 h** (a purpose token tied to `token_version`; support sends it by WhatsApp), **shown once**. Support sends it to the customer. It replaces "Send password reset link by SMS" in v1. |
 | 7.5 | POST | `/admin/customers/:id/logout-all` | `customers.edit` | → `204` |
 
 ## 8. Admin: devices and factory

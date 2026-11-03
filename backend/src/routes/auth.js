@@ -9,6 +9,7 @@ const { requireUser } = require('../middleware/auth');
 const tokens = require('../services/tokens');
 const { loadUser, loadUserByPhone, userView } = require('../services/users');
 const { E } = require('../errors');
+const realtime = require('../services/realtime');
 
 const router = express.Router();
 const DUMMY_HASH = require('bcryptjs').hashSync('not-a-real-password', 11);
@@ -80,6 +81,7 @@ router.post('/logout-all', requireUser, async (req, res) => {
     await tokens.revokeAll(c, req.user.id);
     await audit(req, { action: 'user.logout_all', targetType: 'user', targetId: req.user.id }, c);
   });
+  realtime.disconnectUser(req.user.id);
   tokens.clearAuthCookies(res);
   res.status(204).end();
 });
@@ -97,7 +99,8 @@ router.post('/password/reset', async (req, res) => {
     await c.query('UPDATE users SET password_hash = $2 WHERE id = $1', [u.id, passwordHash]);
     await tokens.revokeAll(c, u.id);   // also makes this link single-use
     await audit(req, { actor: u, action: 'user.password_reset', targetType: 'user', targetId: u.id }, c);
-  });
+    return u.id;
+  }).then((id) => realtime.disconnectUser(id));
   res.status(204).end();
 });
 

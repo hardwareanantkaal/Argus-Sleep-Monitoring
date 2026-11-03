@@ -11,6 +11,7 @@ const tokens = require('../services/tokens');
 const { loadUser, userView } = require('../services/users');
 const { releaseDevice } = require('../services/devices');
 const { E } = require('../errors');
+const realtime = require('../services/realtime');
 
 const router = express.Router();
 router.use(requireUser);
@@ -46,6 +47,7 @@ router.post('/password', async (req, res) => {
     // revokeAll bumped token_version: start a fresh session for this browser.
     await tokens.startSession(res, req, await loadUser(req.user.id, c), c);
   });
+  realtime.disconnectUser(req.user.id); // this browser reconnects with its new cookie
   res.status(204).end();
 });
 
@@ -67,6 +69,7 @@ router.delete('/', async (req, res) => {
     await audit(req, { action: 'user.delete', targetType: 'user', targetId: req.user.id,
       targetLabel: req.user.phone, detail: `${owned.length} device(s) released` }, c);
   });
+  realtime.disconnectUser(req.user.id);
   tokens.clearAuthCookies(res);
   res.status(204).end();
 });
