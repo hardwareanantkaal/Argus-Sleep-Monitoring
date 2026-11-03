@@ -33,6 +33,9 @@ module.exports = {
   hashPepper: required('HASH_PEPPER', 'dev-only-pepper-change-me'),
   accessTokenTtlS: int('ACCESS_TOKEN_TTL_S', 15 * 60),
   refreshTokenTtlDays: int('REFRESH_TOKEN_TTL_DAYS', 30),
+  // Secure cookies need https; on by default in production, off for http://localhost.
+  cookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProd,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:3101',
 
   mqtt: {
     url: required('MQTT_URL', 'mqtt://localhost:1885'),

@@ -115,7 +115,12 @@ Follow the reference: **contract first, code later.** Get owner approval at each
 The details are in `docs/DESIGN.md` §10–11, `docs/API.md` and `docs/DEVICE-DATA.md`.
 
 **Environment**
-- The project lives in the `Ubuntu` WSL distro (Node 22.23.4, Docker 29.9.2), moved from `Ubuntu-22.04` on 3 Nov.
+- The project lives in the `Ubuntu-22.04` WSL distro. The planned move to `Ubuntu` was cancelled.
+  - Docker 29.9.2 is installed here.
+  - Node 22.23.4 is at `~/.local/node/bin` and is not on PATH, so prefix commands with `export PATH="$HOME/.local/node/bin:$PATH"`.
+- Dev ports: backend 3100, postgres 5434, mosquitto 1885, web 3101.
+- **Pushing:** git in this distro has no GitHub login. The owner pushes from Windows PowerShell:
+  `git -c safe.directory=* -C \\wsl.localhost\Ubuntu-22.04\home\dev29\projects\argus-sleep-platform push origin main`
 - GitHub repo: `hardwareanantkaal/Argus-Sleep-Monitoring`.
 
 **Auth and accounts**

@@ -6,6 +6,7 @@ const config = require('./config');
 const db = require('./db');
 const log = require('./logger');
 const { ApiError } = require('./errors');
+const { checkOrigin } = require('./middleware/origin');
 
 function createApp({ mqttConnected = () => false } = {}) {
   const app = express();
@@ -24,8 +25,11 @@ function createApp({ mqttConnected = () => false } = {}) {
   api.use(cors({ origin: config.corsOrigins, credentials: true }));
   api.use(express.json({ limit: '200kb' }));
   api.use(cookieParser());
+  api.use(checkOrigin);
 
-  // Route modules are mounted here as they are built (docs/API.md §1–§9).
+  // Route modules (docs/API.md §1–§9), mounted as they are built.
+  api.use('/auth', require('./routes/auth'));
+  api.use('/me', require('./routes/me'));
 
   api.use((req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such endpoint' } });
@@ -36,7 +40,9 @@ function createApp({ mqttConnected = () => false } = {}) {
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
     if (err instanceof ApiError) {
-      return res.status(err.status).json({ error: { code: err.code, message: err.message, field: err.field } });
+      if (err.retryAfterS) res.set('Retry-After', String(err.retryAfterS));
+      return res.status(err.status).json({ error: {
+        code: err.code, message: err.message, field: err.field, retryAfterS: err.retryAfterS } });
     }
     if (err.type === 'entity.parse.failed') {
       return res.status(400).json({ error: { code: 'BAD_JSON', message: 'Request body is not valid JSON' } });
