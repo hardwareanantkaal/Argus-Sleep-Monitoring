@@ -1,6 +1,9 @@
 -- =====================================================================
---  Argus Sleep Monitoring Platform - PostgreSQL schema  (v1.0)
---  Status: APPROVED 3 Nov 2026 (docs/DESIGN.md §10). Applied via database/migrations/.
+--  Argus Sleep Monitoring Platform - PostgreSQL schema  (v1.1)
+--  Status: v1.0 approved 3 Nov 2026; v1.1 = per-SESSION sleep data,
+--  3 sleep stages, user country, MAC-only device login (docs/DESIGN.md
+--  §10-11). v1.1 approved 3 Nov 2026.
+--  Device message formats: docs/DEVICE-DATA.md.
 --  Target: PostgreSQL 16 (postgres:16-alpine), same as the Water Tank project.
 --  Read docs/DESIGN.md first: it explains every table in plain words.
 --
@@ -11,8 +14,9 @@
 --      are stored only as hashes. Never the plain value.
 --    * Live radar values (heart rate, breathing, movement, presence,
 --      stage) are NOT stored. They stay in backend memory and go to the
---      browser over Socket.IO. The saved health record is the nightly
---      sleep summary (sleep_summaries).
+--      browser over Socket.IO. The saved health record is one summary
+--      per SESSION (bed in -> bed out), in sleep_sessions. Nights and naps
+--      are worked out from sessions by the backend, never stored.
 --    * One permission system for the Argus team and for customer
 --      families (permissions table).
 --
@@ -28,10 +32,10 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- fast "contains" search in admin tab
 -- ---------------------------------------------------------------------
 CREATE TYPE permission_scope AS ENUM ('staff', 'device');  -- staff = admin panel, device = one sensor
 CREATE TYPE otp_purpose      AS ENUM ('verify_phone', 'reset_password');
-CREATE TYPE sensor_mount     AS ENUM ('bedside', 'ceiling');
 CREATE TYPE event_type       AS ENUM ('online', 'offline', 'reboot', 'config_mode',
                                       'settings_applied', 'radar_fault', 'radar_ok',
-                                      'summary_received', 'logs_uploaded',
+                                      'bed_in', 'bed_out', 'struggle', 'unattended',
+                                      'session_received', 'logs_uploaded',
                                       'ota_started', 'ota_success', 'ota_failed',
                                       'claimed', 'unclaimed', 'disabled', 'enabled');
 CREATE TYPE event_severity   AS ENUM ('info', 'warning', 'critical');
@@ -106,6 +110,8 @@ CREATE TABLE users (
   full_name         TEXT        NOT NULL,
   phone             TEXT        NOT NULL,           -- E.164, e.g. +919825012345. This is the login.
   phone_verified_at TIMESTAMPTZ,
+  country           CHAR(2),                        -- ISO 3166 alpha-2, e.g. 'IN'. Asked at sign-up
+                                                    -- (pre-filled from the phone code). NULL only for script-made staff.
   password_hash     TEXT        NOT NULL,           -- bcrypt
   staff_role_id     INTEGER     REFERENCES staff_roles(id) ON DELETE RESTRICT,  -- NULL = customer only
   is_disabled       BOOLEAN     NOT NULL DEFAULT false,
@@ -118,11 +124,13 @@ CREATE TABLE users (
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at        TIMESTAMPTZ,                    -- soft delete ("Delete account")
   CONSTRAINT users_phone_format CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
+  CONSTRAINT users_country_format CHECK (country IS NULL OR country ~ '^[A-Z]{2}$'),
   CONSTRAINT users_disabled_consistent CHECK (is_disabled = (disabled_at IS NOT NULL))
 );
 -- a phone number belongs to one live account; a deleted account frees it
 CREATE UNIQUE INDEX users_phone_uq ON users (phone) WHERE deleted_at IS NULL;
 CREATE INDEX users_staff_idx ON users (staff_role_id) WHERE staff_role_id IS NOT NULL;
+CREATE INDEX users_country_idx ON users (country);   -- admin filter by country
 CREATE INDEX users_name_trgm_idx  ON users USING gin (full_name gin_trgm_ops);
 CREATE INDEX users_phone_trgm_idx ON users USING gin (phone gin_trgm_ops);
 CREATE TRIGGER users_updated BEFORE UPDATE ON users
@@ -141,7 +149,8 @@ CREATE TABLE refresh_tokens (
 );
 CREATE INDEX refresh_tokens_user_idx ON refresh_tokens (user_id) WHERE revoked_at IS NULL;
 
--- One-time SMS codes (phone verification at sign-up, password reset)
+-- One-time SMS codes (phone verification, password reset). Not used in v1
+-- (no SMS, decision C3); kept so the OTP path can be switched on later.
 CREATE TABLE otp_codes (
   id          BIGSERIAL PRIMARY KEY,
   phone       TEXT        NOT NULL,
@@ -220,7 +229,8 @@ CREATE TABLE devices (
   serial_no        TEXT        NOT NULL UNIQUE,     -- on the sticker, e.g. ARG-24A0012
   mac              MACADDR     NOT NULL UNIQUE,     -- read over USB at registration
   mqtt_username    TEXT        NOT NULL UNIQUE,     -- MAC as 12 lowercase hex chars
-  secret_hash      TEXT        NOT NULL,            -- per-device MQTT secret (hash), written to the board over USB at registration (D1)
+  secret_hash      TEXT,                            -- RESERVED, unused: devices log in with the MAC only (owner
+                                                    -- decision C1, as Water Tank migration 003). Kept for a later secret.
   claim_code_hash  TEXT,                            -- HMAC of the 12-char sticker claim code (D2). NULL once claimed
   chip_model       TEXT        NOT NULL,            -- 'ESP32-S3' (read over USB)
   hw_model         TEXT        NOT NULL,            -- 'ARG-S1 rev B'
@@ -232,11 +242,21 @@ CREATE TABLE devices (
   claimed_at       TIMESTAMPTZ,
   name             TEXT,                            -- "Mom's bedroom"
   room             TEXT,                            -- "Master bedroom"
+  -- Backend-only settings (NOT sent to the sensor, so they live here and
+  -- not in device_settings, whose changes trigger a sync to the device):
+  timezone         TEXT        NOT NULL DEFAULT 'Asia/Kolkata',  -- IANA name; where the SLEEPER is.
+                                                    -- Asked at claim (pre-filled from the browser).
+  place            TEXT,                            -- optional "Town or city", for labels like "Surat time";
+                                                    -- empty = label made from the timezone. Asked at claim.
+  sleep_cutoff     TIME        NOT NULL DEFAULT '12:00',  -- a session belongs to the sleep date before this
+                                                    -- local time (later for night-shift sleepers)
+  auto_update      BOOLEAN     NOT NULL DEFAULT true,     -- include in OTA rollouts (daytime window only)
   is_disabled      BOOLEAN     NOT NULL DEFAULT false,  -- admin block: MQTT login refused
   disabled_reason  TEXT,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT devices_serial_format CHECK (serial_no ~ '^ARG-[0-9A-Z]{7}$'),
+  CONSTRAINT devices_place_length CHECK (place IS NULL OR char_length(btrim(place)) BETWEEN 2 AND 60),
   CONSTRAINT devices_mqtt_username_format CHECK (mqtt_username ~ '^[0-9a-f]{12}$'),
   CONSTRAINT devices_claim_consistent CHECK (
     (owner_id IS NULL AND claimed_at IS NULL) OR (owner_id IS NOT NULL AND claimed_at IS NOT NULL)
@@ -252,16 +272,16 @@ CREATE TRIGGER devices_updated BEFORE UPDATE ON devices
 -- Settings that are sent to the sensor over MQTT (retained, versioned).
 -- Same sync idea as Water Tank: any real change bumps `version`; the
 -- device acks the version it saved -> applied_version.
--- The C1001 options are placeholders until its parameter list is confirmed.
+-- Columns = the settings/set message in docs/DEVICE-DATA.md §5 (draft).
 CREATE TABLE device_settings (
   device_id          UUID PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
-  timezone           TEXT         NOT NULL DEFAULT 'Asia/Kolkata',  -- decides when a "night" starts/ends
-  mount              sensor_mount NOT NULL DEFAULT 'bedside',
-  range_m            NUMERIC(2,1) NOT NULL DEFAULT 1.5 CHECK (range_m BETWEEN 0.5 AND 3.0),
-  led_night_off      BOOLEAN      NOT NULL DEFAULT true,
-  led_off_from       TIME         NOT NULL DEFAULT '22:00',
-  led_off_to         TIME         NOT NULL DEFAULT '07:00',
-  auto_update        BOOLEAN      NOT NULL DEFAULT true,           -- OTA only in the daytime window
+  exit_s             SMALLINT     NOT NULL DEFAULT 300 CHECK (exit_s BETWEEN 30 AND 3600),
+                                                    -- bed-exit timeout: a shorter exit keeps the session going
+  live_s             SMALLINT     NOT NULL DEFAULT 5  CHECK (live_s BETWEEN 1 AND 60),   -- live rate in bed
+  idle_s             SMALLINT     NOT NULL DEFAULT 60 CHECK (idle_s BETWEEN 10 AND 600), -- live rate, empty bed
+  struggle           BOOLEAN      NOT NULL DEFAULT true,   -- C1001 abnormal-struggle detection
+  unattended         BOOLEAN      NOT NULL DEFAULT false,  -- C1001 unattended detection
+  unatt_min          SMALLINT     NOT NULL DEFAULT 30 CHECK (unatt_min BETWEEN 1 AND 180),  -- check C1001 range
   version            INTEGER      NOT NULL DEFAULT 1,
   applied_version    INTEGER      NOT NULL DEFAULT 0,
   sent_at            TIMESTAMPTZ,
@@ -279,8 +299,8 @@ CREATE TABLE settings_changes (
   device_id    UUID        NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   version      INTEGER     NOT NULL,
   changed_by   UUID        REFERENCES users(id) ON DELETE SET NULL,
-  old_values   JSONB       NOT NULL,                -- {"range_m": 1.5}
-  new_values   JSONB       NOT NULL,                -- {"range_m": 2.5}
+  old_values   JSONB       NOT NULL,                -- {"exit_s": 300}
+  new_values   JSONB       NOT NULL,                -- {"exit_s": 600}
   changed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   applied_at   TIMESTAMPTZ,                         -- when the device acked this version
   UNIQUE (device_id, version)
@@ -378,50 +398,68 @@ CREATE INDEX device_invites_phone_idx ON device_invites (phone) WHERE accepted_a
 CREATE INDEX device_invites_device_idx ON device_invites (device_id) WHERE accepted_at IS NULL AND revoked_at IS NULL;
 
 -- ---------------------------------------------------------------------
--- 6. Sleep summaries  (THE saved health record)
---    The sensor uploads one summary per night over MQTT. The backend
---    upserts on (device_id, night_date) so a retried upload is harmless.
---    Fields are placeholders until the C1001 output list is confirmed;
---    the full original payload is kept in `raw` so nothing is lost.
+-- 6. Sleep sessions  (THE saved health record)
+--    One row per SESSION (bed in -> bed out) that the sensor uploads on
+--    <p>/<d>/session (docs/DEVICE-DATA.md §4). A night can hold several
+--    sessions. The backend groups them when reading, in the session's
+--    timezone: sessions < app_settings.merge_gap_min apart = one group;
+--    the group belongs to the sleep date before devices.sleep_cutoff;
+--    the longest group on a date is the main sleep, the rest are naps.
+--    Sessions shorter than app_settings.min_session_min are kept but hidden.
+--    Fields marked (check) wait on a real-board test of the C1001.
 -- ---------------------------------------------------------------------
-CREATE TABLE sleep_summaries (
-  id                 BIGSERIAL PRIMARY KEY,
-  device_id          UUID        NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  night_date         DATE        NOT NULL,          -- local date the night STARTED (2 Nov = night of 2->3 Nov)
-  in_bed_at          TIMESTAMPTZ NOT NULL,
-  out_of_bed_at      TIMESTAMPTZ NOT NULL,
-  time_in_bed_min    SMALLINT    NOT NULL CHECK (time_in_bed_min BETWEEN 0 AND 1440),
-  total_sleep_min    SMALLINT    NOT NULL CHECK (total_sleep_min BETWEEN 0 AND 1440),
-  sleep_latency_min  SMALLINT    CHECK (sleep_latency_min BETWEEN 0 AND 1440),  -- "Fell asleep in"
-  efficiency_pct     SMALLINT    CHECK (efficiency_pct BETWEEN 0 AND 100),
-  deep_min           SMALLINT    NOT NULL DEFAULT 0 CHECK (deep_min  >= 0),
-  light_min          SMALLINT    NOT NULL DEFAULT 0 CHECK (light_min >= 0),
-  rem_min            SMALLINT    NOT NULL DEFAULT 0 CHECK (rem_min   >= 0),
-  awake_min          SMALLINT    NOT NULL DEFAULT 0 CHECK (awake_min >= 0),
-  wake_count         SMALLINT    CHECK (wake_count >= 0),
-  out_of_bed_count   SMALLINT    CHECK (out_of_bed_count >= 0),
-  turnover_count     SMALLINT    CHECK (turnover_count >= 0),
-  hr_avg             SMALLINT    CHECK (hr_avg BETWEEN 20 AND 250),   -- bpm
-  hr_min             SMALLINT    CHECK (hr_min BETWEEN 20 AND 250),
-  hr_max             SMALLINT    CHECK (hr_max BETWEEN 20 AND 250),
-  br_avg             NUMERIC(3,1) CHECK (br_avg BETWEEN 0 AND 60),    -- breaths / min
-  br_min             NUMERIC(3,1) CHECK (br_min BETWEEN 0 AND 60),
-  br_max             NUMERIC(3,1) CHECK (br_max BETWEEN 0 AND 60),
-  score              SMALLINT    CHECK (score BETWEEN 0 AND 100),     -- who computes it: decision D6
-  epoch_s            SMALLINT    NOT NULL DEFAULT 300,                -- one hypnogram block = 5 min
-  stages             SMALLINT[]  NOT NULL DEFAULT '{}',               -- per epoch: 0 awake, 1 REM, 2 light, 3 deep
-  fw_version         TEXT,
-  raw                JSONB       NOT NULL,                            -- the exact payload the device sent
-  received_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (device_id, night_date),
-  CONSTRAINT summary_out_after_in CHECK (out_of_bed_at > in_bed_at),
-  CONSTRAINT summary_sleep_le_bed CHECK (total_sleep_min <= time_in_bed_min),
-  CONSTRAINT summary_stage_values CHECK (stages <@ ARRAY[0,1,2,3]::SMALLINT[]),
-  CONSTRAINT summary_stage_count CHECK (cardinality(stages) <= 288)  -- at most 24 h of 5-min blocks
+CREATE TABLE sleep_sessions (
+  id              BIGSERIAL PRIMARY KEY,
+  device_id       UUID         NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  sid             INTEGER      NOT NULL,            -- device session counter; echoed in session/ack
+  started_at      TIMESTAMPTZ  NOT NULL,            -- bed in
+  ended_at        TIMESTAMPTZ  NOT NULL,            -- bed out (after the bed-exit timeout)
+  duration_min    INTEGER GENERATED ALWAYS AS
+                    ((EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::INTEGER) STORED,
+  timezone        TEXT         NOT NULL,            -- devices.timezone when it was received, so old
+                                                    -- nights don't move if the timezone is changed later
+  score           SMALLINT     CHECK (score BETWEEN 0 AND 100),        -- C1001 quality score (check range)
+  sleep_min       SMALLINT     CHECK (sleep_min BETWEEN 0 AND 1440),   -- total sleep
+  wake_min        SMALLINT     CHECK (wake_min  BETWEEN 0 AND 1440),   -- awake in bed (check unit)
+  light_pct       SMALLINT     CHECK (light_pct BETWEEN 0 AND 100),
+  deep_pct        SMALLINT     CHECK (deep_pct  BETWEEN 0 AND 100),
+  oob_min         SMALLINT     CHECK (oob_min   BETWEEN 0 AND 1440),   -- out of bed during session (check unit)
+  exits           SMALLINT     CHECK (exits     >= 0),                 -- bed exits
+  turns           SMALLINT     CHECK (turns     >= 0),                 -- turn-overs
+  big_mv_pct      SMALLINT     CHECK (big_mv_pct   BETWEEN 0 AND 100),
+  small_mv_pct    SMALLINT     CHECK (small_mv_pct BETWEEN 0 AND 100),
+  apnea           SMALLINT     CHECK (apnea     >= 0),                 -- apnea events
+  struggles       SMALLINT     CHECK (struggles >= 0),
+  hr_avg          SMALLINT     CHECK (hr_avg BETWEEN 20 AND 250),      -- bpm
+  hr_min          SMALLINT     CHECK (hr_min BETWEEN 20 AND 250),      -- min/max tracked by firmware
+  hr_max          SMALLINT     CHECK (hr_max BETWEEN 20 AND 250),
+  br_avg          NUMERIC(3,1) CHECK (br_avg BETWEEN 0 AND 60),        -- breaths / min
+  br_min          NUMERIC(3,1) CHECK (br_min BETWEEN 0 AND 60),
+  br_max          NUMERIC(3,1) CHECK (br_max BETWEEN 0 AND 60),
+  epoch_s         SMALLINT     NOT NULL DEFAULT 300 CHECK (epoch_s IN (60, 300)),  -- one hypnogram letter
+  hyp             TEXT         NOT NULL DEFAULT '',  -- hypnogram, one letter per epoch:
+                                                    -- D deep, L light, A awake, O out of bed (no REM on C1001)
+  fw_version      TEXT,
+  raw             JSONB        NOT NULL,            -- the exact message the device sent
+  received_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  -- a re-sent session (store-and-forward after a Wi-Fi drop) hits this and is ignored;
+  -- start time, not sid, so a counter reset after a flash wipe can't clash
+  UNIQUE (device_id, started_at),
+  CONSTRAINT session_end_after_start CHECK (ended_at > started_at),
+  CONSTRAINT session_max_length CHECK (ended_at - started_at <= interval '24 hours'),
+  CONSTRAINT session_hyp_letters CHECK (hyp ~ '^[DLAO]*$' AND length(hyp) <= 1440)
 );
--- the UNIQUE above also serves "last 14 nights for this device" (newest first via backward scan)
-CREATE TRIGGER sleep_summaries_updated BEFORE UPDATE ON sleep_summaries
+-- "sessions for this device in a date range" (history, trends); the UNIQUE index covers it
+
+-- Admin-wide settings (one row). Changing them regroups history on the next read.
+CREATE TABLE app_settings (
+  id               SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  merge_gap_min    SMALLINT NOT NULL DEFAULT 30 CHECK (merge_gap_min BETWEEN 0 AND 240),
+  min_session_min  SMALLINT NOT NULL DEFAULT 25 CHECK (min_session_min BETWEEN 0 AND 240),
+  updated_by       UUID     REFERENCES users(id) ON DELETE SET NULL,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER app_settings_updated BEFORE UPDATE ON app_settings
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------------------------------------------------------------------
@@ -438,6 +476,7 @@ CREATE TABLE alert_rules (
   high_value    NUMERIC(5,1),         -- hr_out_of_range: 110 bpm
   duration_s    INTEGER CHECK (duration_s IS NULL OR duration_s > 0),
                                       -- breath 30 s, hr 60 s, out_of_bed 600 s, no_movement 10800 s, offline 900 s
+                                      -- (live data arrives every live_s = 5 s, so 30 s = ~6 readings)
   window_from   TIME,                 -- out_of_bed: only between 23:00 ...
   window_to     TIME,                 --             ... and 06:00 (device local time)
   updated_by    UUID        REFERENCES users(id) ON DELETE SET NULL,
@@ -642,6 +681,8 @@ CREATE VIEW staff_user_permissions AS
 -- ---------------------------------------------------------------------
 -- 13. Starting data (from the mockup)
 -- ---------------------------------------------------------------------
+INSERT INTO app_settings DEFAULT VALUES;
+
 INSERT INTO permissions (code, scope, label, sort_order) VALUES
   ('live.view',        'device', 'See live values',            1),
   ('history.view',     'device', 'See sleep history',          2),
