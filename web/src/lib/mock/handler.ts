@@ -137,17 +137,15 @@ on('GET', '/me', () => userObj(me()));
 on('PATCH', '/me', (_m, b) => { const u = me(); if (b.fullName) u.fullName = b.fullName; if (b.country) u.country = b.country; return userObj(u); });
 on('POST', '/me/password', (_m, b) => { me(); if ((b.currentPassword || '').length < 8) fail(401, 'BAD_CREDENTIALS', 'Current password is wrong', 'currentPassword'); if ((b.newPassword || '').length < 8) fail(400, 'VALIDATION', 'Password must be at least 8 characters', 'newPassword'); return undefined; });
 on('DELETE', '/me', (_m, b) => { const u = me(); if ((b?.password || '').length < 8) fail(401, 'BAD_CREDENTIALS', 'Password is wrong', 'password'); u.status = 'disabled'; setSession(null); return undefined; });
-// "Show me alerts from" (per user, per device). Alerts are in-app only in v1: no push, no SMS, no quiet hours.
-// PROPOSED route, not yet in API.md (see the web report).
-on('GET', '/me/alert-sources', () => {
-  const u = me(); const off = db.alertsOff[u.id] || [];
-  return { items: db.devices.filter((d) => permsOn(u, d).includes('alerts.receive')).map((d) => ({ deviceId: d.id, deviceName: d.name, enabled: !off.includes(d.id) })) };
-});
-on('PATCH', '/me/alert-sources/([^/]+)', (m, b) => {
-  const u = me(); device(u, m[1], 'alerts.receive');
-  const off = new Set(db.alertsOff[u.id] || []); if (b.enabled) off.delete(m[1]); else off.add(m[1]);
-  db.alertsOff[u.id] = [...off];
-  return { deviceId: m[1], enabled: !!b.enabled };
+// Notification prefs (API.md 2.5/2.6). In-app only: no push, no SMS.
+const defaultPrefs = () => ({ quietEnabled: false, quietFrom: '22:00', quietTo: '07:00', mutedDeviceIds: [] as string[] });
+on('GET', '/me/notification-prefs', () => { const u = me(); return db.prefs[u.id] || defaultPrefs(); });
+on('PATCH', '/me/notification-prefs', (_m, b) => {
+  const u = me(); const cur = db.prefs[u.id] || defaultPrefs();
+  for (const k of ['quietFrom', 'quietTo'] as const) if (b[k] !== undefined && !/^\d{2}:\d{2}$/.test(b[k])) fail(400, 'VALIDATION', 'Use HH:mm', k);
+  if (b.mutedDeviceIds !== undefined && !Array.isArray(b.mutedDeviceIds)) fail(400, 'VALIDATION', 'mutedDeviceIds must be a list', 'mutedDeviceIds');
+  db.prefs[u.id] = { ...cur, ...b };
+  return db.prefs[u.id];
 });
 
 /* ---------- 3. devices ---------- */
@@ -230,7 +228,7 @@ on('GET', '/devices/([^/]+)/shares', (m) => {
   return {
     owner: { fullName: owner.fullName, phone: owner.phone },
     shares: db.shares.filter((s) => s.deviceId === d.id).map((s) => { const x = db.users.find((y) => y.id === s.userId)!; return { userId: x.id, fullName: x.fullName, phone: x.phone, permissions: s.permissions, status: 'joined' }; }),
-    invites: db.invites.filter((i) => i.kind === 'device' && i.deviceId === d.id && i.status === 'invite_sent').map((i) => ({ id: i.id, label: i.label, permissions: i.permissions!, status: 'invite_sent', expiresAt: i.expiresAt, url: `${origin()}/invite/${i.token}` })),
+    invites: db.invites.filter((i) => i.kind === 'device' && i.deviceId === d.id && i.status === 'invite_sent').map((i) => ({ id: i.id, label: i.label, permissions: i.permissions!, status: 'invite_sent', expiresAt: i.expiresAt })),
   };
 });
 on('POST', '/devices/([^/]+)/invites', (m, b) => {
@@ -272,10 +270,10 @@ on('GET', '/invites/([^/]+)', (m): InvitePreview => {
 on('POST', '/invites/([^/]+)/accept', (m) => {
   const u = me(); const i = inviteByToken(m[1]);
   // Link-only: any logged-in account may accept; the phone is never compared (owner decision 3 Nov).
+  if (i.kind === 'device') { const dv0 = db.devices.find((d) => d.id === i.deviceId)!; if (dv0.ownerId === u.id || db.shares.some((s) => s.deviceId === dv0.id && s.userId === u.id)) fail(409, 'ALREADY_SHARED', 'You already have access to this sensor'); }
+  if (i.kind === 'staff' && u.roleId) fail(409, 'ALREADY_STAFF', 'You are already on the team. Ask an Owner to change your role instead.');
   i.status = 'accepted';
   if (i.kind === 'staff') { u.roleId = i.roleId!; return { role: db.roles.find((r) => r.id === i.roleId) }; }
-  const dv = db.devices.find((d) => d.id === i.deviceId)!;
-  if (dv.ownerId === u.id || db.shares.some((s) => s.deviceId === dv.id && s.userId === u.id)) fail(409, 'ALREADY_SHARED', 'You already have access to this sensor');
   db.shares.push({ deviceId: i.deviceId!, userId: u.id, permissions: i.permissions! });
   return { device: card(u, db.devices.find((d) => d.id === i.deviceId)!) };
 });
@@ -283,7 +281,7 @@ on('POST', '/invites/([^/]+)/accept', (m) => {
 /* ---------- 6. alerts ---------- */
 on('GET', '/alerts', (_m, _b, q) => {
   const u = me();
-  const off = db.alertsOff[u.id] || [];
+  const off = db.prefs[u.id]?.mutedDeviceIds || [];
   const ok = new Set(db.devices.filter((d) => permsOn(u, d).includes('alerts.receive') && !off.includes(d.id)).map((d) => d.id));
   const dev = q.get('deviceId');
   return { items: db.alerts.filter((a) => ok.has(a.deviceId) && (!dev || a.deviceId === dev)), nextCursor: null };
@@ -328,7 +326,7 @@ on('POST', '/admin/customers/([^/]+)/reset-link', (m) => {
   const u = me(); needStaff(u, 'customers.edit');
   const c = customers().find((x) => x.id === m[1]); if (!c) fail(404, 'NOT_FOUND', 'Customer not found');
   audit(u, 'customer.reset_link', 'user', c!.fullName);
-  return { resetUrl: `${origin()}/reset/${Math.random().toString(36).slice(2, 14)}`, expiresAt: new Date(Date.now() + 3600000).toISOString() };
+  return { resetUrl: `${origin()}/reset/${Math.random().toString(36).slice(2, 14)}`, expiresAt: new Date(Date.now() + 24 * 3600000).toISOString() }; // 24 h, single use
 });
 on('POST', '/admin/customers/([^/]+)/logout-all', () => { needStaff(me(), 'customers.edit'); return undefined; });
 
@@ -415,7 +413,19 @@ on('POST', '/admin/devices/([^/]+)/commands', (m, b) => {
 });
 on('GET', '/admin/devices/([^/]+)/commands', (m) => { needStaff(me(), 'devices.view'); return { items: db.commands[m[1]] || [], nextCursor: null }; });
 on('GET', '/admin/devices/([^/]+)/logs', (m) => { needStaff(me(), 'devices.view'); return { items: (db.logs[m[1]] || []).slice(0, 5) }; });
-on('GET', '/admin/devices/([^/]+)/events', () => { needStaff(me(), 'devices.view'); return { items: [], nextCursor: null }; });
+on('GET', '/admin/devices/([^/]+)/events', (m) => {
+  needStaff(me(), 'devices.view');
+  const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
+  const t = (min: number) => new Date(Date.now() - min * 60000).toISOString();
+  const items = d!.ownerId ? [
+    { id: 'e5', type: 'bed_in', detail: null, createdAt: t(500) },
+    { id: 'e4', type: 'bed_out', detail: 'session sid=128', createdAt: t(900) },
+    { id: 'e3', type: d!.online ? 'online' : 'offline', detail: null, createdAt: t(d!.online ? 1400 : 2880) },
+    { id: 'e2', type: 'claimed', detail: `by ${db.users.find((u) => u.id === d!.ownerId)?.fullName}`, createdAt: t(40000) },
+    { id: 'e1', type: 'registered', detail: `by ${d!.registeredBy}`, createdAt: d!.registeredAt },
+  ] : [{ id: 'e1', type: 'registered', detail: `by ${d!.registeredBy}`, createdAt: d!.registeredAt }];
+  return { items, nextCursor: null };
+});
 on('DELETE', '/admin/devices/([^/]+)', (m) => {
   const u = me(); needStaff(u, 'devices.register');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
@@ -462,13 +472,13 @@ on('POST', '/admin/ota/rollouts/([^/]+)/(pause|resume|cancel|retry)', (m) => {
 on('GET', '/admin/team', () => {
   needStaff(me(), 'team.manage');
   return { members: db.users.filter((u) => u.roleId).map((u) => { const r = db.roles.find((x) => x.id === u.roleId)!; return { userId: u.id, fullName: u.fullName, phone: u.phone, role: { id: r.id, name: r.name }, lastActiveAt: u.lastActiveAt }; }),
-    invites: db.invites.filter((i) => i.kind === 'staff' && i.status === 'invite_sent').map((i) => { const r = db.roles.find((x) => x.id === i.roleId)!; return { id: i.id, label: i.label, role: { id: r.id, name: r.name }, expiresAt: i.expiresAt, url: `${origin()}/invite/${i.token}` }; }) };
+    invites: db.invites.filter((i) => i.kind === 'staff' && i.status === 'invite_sent').map((i) => { const r = db.roles.find((x) => x.id === i.roleId)!; return { id: i.id, label: i.label, role: { id: r.id, name: r.name }, expiresAt: i.expiresAt }; }) };
 });
 on('POST', '/admin/team/invites', (_m, b) => {
   const u = me(); needStaff(u, 'team.manage');
-  // Link-only: {label, roleId | role}. No phone (owner decision 3 Nov).
+  // Link-only: {label, roleId}. No phone (owner decision 3 Nov).
   if (!b.label?.trim()) fail(400, 'VALIDATION', 'Who is it for? Add a label for your list', 'label');
-  const role = db.roles.find((r) => r.id === Number(b.roleId ?? b.role) || r.name === b.role); if (!role) fail(400, 'VALIDATION', 'Pick a role', 'roleId');
+  const role = db.roles.find((r) => r.id === Number(b.roleId)); if (!role) fail(400, 'VALIDATION', 'Pick a role', 'roleId');
   if (role!.isOwner && !db.roles.find((r) => r.id === u.roleId)?.isOwner) fail(403, 'FORBIDDEN', 'Only an Owner can invite another Owner');
   const token = Math.random().toString(36).slice(2, 14);
   const inv = { id: rid('inv'), token, kind: 'staff' as const, roleId: role!.id, label: b.label.trim(), invitedBy: u.id, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), status: 'invite_sent' as const };
@@ -513,7 +523,9 @@ on('DELETE', '/admin/roles/([^/]+)', (m) => { needStaff(me(), 'team.manage'); co
 on('GET', '/admin/audit', (_m, _b, q) => {
   needStaff(me(), 'audit.view');
   const term = (q.get('q') || '').toLowerCase(); const a = q.get('action');
-  return { items: db.audit.filter((x) => (!a || x.action.startsWith(a)) && (!term || `${x.actorName} ${x.action} ${x.targetLabel} ${x.detail}`.toLowerCase().includes(term))), nextCursor: null };
+  const from = q.get('from'), to = q.get('to'); // YYYY-MM-DD, inclusive
+  return { items: db.audit.filter((x) => (!a || x.action.startsWith(a)) && (!term || `${x.actorName} ${x.action} ${x.targetLabel} ${x.detail}`.toLowerCase().includes(term))
+    && (!from || x.at.slice(0, 10) >= from) && (!to || x.at.slice(0, 10) <= to)), nextCursor: null };
 });
 on('GET', '/admin/platform-settings', () => { needStaff(me(), 'platform.settings'); return db.platform; });
 on('PATCH', '/admin/platform-settings', (_m, b) => {
@@ -539,6 +551,22 @@ export async function mockRequest<T>(method: string, path: string, body?: unknow
 function structuredCloneSafe<T>(v: T): T { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
 
 /* ---------- fake Socket.IO events (used by socket.ts in mock mode) ---------- */
+/** Advance running rollouts every few seconds and emit rollout:progress, like the real OTA bridge. */
+let rolloutTimer: ReturnType<typeof setInterval> | null = null;
+export function startMockRollouts() {
+  if (rolloutTimer) return;
+  rolloutTimer = setInterval(() => {
+    for (const r of db.rollouts) {
+      if (r.status !== 'running') continue;
+      const c = r.counts;
+      if (c.downloading > 0) { const n = Math.min(c.downloading, 1 + Math.floor(Math.random() * 2)); c.downloading -= n; if (Math.random() < 0.1) c.failed += 1; else c.done += n; }
+      if (c.waiting > 0) { const n = Math.min(c.waiting, 1 + Math.floor(Math.random() * 2)); c.waiting -= n; c.downloading += n; }
+      if (!c.waiting && !c.downloading) r.status = 'finished';
+      mockEmit('rollout:progress', { rolloutId: r.id, counts: { ...c }, status: r.status });
+    }
+  }, 2500);
+}
+
 type Listener = (payload: any) => void;
 const listeners: Record<string, Set<Listener>> = {};
 export function mockOn(ev: string, fn: Listener) { (listeners[ev] ||= new Set()).add(fn); }

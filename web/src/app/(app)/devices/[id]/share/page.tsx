@@ -69,7 +69,7 @@ export default function SharePage() {
             <input className="inp mono" value={link.url} readOnly style={{ minWidth: 0 }} onFocus={(e) => e.target.select()} aria-label="Invite link" />
             <button className="btn" onClick={() => copy(link.url)}>Copy link</button>
           </div>
-          <p className="hint">Send it to them yourself, on WhatsApp, SMS or email. Anyone who opens it can accept, so send it only to that person. It works once{link.expiresAt ? ` and expires on ${day(link.expiresAt)}` : ' and expires in 7 days'}.</p>
+          <p className="hint">Send it to them yourself, on WhatsApp, SMS or email. Anyone who opens it can accept, so send it only to that person. It works once{link.expiresAt ? ` and expires on ${day(link.expiresAt)}` : ' and expires in 7 days'}. <b>Copy it now:</b> it won’t be shown again.</p>
           <button className="link small" style={{ alignSelf: 'flex-start' }} onClick={() => setLink(null)}>Done</button>
         </div>
       )}
@@ -112,9 +112,8 @@ export default function SharePage() {
             <div className="person" key={i.id}><div className="avatar">{initials(i.label)}</div>
               <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
                 <div className="between" style={{ alignItems: 'flex-start' }}>
-                  <div className="stack" style={{ gap: 2, minWidth: 0 }}><b>{i.label} <span className="pill warn" style={{ marginLeft: 4 }}>Link not used yet</span></b><span className="xs muted">Invite link expires {day(i.expiresAt)}</span></div>
+                  <div className="stack" style={{ gap: 2, minWidth: 0 }}><b>{i.label} <span className="pill warn" style={{ marginLeft: 4 }}>Link not used yet</span></b><span className="xs muted">Expires {day(i.expiresAt)} · the link was shown once when it was made. Lost it? Cancel and invite again.</span></div>
                   <div className="row" style={{ gap: 6 }}>
-                    {i.url && <button className="btn ghost sm" onClick={() => copy(i.url!)}>Copy link</button>}
                     <button className="btn danger sm" onClick={() => { if (confirm(`Cancel the invite for ${i.label}? The link stops working.`)) act(() => del(`/devices/${id}/invites/${i.id}`), 'Invite cancelled'); }}>Cancel</button>
                   </div>
                 </div>

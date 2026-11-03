@@ -87,7 +87,8 @@ export interface NightsResponse {
 
 export interface Share { userId: string; fullName: string; phone: string; permissions: DevicePerm[]; status: 'joined' }
 // Invites are link-only (owner decision 3 Nov): a label for the inviter's list, no phone.
-export interface Invite { id: string; label: string; permissions: DevicePerm[]; status: 'invite_sent'; expiresAt: string; url?: string }
+// The link itself is shown only once, in the create response (only its hash is stored).
+export interface Invite { id: string; label: string; permissions: DevicePerm[]; status: 'invite_sent'; expiresAt: string }
 export interface InviteCreated { invite?: Invite; inviteUrl: string; expiresAt: string }
 export interface SharesResponse { owner: { fullName: string; phone: string }; shares: Share[]; invites: Invite[] }
 
@@ -143,6 +144,7 @@ export interface CommandRow {
   id: string; type: CommandType; requestedBy: string; status: 'queued' | 'sent' | 'acked' | 'done' | 'failed' | 'expired';
   error: string | null; createdAt: string; sentAt: string | null; ackedAt: string | null;
 }
+export interface DeviceEvent { id: string; type: string; detail: string | null; createdAt: string }
 export interface RegisterResult {
   device: { id: string }; serial: string; claimCode: string; qrPayload: string; qrPngBase64: string | null; stickerHtml: string | null;
 }
@@ -165,9 +167,10 @@ export interface Rollout {
 }
 export interface TeamResponse {
   members: { userId: string; fullName: string; phone: string; role: { id: number; name: string }; lastActiveAt: string | null }[];
-  invites: { id: string; label: string; role: { id: number; name: string }; expiresAt: string; url?: string }[];
+  invites: { id: string; label: string; role: { id: number; name: string }; expiresAt: string }[];
 }
 export interface Role { id: number; name: string; isOwner: boolean; permissions: StaffPerm[]; memberCount: number }
 export interface RolesResponse { roles: Role[]; permissions: { code: StaffPerm; label: string; scope: 'staff' }[] }
 export interface AuditItem { id: string; at: string; actorName: string; action: string; targetType: string; targetLabel: string; detail: string }
+export interface NotificationPrefs { quietEnabled: boolean; quietFrom: string; quietTo: string; mutedDeviceIds: string[] }
 export interface PlatformSettings { mergeGapMin: number; minSessionMin: number; defaultSleepCutoff: string }

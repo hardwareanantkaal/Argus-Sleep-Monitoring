@@ -4,7 +4,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { isLive } from './config';
 import { refreshSession } from './api';
-import { mockDevice, mockEmit, mockOff, mockOn } from './mock/handler';
+import { mockDevice, mockEmit, mockOff, mockOn, startMockRollouts } from './mock/handler';
 
 type Listener = (payload: any) => void;
 export interface LiveSocket {
@@ -57,6 +57,7 @@ const mockSocket: LiveSocket = {
     if (ev === 'live:subscribe') { startMockLive(payload.deviceId); const d = mockDevice(payload.deviceId); ack?.({ ok: true, live: d?.online ? { pr: d.base.bed, bed: d.base.bed, ss: d.base.ss, hr: d.base.hr, br: d.base.br, at: new Date().toISOString() } : null }); }
     else if (ev === 'live:unsubscribe') { clearInterval(timers[payload.deviceId]); delete timers[payload.deviceId]; ack?.({ ok: true }); }
     else if (ev === 'devices:subscribe') ack?.({ ok: true, deviceIds: payload.deviceIds, status: (payload.deviceIds as string[]).map((id) => { const d = mockDevice(id); return { deviceId: id, online: !!d?.online, lastSeenAt: d?.lastSeenAt }; }) });
+    else if (ev === 'admin:subscribe') { if ((payload.topics || []).includes('rollouts')) startMockRollouts(); ack?.({ ok: true }); }
     else ack?.({ ok: true });
   },
 };

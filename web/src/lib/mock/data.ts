@@ -86,8 +86,8 @@ export const db = {
   logs: {} as Record<string, { id: string; createdAt: string; content: string }[]>,
   audit: [] as AuditItem[],
   platform: { mergeGapMin: 30, minSessionMin: 25, defaultSleepCutoff: '12:00' } as PlatformSettings,
-  // per user: device ids the user turned "Show me alerts from" off for (in-app only, no push in v1)
-  alertsOff: {} as Record<string, string[]>,
+  // API.md 2.5/2.6 per user. Alerts are in-app only in v1; mutedDeviceIds = "Show me alerts from" switched off.
+  prefs: {} as Record<string, { quietEnabled: boolean; quietFrom: string; quietTo: string; mutedDeviceIds: string[] }>,
 };
 
 function dev(i: string, o: Partial<MDevice>): MDevice {
