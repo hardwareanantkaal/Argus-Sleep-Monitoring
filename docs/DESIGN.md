@@ -56,7 +56,7 @@ There are 29 tables and 3 views, grouped below. The SQL has the full column list
 | `users` | Everyone: customers, family and staff. Login is **phone + password**. Also stores **country** (ISO code such as `IN` or `US`), asked at sign-up. | One account per phone number. A staff member who also owns a sensor needs only one login. |
 | `staff_roles` | Owner, Developer, Manufacturing, Support, plus any role added on the Team screen | The mockup lets the Owner add roles and switch their permissions. |
 | `staff_role_permissions` | Which staff permissions each role has | The Team → Roles table in the mockup. |
-| `permissions` | The 15 permission codes, e.g. `history.view`, `firmware.rollout` | One list. Each code is either `staff` or `device`, and the database refuses to mix them up. |
+| `permissions` | The 16 permission codes (11 staff, 5 device), e.g. `history.view`, `firmware.rollout` | One list. Each code is either `staff` or `device`, and the database refuses to mix them up. |
 | `device_shares` + `device_share_permissions` | Which family member can do what on which sensor | The Share access screen (one switch per person). |
 | `device_invites`, `staff_invites` | Pending SMS invites | You can invite someone before they have an account. They join when they sign up with that phone number. |
 | `refresh_tokens`, `otp_codes`, `push_tokens`, `user_notification_prefs` | Sessions, SMS codes, where to send push notifications, and the "How to reach me" settings | Same as Water Tank, plus the alert preferences. |
@@ -72,7 +72,7 @@ SELECT 1 FROM staff_user_permissions WHERE user_id = $1 AND permission = 'firmwa
 ```
 
 - The **device owner** automatically has all 5 device permissions.
-- The **Owner role** automatically has all 10 staff permissions. It can't be edited and there is only one.
+- The **Owner role** automatically has all 11 staff permissions. It can't be edited and there is only one.
 
 **Who is staff?** A user is staff when `users.staff_role_id` is set. That replaces Water Tank's fixed `super_admin | user` field.
 
@@ -104,7 +104,7 @@ One row per **session**, from the moment the person gets into bed until they lea
 ### How sessions become nights (worked out on read)
 The backend does this with luxon, in each session's own time zone, so daylight-saving changes are handled:
 
-1. **Hide short sessions.** Anything under **25 min** is kept but not shown (`app_settings.min_session_min`).
+1. **Hide short sessions.** Anything under **25 min** is kept but not shown (`app_settings.min_session_min`). These two settings and the default cut-off for new devices are edited on the admin "Sleep rules" screen (permission `platform.settings`).
 2. **Merge.** Sessions **less than 30 min apart** form one group (`app_settings.merge_gap_min`, an admin setting).
 3. **Date it.** A group belongs to the sleep date **before the cut-off** (default 12:00 noon, set per device in `devices.sleep_cutoff`). So 23:00 on 2 Nov → 07:00 on 3 Nov counts as "night of 2 Nov".
 4. **Main sleep or nap.** The longest group on a date is the **main sleep**; the others are **naps** (shown, but trends use main sleep only).
@@ -161,7 +161,7 @@ The backend does this with luxon, in each session's own time zone, so daylight-s
 
 `schema.sql` ran without errors on a throwaway `postgres:16-alpine` container. A test script then confirmed:
 
-- **Permissions:** the Owner role gets 10 staff permissions and Manufacturing gets 3. The device owner gets 5 device permissions, and the family member gets only the 2 that were switched on. Putting a staff permission on a family member is refused.
+- **Permissions:** the Owner role gets 11 staff permissions and Manufacturing gets 3. The device owner gets 5 device permissions, and the family member gets only the 2 that were switched on. Putting a staff permission on a family member is refused.
 - **Settings sync:** changing the bed-exit timeout from 300 to 600 s raises the version to 2 and logs the change. The device ack marks it applied. Changing the time zone does **not** bump the version.
 - **Sleep sessions:** two sessions on one night are both kept. Re-sending a session is ignored. A hypnogram letter other than D/L/A/O is refused.
 - **Users and devices:** a bad country code and a one-letter place are refused.

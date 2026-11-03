@@ -456,6 +456,7 @@ CREATE TABLE app_settings (
   id               SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   merge_gap_min    SMALLINT NOT NULL DEFAULT 30 CHECK (merge_gap_min BETWEEN 0 AND 240),
   min_session_min  SMALLINT NOT NULL DEFAULT 25 CHECK (min_session_min BETWEEN 0 AND 240),
+  default_sleep_cutoff TIME NOT NULL DEFAULT '12:00',   -- copied into devices.sleep_cutoff at claim
   updated_by       UUID     REFERENCES users(id) ON DELETE SET NULL,
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -698,14 +699,15 @@ INSERT INTO permissions (code, scope, label, sort_order) VALUES
   ('firmware.upload',  'staff',  'Upload firmware',            7),
   ('firmware.rollout', 'staff',  'Start OTA rollouts',         8),
   ('team.manage',      'staff',  'Manage team and roles',      9),
-  ('audit.view',       'staff',  'View audit log',            10);
+  ('audit.view',       'staff',  'View audit log',            10),
+  ('platform.settings','staff',  'Change sleep rules',        11);
 
 INSERT INTO staff_roles (name, is_owner) VALUES
   ('Owner', true), ('Developer', false), ('Manufacturing', false), ('Support', false);
 
 INSERT INTO staff_role_permissions (role_id, permission)
   SELECT r.id, p.code FROM staff_roles r JOIN permissions p ON p.scope = 'staff'
-   WHERE r.name = 'Developer' AND p.code <> 'team.manage'
+   WHERE r.name = 'Developer' AND p.code NOT IN ('team.manage', 'platform.settings')
   UNION ALL
   SELECT r.id, p FROM staff_roles r,
          unnest(ARRAY['devices.view','devices.register','firmware.view']) p

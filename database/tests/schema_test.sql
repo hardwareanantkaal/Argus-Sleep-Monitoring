@@ -3,7 +3,7 @@
 -- Lines marked "EXPECT ERROR" must print an ERROR; everything else must not.
 \set ON_ERROR_STOP 0
 
-\echo == staff permissions per role (expect Devam 10, Kiran 3)
+\echo == staff permissions per role (expect Devam 11, Kiran 3)
 INSERT INTO users (full_name, phone, country, password_hash, staff_role_id) VALUES
  ('Devam','+919898011223','IN','x',(SELECT id FROM staff_roles WHERE name='Owner')),
  ('Kiran','+919723044871','IN','x',(SELECT id FROM staff_roles WHERE name='Manufacturing')),
