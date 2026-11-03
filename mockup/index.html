@@ -1,0 +1,1108 @@
+<title>Argus Mockup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one app shell. Desktop = full sidebar, tablet = icon rail, phone = bottom tab bar.
+   Dark night palette is the default; light theme only when chosen. */
+:root{
+  --bg:#0a0f1f; --panel:#111a2e; --panel-2:#18233d; --line:#25314f; --ink:#e7ebf6; --muted:#8c97b6;
+  --accent:#93a8ff; --accent-ink:#0a0f1f; --accent-soft:rgba(147,168,255,.14);
+  --live:#4fd6bd; --live-soft:rgba(79,214,189,.14);
+  --ok:#4cd38a; --ok-soft:rgba(76,211,138,.14); --warn:#f2b45c; --warn-soft:rgba(242,180,92,.15); --bad:#ff7a7a; --bad-soft:rgba(255,122,122,.15);
+  --st-deep:#5468e0; --st-light:#93a8ff; --st-awake:#f2b45c;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --display:"Sora","Segoe UI",system-ui,sans-serif;
+  --body:"Figtree","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --bar:52px;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#f2f4fb; --panel:#ffffff; --panel-2:#eaeef8; --line:#d9dfee; --ink:#121831; --muted:#58628a;
+  --accent:#3b52d1; --accent-ink:#ffffff; --accent-soft:rgba(59,82,209,.1);
+  --live:#0b937c; --live-soft:rgba(11,147,124,.1);
+  --ok:#17834c; --ok-soft:rgba(23,131,76,.1); --warn:#a35f00; --warn-soft:rgba(163,95,0,.1); --bad:#c8352d; --bad-soft:rgba(200,53,45,.1);
+  --st-deep:#3346b8; --st-light:#8193ee; --st-awake:#e09a35;
+  --shadow:0 10px 30px rgba(20,30,70,.12);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:40;background:var(--panel)}
+h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:-.015em;margin:0;text-wrap:balance}
+h1{font-size:clamp(22px,2.6vw,28px);line-height:1.2}
+h2{font-size:17px} h3{font-size:15px}
+p{margin:0}
+a,.link{color:var(--accent);cursor:pointer;text-decoration:none;background:none;border:0;padding:0;font:inherit}
+a:hover,.link:hover{text-decoration:underline}
+.mono{font-family:var(--mono);font-size:.9em}
+.muted{color:var(--muted)} .small{font-size:13.5px} .xs{font-size:12px}
+.label{font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.num{font-variant-numeric:tabular-nums}
+.i{flex:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* demo bar */
+.demobar{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:var(--panel);border-bottom:1px solid var(--line)}
+.demobar .in{display:flex;align-items:center;gap:12px;height:var(--bar);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.brand{display:flex;align-items:center;gap:9px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.03em;color:var(--ink)}
+.brand svg{color:var(--accent)}
+.mock-tag{font-size:11.5px;font-weight:600;color:var(--warn);border:1px dashed var(--warn);border-radius:999px;padding:2px 10px;white-space:nowrap}
+.sp{flex:1}
+.demobar select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:6px 8px;font:inherit;font-size:13.5px;max-width:52vw}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.iconbtn:hover{background:var(--panel-2)}
+
+/* shell */
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:calc(100vh - var(--bar))}
+.side{position:sticky;top:calc(var(--bar) + env(safe-area-inset-top,0px));height:calc(100vh - var(--bar) - env(safe-area-inset-top,0px));align-self:start;border-right:1px solid var(--line);padding:18px 12px;padding-left:max(12px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:2px;overflow:auto}
+.side .sec{margin:2px 11px 8px}
+.nav{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;color:var(--ink);font:inherit;font-weight:500;border:0;background:none;text-align:left;width:100%;cursor:pointer}
+.nav:hover{background:var(--panel-2)}
+.nav.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.side .foot{margin-top:auto;border-top:1px solid var(--line);padding:14px 8px 0;display:flex;flex-direction:column;gap:10px}
+.who b{display:block;font-weight:600}
+.main{padding-block:26px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));min-width:0}
+@media (min-width:720px){.main{padding-left:max(28px,env(safe-area-inset-left,0px));padding-right:max(28px,env(safe-area-inset-right,0px))}}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.wrap.narrow{max-width:760px}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.head .t{display:flex;flex-direction:column;gap:4px;min-width:0}
+.crumb{display:inline-flex;align-items:center;gap:2px;color:var(--muted);font:inherit;font-size:13.5px;cursor:pointer;background:none;border:0;padding:0;align-self:flex-start}
+.crumb:hover{color:var(--ink)}
+.tabbar{display:none}
+
+@media (min-width:720px) and (max-width:1099px){
+  .shell{grid-template-columns:88px minmax(0,1fr)}
+  .side{padding:14px 8px;padding-left:max(8px,env(safe-area-inset-left,0px))}
+  .nav{flex-direction:column;gap:5px;font-size:11.5px;padding:10px 4px;text-align:center;line-height:1.2}
+  .side .sec,.side .who{display:none}
+  .side .foot{padding:12px 0 0;align-items:center}
+  .side .foot .btn{padding:6px 8px;font-size:11.5px}
+}
+@media (max-width:719px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .side{display:none}
+  .main{padding-bottom:110px}
+  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(6px,env(safe-area-inset-left,0px));padding-right:max(6px,env(safe-area-inset-right,0px))}
+  .tabbar button{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 2px 8px;border:0;background:none;color:var(--muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tabbar button.on{color:var(--accent)}
+  .mock-tag{display:none}
+}
+
+/* sheet (phone "More") */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:51;background:var(--panel);border-radius:18px 18px 0 0;border-top:1px solid var(--line);padding:10px 0 calc(16px + env(safe-area-inset-bottom,0px));padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));box-shadow:var(--shadow);display:flex;flex-direction:column;gap:2px}
+.sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px}
+
+/* blocks */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;min-width:0}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.ch .t{display:flex;flex-direction:column;gap:2px}
+.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.g21{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.tile .v{font-family:var(--display);font-size:30px;font-weight:600;line-height:1.15;margin-top:6px;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:14px;color:var(--muted);font-weight:500;margin-left:3px}
+@media (max-width:1099px){.g21{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:980px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:719px){.g2,.g3{grid-template-columns:minmax(0,1fr)}.tile .v{font-size:25px}.card{padding:16px}}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.between{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.divider{height:1px;background:var(--line);margin:4px 0}
+
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--panel-2);color:var(--muted);white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.live{background:var(--live-soft);color:var(--live)} .pill.acc{background:var(--accent-soft);color:var(--accent)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.pulse{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.ph{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.04em;color:var(--warn);border:1px dashed currentColor;border-radius:5px;padding:0 5px;margin-left:6px;vertical-align:middle;text-transform:uppercase;line-height:1.6}
+body.noph .ph{display:none}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 16px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap;min-height:42px}
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+.btn.ghost:hover{background:var(--panel-2);filter:none}
+.btn.danger{background:transparent;color:var(--bad);border-color:var(--bad-soft)}
+.btn.danger.solid{background:var(--bad);color:var(--accent-ink);border-color:var(--bad)}
+.btn.sm{padding:5px 11px;min-height:34px;font-size:13px}
+.btn.block{width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+
+.form{display:flex;flex-direction:column;gap:14px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:13px;font-weight:600;color:var(--muted)}
+.inp{width:100%;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;min-height:42px}
+.inp:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+.inp.sm{min-height:34px;padding:5px 9px;width:auto}
+.hint{font-size:12.5px;color:var(--muted)}
+.phone{display:grid;grid-template-columns:118px minmax(0,1fr);gap:8px}
+.fields2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:560px){.fields2{grid-template-columns:minmax(0,1fr)}}
+
+.sw{appearance:none;-webkit-appearance:none;width:40px;height:24px;border-radius:999px;background:var(--line);position:relative;cursor:pointer;flex:none;margin:0;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--ink);transition:transform .15s}
+.sw:checked{background:var(--accent)}
+.sw:checked::after{transform:translateX(16px);background:var(--accent-ink)}
+.sw:disabled{opacity:.5;cursor:not-allowed}
+.tog{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid var(--line)}
+.tog:last-child{border-bottom:0}
+.tog .t{display:flex;flex-direction:column;min-width:0}
+
+.seg{display:inline-flex;background:var(--panel-2);border-radius:11px;padding:3px;gap:2px;max-width:100%;overflow-x:auto}
+.seg button{border:0;background:none;color:var(--muted);font:inherit;font-weight:600;font-size:13.5px;padding:7px 14px;border-radius:8px;cursor:pointer;white-space:nowrap}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+
+.tbl{overflow-x:auto;margin:0 -18px -18px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:700;padding:10px 18px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:12px 18px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--panel-2)}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.toolbar .inp{width:auto;flex:1 1 180px}
+.toolbar select.inp{flex:0 1 170px}
+
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px 16px;font-size:14px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;text-align:right;overflow-wrap:anywhere}
+
+/* devices */
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px}
+.dcard{display:flex;flex-direction:column;gap:14px}
+.vitals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.vital{background:var(--panel-2);border-radius:12px;padding:10px 12px;min-width:0}
+.vital b{font-family:var(--display);font-size:20px;font-weight:600;display:block;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vital span{font-size:12px;color:var(--muted)}
+.empty{text-align:center;padding:34px 16px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:10px}
+
+/* live */
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media (max-width:980px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:460px){.metrics{grid-template-columns:minmax(0,1fr)}}
+.metric{display:flex;flex-direction:column;gap:6px}
+.metric .top{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13.5px;font-weight:600}
+.metric .big{font-family:var(--display);font-size:44px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.metric .big small{font-size:15px;color:var(--muted);font-weight:500;margin-left:4px;letter-spacing:0}
+.spark{width:100%;height:46px;display:block}
+.meter{height:8px;border-radius:4px;background:var(--panel-2);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--live);border-radius:4px;transition:width .6s}
+.note{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--muted);background:var(--panel-2);border-radius:12px;padding:12px 14px}
+
+/* sleep */
+.sbar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--panel-2);min-width:120px}
+.sbar i{display:block;height:100%}
+.c-deep{background:var(--st-deep)} .c-light{background:var(--st-light)} .c-awake{background:var(--st-awake)} .c-oob{background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 5px);opacity:.6}
+.fA{fill:var(--st-awake)} .fL{fill:var(--st-light)} .fD{fill:var(--st-deep)} .fO{fill:var(--muted);opacity:.16}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+svg text{fill:var(--muted);font-family:var(--body);font-size:11px}
+svg .grid{stroke:var(--line);stroke-width:1}
+.chartbox{overflow-x:auto}
+.chartbox svg{display:block;width:100%;min-width:480px;height:auto}
+.night{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.6fr) auto;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.night:last-child{border-bottom:0}
+.night:hover .nd{color:var(--accent)}
+@media (max-width:640px){.night{grid-template-columns:minmax(0,1fr) auto}.night .nb{grid-column:1/-1;order:3}.night .nt{display:none}}
+.score{position:relative;width:46px;height:46px;flex:none}
+.score svg{width:100%;height:100%;transform:rotate(-90deg)}
+.score b{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--display);font-size:14px;font-weight:600}
+.score.lg{width:112px;height:112px}
+.score.lg b{font-size:32px}
+.stagelist{display:flex;flex-direction:column;gap:12px}
+.stagelist .r{display:grid;grid-template-columns:70px minmax(0,1fr) 72px;gap:12px;align-items:center;font-size:14px}
+.stagelist .track{height:10px;border-radius:5px;background:var(--panel-2);overflow:hidden}
+.stagelist .track i{display:block;height:100%;border-radius:5px}
+
+/* auth */
+.auth{min-height:calc(100vh - var(--bar));display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+.auth .art{background:var(--panel);border-right:1px solid var(--line);padding:48px;display:flex;flex-direction:column;justify-content:space-between;gap:30px;overflow:hidden}
+.auth .art h2{font-size:clamp(26px,3vw,38px);line-height:1.15;letter-spacing:-.03em;max-width:15ch}
+.auth .side-form{display:flex;align-items:center;justify-content:center;padding-block:40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.auth .box{width:100%;max-width:400px;display:flex;flex-direction:column;gap:20px}
+@media (max-width:860px){.auth{grid-template-columns:minmax(0,1fr)}.auth .art{display:none}}
+.steps{display:flex;gap:6px}
+.steps i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.steps i.on{background:var(--accent)}
+
+/* claim / register */
+.scan{position:relative;width:100%;max-width:300px;aspect-ratio:1;border-radius:18px;background:var(--bg);border:1px solid var(--line);margin:0 auto;display:grid;place-items:center;overflow:hidden}
+.scan .c{position:absolute;width:42px;height:42px;border:3px solid var(--live)}
+.scan .c1{top:18px;left:18px;border-right:0;border-bottom:0;border-radius:10px 0 0 0}
+.scan .c2{top:18px;right:18px;border-left:0;border-bottom:0;border-radius:0 10px 0 0}
+.scan .c3{bottom:18px;left:18px;border-right:0;border-top:0;border-radius:0 0 0 10px}
+.scan .c4{bottom:18px;right:18px;border-left:0;border-top:0;border-radius:0 0 10px 0}
+.scan .ln{position:absolute;left:30px;right:30px;height:2px;background:var(--live);top:50%;animation:scan 2.2s ease-in-out infinite alternate;opacity:.8}
+@keyframes scan{from{top:22%}to{top:78%}}
+.stepper{display:flex;gap:8px;flex-wrap:wrap}
+.stepper .s{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--muted);padding:6px 12px 6px 6px;border-radius:999px;background:var(--panel-2)}
+.stepper .s b{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--line);color:var(--ink);font-size:12px}
+.stepper .s.on{color:var(--ink)} .stepper .s.on b{background:var(--accent);color:var(--accent-ink)}
+.stepper .s.done b{background:var(--ok);color:var(--accent-ink)}
+/* sticker is printed on white paper, so it is white in both themes */
+.sticker{background:#ffffff;color:#000000;border-radius:12px;padding:16px;display:flex;gap:16px;align-items:center;max-width:420px;border:1px dashed var(--muted)}
+.sticker canvas{width:132px;height:132px;image-rendering:pixelated;flex:none}
+.sticker .mono{font-size:12.5px;line-height:1.7}
+@media (max-width:400px){.sticker{flex-direction:column;align-items:flex-start}}
+.term{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.7;max-height:220px;overflow:auto;white-space:pre}
+.progress{height:8px;border-radius:4px;background:var(--panel-2);overflow:hidden;display:flex}
+.progress i{display:block;height:100%}
+.confirm{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--warn-soft);border-radius:12px;padding:12px 14px;font-size:14px}
+.cmds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:460px){.cmds{grid-template-columns:minmax(0,1fr)}}
+.cmd{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;cursor:pointer}
+.cmd:hover:not(:disabled){border-color:var(--accent)}
+.cmd:disabled{opacity:.45;cursor:not-allowed}
+.cmd b{font-family:var(--mono);font-size:13.5px}
+.cmd span{font-size:12.5px;color:var(--muted)}
+.matrix td:first-child{white-space:normal;min-width:190px}
+.matrix td{text-align:center} .matrix td:first-child,.matrix th:first-child{text-align:left}
+.matrix th{text-align:center}
+.alert{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid var(--line);align-items:flex-start}
+.alert:last-child{border-bottom:0}
+.alert .ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none}
+.alert .ico.warn{background:var(--warn-soft);color:var(--warn)} .alert .ico.bad{background:var(--bad-soft);color:var(--bad)} .alert .ico.muted{background:var(--panel-2);color:var(--muted)}
+.person{display:flex;gap:12px;align-items:flex-start;padding:14px 0;border-bottom:1px solid var(--line)}
+.person:last-child{border-bottom:0}
+.avatar{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.lock{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:60px 16px;color:var(--muted)}
+.badge{margin-left:auto;background:var(--bad);color:var(--accent-ink);font-size:11px;font-weight:700;line-height:18px;min-width:18px;text-align:center;border-radius:999px;padding:0 5px}
+.tabbar button{position:relative}
+.tabbar .badge{position:absolute;top:4px;left:calc(50% + 4px);margin:0}
+@media (min-width:720px) and (max-width:1099px){.side .nav{position:relative}.side .badge{position:absolute;top:4px;right:14px}}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:12px;font-weight:600;font-size:14px;opacity:0;pointer-events:none;transition:all .25s;z-index:60;max-width:calc(100vw - 32px);box-shadow:var(--shadow)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (max-width:719px){#toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}}
+</style>
+
+<div class="demobar"><div class="in">
+  <span class="brand" id="brand"></span>
+  <span class="mock-tag">Mockup · sample data</span>
+  <span class="sp"></span>
+  <label class="xs muted" for="persona" style="white-space:nowrap" id="viewas">View as</label>
+  <select id="persona" aria-label="View the app as">
+    <optgroup label="Customers">
+      <option value="priya">Priya · owner</option>
+      <option value="rohan">Rohan · family in Dubai (view only)</option>
+    </optgroup>
+    <optgroup label="Admin team">
+      <option value="devam">Devam · Owner</option>
+      <option value="kiran">Kiran · Manufacturing</option>
+    </optgroup>
+    <optgroup label="Logged out">
+      <option value="out">Login / sign-up</option>
+      <option value="inv-family">Open a family invite link</option>
+      <option value="inv-staff">Open a team invite link</option>
+    </optgroup>
+  </select>
+  <button class="iconbtn" id="phbtn" title="Show or hide placeholder tags" aria-label="Show or hide placeholder tags"></button>
+  <button class="iconbtn" id="themebtn" title="Switch light / dark" aria-label="Switch light or dark theme"></button>
+</div></div>
+<div id="app"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
+const pad=n=>String(n).padStart(2,'0');
+const hm=m=>{m=((m%1440)+1440)%1440;return pad(Math.floor(m/60))+':'+pad(m%60)};
+const dur=m=>Math.floor(m/60)+'h '+pad(m%60)+'m';
+const initials=n=>n.split(' ').map(w=>w[0]).slice(0,2).join('');
+
+const IC={
+ bed:'<path d="M3 18V6M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5"/><circle cx="7" cy="10.5" r="2"/>',
+ moon:'<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+ bell:'<path d="M6 9a6 6 0 1 1 12 0c0 6 3 7.5 3 7.5H3S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+ grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+ chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+ usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="19" r="2.5"/><path d="M12 13l-5-2.5V8M12 11l5-2V7"/>',
+ users:'<circle cx="9" cy="8" r="3.5"/><path d="M2 20a7 7 0 0 1 14 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 13.6a7 7 0 0 1 4 6.4"/>',
+ upload:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+ shield:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+ list:'<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+ heart:'<path d="M12 20s-7-4.4-9-9a5 5 0 0 1 9-3 5 5 0 0 1 9 3c-2 4.6-9 9-9 9z"/>',
+ wind:'<path d="M3 8h11a3 3 0 1 0-3-3M3 12h16a3 3 0 1 1-3 3M3 16h8"/>',
+ activity:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+ wifi:'<path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+ share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
+ back:'<path d="M15 18l-6-6 6-6"/>',
+ chev:'<path d="M9 18l6-6-6-6"/>',
+ qr:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3M14 20v1"/>',
+ more:'<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+ sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+ person:'<circle cx="12" cy="5" r="2"/><path d="M12 8v6M8 21l4-7 4 7M7 11h10"/>',
+ tag:'<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="8" cy="8" r="1.5"/>',
+ out:'<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 8l-4 4 4 4M6 12h10"/>',
+ alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5h.01"/>',
+ off:'<path d="M2 9a15 15 0 0 1 6-3.4M22 9a15 15 0 0 0-9.5-4M5 12.5a10 10 0 0 1 3-2M19 12.5a10 10 0 0 0-3.5-2.2M8.5 16a5 5 0 0 1 7 0M3 3l18 18"/>',
+ check:'<path d="M5 12.5l4.5 4.5L19 7"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5h.01"/>',
+ clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ cam:'<path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="4"/>',
+};
+const ic=(n,s=18)=>`<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
+const LOGO=(s=24)=>`<svg width="${s}" height="${s}" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M2.5 16S8 7 16 7s13.5 9 13.5 9S24 25 16 25 2.5 16 2.5 16z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><circle cx="16" cy="16" r="5.2" fill="currentColor"/><circle cx="18.2" cy="14.2" r="4" fill="var(--panel)"/></svg>`;
+const PH='<span class="ph">placeholder</span>';
+const TZS=['Asia/Kolkata','Asia/Dubai','Asia/Singapore','Europe/London','America/New_York','America/Los_Angeles','Australia/Sydney'];
+const BROWSER_TZ=(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Kolkata'}catch(e){return 'Asia/Kolkata'}})();
+const tzOptions=sel=>[...new Set([sel,...TZS])].map(z=>`<option ${z===sel?'selected':''}>${z}</option>`).join('');
+const COUNTRY_BY_CODE={'+91':'India','+971':'United Arab Emirates','+1':'United States','+44':'United Kingdom'};
+const countryOptions=sel=>Object.values(COUNTRY_BY_CODE).map(c=>`<option ${c===sel?'selected':''}>${c}</option>`).join('');
+const ccSelect=id=>`<select class="inp" id="${id}">${Object.entries(COUNTRY_BY_CODE).map(([k,c])=>`<option value="${k}">${k} ${c.replace('United Arab Emirates','UAE').replace('United States','US/CA').replace('United Kingdom','UK')}</option>`).join('')}</select>`;
+
+/* ---------- permissions (one system for admin team + customer family) ---------- */
+const FAM_PERMS=[['live.view','See live values'],['history.view','See sleep history'],['alerts.receive','Get alerts'],['settings.edit','Change device settings'],['sharing.manage','Invite and manage people']];
+const ADMIN_PERMS=[['devices.view','View devices'],['devices.command','Send device commands'],['devices.register','Register devices by USB'],['customers.view','View customers'],['customers.edit','Edit or disable customers'],['firmware.view','View firmware'],['firmware.upload','Upload firmware'],['firmware.rollout','Start OTA rollouts'],['team.manage','Manage team and roles'],['audit.view','View audit log'],['platform.settings','Change sleep rules']];
+const ALL_ADMIN=ADMIN_PERMS.map(p=>p[0]);
+let ROLES={
+  Owner:[...ALL_ADMIN],
+  Developer:ALL_ADMIN.filter(p=>p!=='team.manage'),
+  Manufacturing:['devices.view','devices.register','firmware.view'],
+  Support:['devices.view','devices.command','customers.view','audit.view'],
+};
+const PERSONAS={
+  priya:{kind:'customer',name:'Priya Shah',phone:'+91 98250 12345',country:'India',tz:'Asia/Kolkata',owner:true,perms:FAM_PERMS.map(p=>p[0])},
+  rohan:{kind:'customer',name:'Rohan Shah',phone:'+971 50 318 2264',country:'United Arab Emirates',tz:'Asia/Dubai',owner:false,perms:['live.view','history.view','alerts.receive']},
+  devam:{kind:'admin',name:'Devam Gandhi',phone:'+91 98980 11223',country:'India',tz:'Asia/Kolkata',role:'Owner'},
+  kiran:{kind:'admin',name:'Kiran Patel',phone:'+91 97230 44871',country:'India',tz:'Asia/Kolkata',role:'Manufacturing'},
+};
+
+/* ---------- sample data ---------- */
+const DEVICES=[
+ {id:'ARG-24A0012',name:"Mom's bedroom",room:'Master bedroom',owner:'c1',online:true,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:0F:22',seen:'Live now',hr:61,br:14,presence:'In bed',move:8,stage:'Light',rssi:-57,reg:'2 Oct 2026',ip:'192.168.1.41',up:'6d 4h'},
+ {id:'ARG-24A0013',name:"Dad's room",room:'Second bedroom',owner:'c1',online:true,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:0F:5E',seen:'Live now',hr:57,br:12,presence:'In bed',move:3,stage:'Deep',rssi:-63,reg:'2 Oct 2026',ip:'192.168.1.42',up:'6d 4h'},
+ {id:'ARG-24A0019',name:'Guest room',room:'Guest room',owner:'c1',online:false,fw:'1.3.9',chip:'ESP32-S3',mac:'34:85:18:A1:11:07',seen:'2 days ago',hr:null,br:null,presence:'—',move:0,stage:'—',rssi:null,reg:'5 Oct 2026',ip:'—',up:'—'},
+ {id:'ARG-24A0021',name:'Bedroom',room:'Bedroom',owner:'c2',online:true,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:13:9C',seen:'Live now',hr:66,br:15,presence:'In bed',move:12,stage:'Light',rssi:-61,reg:'8 Oct 2026',ip:'10.0.0.18',up:'2d 11h'},
+ {id:'ARG-24A0022',name:'Nani',room:'Ground floor',owner:'c3',online:true,fw:'1.4.3-beta',chip:'ESP32-S3',mac:'34:85:18:A1:13:A4',seen:'Live now',hr:72,br:17,presence:'Out of bed',move:0,stage:'Awake',rssi:-70,reg:'8 Oct 2026',ip:'192.168.0.77',up:'11h 02m'},
+ {id:'ARG-24A0026',name:'Main bedroom',room:'Bedroom',owner:'c4',online:false,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:15:30',seen:'5 h ago',hr:null,br:null,presence:'—',move:0,stage:'—',rssi:null,reg:'12 Oct 2026',ip:'—',up:'—'},
+ {id:'ARG-24A0027',name:'Kids room',room:'Bedroom 2',owner:'c4',online:true,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:15:3B',seen:'Live now',hr:79,br:19,presence:'In bed',move:22,stage:'Light',rssi:-55,reg:'12 Oct 2026',ip:'192.168.1.23',up:'4d 7h'},
+ {id:'ARG-24A0030',name:'Room 4',room:'Ward B',owner:'c5',online:true,fw:'1.4.3-beta',chip:'ESP32-S3',mac:'34:85:18:A1:17:F1',seen:'Live now',hr:64,br:13,presence:'In bed',move:5,stage:'Deep',rssi:-66,reg:'20 Oct 2026',ip:'172.16.4.12',up:'9d 1h'},
+ {id:'ARG-24A0031',name:'—',room:'—',owner:null,online:false,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:18:02',seen:'Never',hr:null,br:null,presence:'—',move:0,stage:'—',rssi:null,reg:'1 Nov 2026',ip:'—',up:'—'},
+ {id:'ARG-24A0032',name:'—',room:'—',owner:null,online:false,fw:'1.4.2',chip:'ESP32-S3',mac:'34:85:18:A1:18:0D',seen:'Never',hr:null,br:null,presence:'—',move:0,stage:'—',rssi:null,reg:'1 Nov 2026',ip:'—',up:'—'},
+];
+/* each device has an IANA time zone (picked at claim) and a place name used in labels like "Surat time" */
+const DEV_TZ={c1:['Asia/Kolkata','Surat'],c2:['Asia/Kolkata','Mumbai'],c3:['Asia/Dubai',''],c4:['Asia/Kolkata','Chennai'],c5:['Asia/Kolkata','Ahmedabad']};
+DEVICES.forEach(d=>{const t=DEV_TZ[d.owner]||['',''];d.tz=t[0];d.place=t[1];d.cutoff='12:00'});
+const CUSTOMERS={
+ c1:{id:'c1',name:'Priya Shah',phone:'+91 98250 12345',country:'India',joined:'2 Oct 2026',active:'Today',status:'Active',family:['Rohan Shah','Anita Shah']},
+ c2:{id:'c2',name:'Arjun Mehta',phone:'+91 99245 77810',country:'India',joined:'8 Oct 2026',active:'Today',status:'Active',family:[]},
+ c3:{id:'c3',name:'Fatima Shaikh',phone:'+971 50 412 7781',country:'United Arab Emirates',joined:'9 Oct 2026',active:'Yesterday',status:'Active',family:['Imran Shaikh']},
+ c4:{id:'c4',name:'Neha Iyer',phone:'+91 90040 31122',country:'India',joined:'12 Oct 2026',active:'3 days ago',status:'Active',family:['Karthik Iyer','Meera Iyer']},
+ c5:{id:'c5',name:'Sunrise Care Home',phone:'+91 79 4890 2200',country:'India',joined:'20 Oct 2026',active:'Today',status:'Active',family:['Night nurse 1','Night nurse 2','Dr. Bhatt']},
+ c6:{id:'c6',name:'Vikram Rao',phone:'+44 7700 900461',country:'United Kingdom',joined:'28 Oct 2026',active:'6 days ago',status:'Disabled',family:[]},
+};
+let SHARES={
+ 'ARG-24A0012':[
+   {name:'Rohan Shah',phone:'+971 50 318 2264',perms:['live.view','history.view','alerts.receive'],status:'Joined'},
+   {name:'Anita Shah',phone:'+1 415 555 0142',perms:['live.view','history.view','alerts.receive','settings.edit'],status:'Joined'},
+   {name:'Dr. Mehul Joshi',phone:'',perms:['history.view'],status:'Pending',expires:'8 Nov',url:'https://app.argus.example/invite/m4Hq8ZtR2c'},
+ ],
+ 'ARG-24A0013':[{name:'Rohan Shah',phone:'+971 50 318 2264',perms:['live.view','history.view','alerts.receive'],status:'Joined'}],
+ 'ARG-24A0019':[],
+};
+let TEAM_INVITES=[{name:'Meet Shah',role:'Developer',expires:'9 Nov',url:'https://app.argus.example/invite/T7kP2wQx9a'}];
+let TEAM=[
+ {name:'Devam Gandhi',phone:'+91 98980 11223',role:'Owner',active:'Now'},
+ {name:'Aarav Desai',phone:'+91 99790 22014',role:'Developer',active:'1 h ago'},
+ {name:'Kiran Patel',phone:'+91 97230 44871',role:'Manufacturing',active:'Today'},
+ {name:'Sneha Trivedi',phone:'+91 95120 80345',role:'Support',active:'Yesterday'},
+];
+let FIRMWARE=[
+ {v:'1.4.3-beta',ch:'beta',date:'1 Nov 2026',size:'1.24 MB',sha:'9f2c…a71e',devices:18,notes:'Faster presence detection; fixes Wi-Fi reconnect loop'},
+ {v:'1.4.2',ch:'stable',date:'20 Oct 2026',size:'1.21 MB',sha:'4b8d…02c3',devices:402,notes:'Nightly summary upload retry'},
+ {v:'1.3.9',ch:'stable',date:'28 Sep 2026',size:'1.18 MB',sha:'e1a0…9bd4',devices:18,notes:'First production build'},
+];
+let ROLLOUTS=[
+ {id:'R-07',v:'1.4.3-beta',target:'5% canary (20 devices)',by:'Aarav Desai',started:'1 Nov, 18:40',done:12,dl:5,pending:2,failed:1,state:'Running'},
+ {id:'R-06',v:'1.4.2',target:'All devices (418)',by:'Devam Gandhi',started:'21 Oct, 11:05',done:402,dl:0,pending:14,failed:2,state:'Finished'},
+];
+let CMDLOG={
+ 'ARG-24A0012':[
+  {c:'ota_check',by:'Aarav Desai',t:'21 Oct, 11:06',s:'Done'},
+  {c:'logs',by:'Sneha Trivedi',t:'18 Oct, 16:22',s:'Done'},
+ ]
+};
+const AUDIT=[
+ ['3 Nov, 09:14','Devam Gandhi','team.role.update','Manufacturing','Turned on firmware.view'],
+ ['3 Nov, 08:52','Kiran Patel','device.register','ARG-24A0032','MAC 34:85:18:A1:18:0D · ESP32-S3'],
+ ['3 Nov, 08:49','Kiran Patel','device.register','ARG-24A0031','MAC 34:85:18:A1:18:02 · ESP32-S3'],
+ ['2 Nov, 22:10','Priya Shah','share.invite','ARG-24A0012','Invited +91 98795 20031 (history only)'],
+ ['2 Nov, 17:31','Sneha Trivedi','device.command.reboot','ARG-24A0022','Sent · acked in 2.1 s'],
+ ['2 Nov, 12:03','Arjun Mehta','device.claim','ARG-24A0021','Claimed by QR scan'],
+ ['1 Nov, 18:40','Aarav Desai','ota.rollout.start','1.4.3-beta','5% canary, 20 devices'],
+ ['1 Nov, 18:22','Aarav Desai','firmware.upload','1.4.3-beta','1.24 MB · sha256 9f2c…a71e'],
+ ['31 Oct, 14:45','Devam Gandhi','customer.disable','Vikram Rao','Reason: duplicate account'],
+ ['30 Oct, 10:12','Devam Gandhi','team.invite','Sneha Trivedi','Role: Support'],
+];
+let ALERTS=[
+ {t:'Today, 03:12',dev:"Dad's room",sev:'warn',icon:'person',title:'Out of bed for 14 min',text:'Rule: out of bed more than 10 min between 23:00 and 06:00'},
+ {t:'Today, 01:47',dev:"Mom's bedroom",sev:'bad',icon:'wind',title:'Breathing rate low: 7 /min',text:'Rule: breath rate below 8 /min for 30 s'},
+ {t:'Yesterday, 21:05',dev:'Guest room',sev:'muted',icon:'off',title:'Device offline',text:'No data for more than 15 min. Check power and Wi-Fi.'},
+ {t:'1 Nov, 04:30',dev:"Mom's bedroom",sev:'warn',icon:'heart',title:'Heart rate high: 112 bpm',text:'Rule: heart rate above 110 bpm for 60 s'},
+];
+
+/* Nights. The device sends one summary per session (bed in -> bed out) with a hypnogram:
+   one character per 5 min, D deep, L light, A awake, O out of bed (see docs/DEVICE-DATA.md).
+   The server groups sessions into a night: gaps under 30 min merge, noon cut-off in the device
+   time zone, longest group = main sleep, other groups = naps, sessions under 25 min hidden. */
+let PLATFORM={mergeGap:30,minSession:25,cutoff:'12:00'};
+function genHyp(r,steps){
+  const seg=[];const onset=2+Math.floor(r()*4);
+  for(let k=0;k<onset;k++) seg.push('A');
+  let c=0;
+  while(seg.length<steps){
+    const plan=[['L',4+Math.floor(r()*3)],['D',Math.max(0,8-c*2+Math.floor(r()*3))],['L',3+c+Math.floor(r()*3)]];
+    if(r()<.45) plan.push(['A',1+Math.floor(r()*2)]);
+    if(r()<.1) plan.push(['O',1+Math.floor(r()*2)]);
+    for(const [s,n] of plan) for(let k=0;k<n;k++) seg.push(s);
+    c++;
+  }
+  seg.length=steps; seg[steps-1]='A';
+  return seg.join('');
+}
+const NIGHTS={};
+function nightsFor(id){
+  if(NIGHTS[id]) return NIGHTS[id];
+  const out=[];
+  for(let i=0;i<14;i++){
+    const r=rng(hash(id)+i*977);
+    const d=new Date(2026,10,2-i);
+    const bed=22*60+40+Math.floor(r()*70);
+    const len=390+Math.floor(r()*90);
+    let sessions=[{start:bed,end:bed+len}];
+    if(i===0||r()<.3){ // got up in the night for 10-25 min: two sessions, merged into one night
+      const cut=Math.round(len*(.35+r()*.3)/5)*5, gap=10+Math.floor(r()*4)*5;
+      sessions=[{start:bed,end:bed+cut},{start:bed+cut+gap,end:bed+len}];
+    }
+    sessions.forEach(s=>s.hyp=genHyp(r,Math.round((s.end-s.start)/5)));
+    let tl='';
+    sessions.forEach((s,k)=>{if(k) tl+='O'.repeat(Math.round((s.start-sessions[k-1].end)/5)); tl+=s.hyp});
+    const cnt={D:0,L:0,A:0,O:0}; tl.split('').forEach(ch=>cnt[ch]++);
+    const mins={D:cnt.D*5,L:cnt.L*5,A:cnt.A*5,O:cnt.O*5};
+    const span=sessions[sessions.length-1].end-bed, inBed=span-mins.O, total=mins.D+mins.L;
+    let wake=0; for(let k=6;k<tl.length-1;k++) if(tl[k]==='A'&&tl[k-1]!=='A') wake++;
+    let exits=0; for(let k=1;k<tl.length;k++) if(tl[k]==='O'&&tl[k-1]!=='O') exits++;
+    const score=Math.max(42,Math.min(96,Math.round(28+total/9+mins.D/7-wake*4)));
+    const nap=(i===1||r()<.25)?(()=>{const s=14*60+Math.floor(r()*12)*10,l=30+Math.floor(r()*5)*10;return {start:s,end:s+l,hyp:genHyp(r,l/5)}})():null;
+    const hrAvg=54+Math.floor(r()*9), brAvg=12+Math.floor(r()*4);
+    out.push({i,date:d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'}),bed,wakeAt:bed+span,span,inBed,sessions,tl,mins,total,wake,exits,score,nap,
+      hrAvg,hrMin:hrAvg-6-Math.floor(r()*3),hrMax:hrAvg+14+Math.floor(r()*10),brAvg,brMin:brAvg-3,brMax:brAvg+4+Math.floor(r()*3),
+      turns:9+Math.floor(r()*18),bigMv:3+Math.floor(r()*6),smallMv:14+Math.floor(r()*12),apnea:r()<.2?1:0,struggles:0,eff:Math.round(total/inBed*100)});
+  }
+  return NIGHTS[id]=out;
+}
+
+/* ---------- state ---------- */
+const S={persona:'priya',screen:'c-devices',dev:'ARG-24A0012',night:0,cust:'c1',theme:'dark',ph:true,more:false,
+  signupStep:1,claimTab:'scan',claimStep:1,scanState:'idle',histDev:null,alertTab:'inbox',invite:false,editShare:null,
+  pendingCmd:null,reg:{step:1,reading:false,mac:'',chip:'',serial:'',code:''},fwTab:'versions',newRollout:false,devFilter:{q:'',st:'all'},newLink:null,teamInvite:false,forgot:false,unread:2,acceptKind:'family',pendingInvite:null,custQ:'',custCountry:'all',custTz:'all',auditQ:'',auditA:'all'};
+const P=()=>PERSONAS[S.persona];
+function can(p){const u=P(); if(!u) return false; return u.kind==='admin'?ROLES[u.role].includes(p):u.perms.includes(p)}
+function myDevices(){const u=P(); if(!u||u.kind!=='customer') return []; return u.owner?DEVICES.filter(d=>d.owner==='c1'):DEVICES.filter(d=>(SHARES[d.id]||[]).some(s=>s.name===u.name))}
+const dev=id=>DEVICES.find(d=>d.id===id);
+
+const NAV={
+ customer:[
+  {id:'c-devices',label:'My devices',icon:'bed'},
+  {id:'c-history',label:'Sleep',icon:'moon',perm:'history.view'},
+  {id:'c-alerts',label:'Alerts',icon:'bell',perm:'alerts.receive'},
+  {id:'c-claim',label:'Add device',icon:'plus',owner:true},
+  {id:'c-profile',label:'Profile',icon:'user'},
+ ],
+ admin:[
+  {id:'a-dash',label:'Dashboard',icon:'grid'},
+  {id:'a-devices',label:'Devices',icon:'chip',perm:'devices.view'},
+  {id:'a-register',label:'Register',icon:'usb',perm:'devices.register'},
+  {id:'a-customers',label:'Customers',icon:'users',perm:'customers.view'},
+  {id:'a-firmware',label:'Firmware',icon:'upload',perm:'firmware.view'},
+  {id:'a-team',label:'Team',icon:'shield',perm:'team.manage'},
+  {id:'a-audit',label:'Audit log',icon:'list',perm:'audit.view'},
+  {id:'a-settings',label:'Sleep rules',icon:'gear',perm:'platform.settings'},
+ ]};
+const PARENT={'c-live':'c-devices','c-settings':'c-devices','c-share':'c-devices','c-night':'c-history','a-device':'a-devices','a-customer':'a-customers'};
+const SCREEN_PERM={'c-live':'live.view','c-history':'history.view','c-night':'history.view','c-alerts':'alerts.receive','c-settings':'settings.edit','c-share':'sharing.manage',
+ 'a-devices':'devices.view','a-device':'devices.view','a-register':'devices.register','a-customers':'customers.view','a-customer':'customers.view','a-firmware':'firmware.view','a-team':'team.manage','a-audit':'audit.view','a-settings':'platform.settings'};
+function navFor(){const u=P(); if(!u) return []; return NAV[u.kind].filter(n=>(!n.perm||can(n.perm))&&(!n.owner||u.owner))}
+const home=()=>{const u=P(); return !u?'login':u.kind==='admin'?'a-dash':'c-devices'};
+
+/* ---------- small components ---------- */
+const statusPill=d=>d.owner===null&&!d.online?'<span class="pill acc"><span class="dot"></span>Not claimed</span>':d.online?'<span class="pill ok"><span class="dot"></span>Online</span>':'<span class="pill bad"><span class="dot"></span>Offline</span>';
+function scoreRing(v,lg){const r=lg?48:19,c=2*Math.PI*r,sw=lg?9:4,sz=lg?112:46,col=v>=80?'var(--ok)':v>=65?'var(--accent)':'var(--warn)';
+  return `<div class="score${lg?' lg':''}"><svg viewBox="0 0 ${sz} ${sz}"><circle cx="${sz/2}" cy="${sz/2}" r="${r}" fill="none" stroke="var(--panel-2)" stroke-width="${sw}"/><circle cx="${sz/2}" cy="${sz/2}" r="${r}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${c*v/100} ${c}"/></svg><b>${v}</b></div>`}
+const STAGES=[['D','Deep','c-deep'],['L','Light','c-light'],['A','Awake','c-awake'],['O','Out of bed','c-oob']];
+function stageBar(n){return `<div class="sbar">${STAGES.map(([k,,c])=>`<i class="${c}" style="width:${n.mins[k]/n.span*100}%"></i>`).join('')}</div>`}
+const legend=`<div class="legend">${STAGES.map(([,l,c])=>`<span><i class="${c}"></i>${l}</span>`).join('')}</div>`;
+/* times are shown in the device's time zone; label them when the viewer is somewhere else */
+const TZ_COUNTRY={'Asia/Kolkata':'India','Asia/Dubai':'UAE','Asia/Singapore':'Singapore','Europe/London':'UK','Australia/Sydney':'Sydney'};
+/* place name if the owner gave one, otherwise a label from the time zone */
+const tzName=d=>d.place||TZ_COUNTRY[d.tz]||d.tz.split('/').pop().replace(/_/g,' ');
+function tzTag(d){const u=P();return u&&d.tz&&u.tz!==d.tz?` <span class="pill acc" title="${d.tz}">${ic('clock',13)} ${esc(tzName(d))} time</span>`:''}
+function head(title,sub,actions='',back=''){return `<div class="head"><div class="t">${back?`<button class="crumb" data-go="${back[0]}">${ic('back',16)}${back[1]}</button>`:''}<h1>${title}</h1>${sub?`<p class="muted small">${sub}</p>`:''}</div>${actions?`<div class="row">${actions}</div>`:''}</div>`}
+function permToggles(list,on,name,disabled){return list.map(([k,l])=>`<label class="tog"><span class="t"><span>${l}</span><span class="xs muted mono">${k}</span></span><input type="checkbox" class="sw" name="${name}" value="${k}" ${on.includes(k)?'checked':''} ${disabled?'disabled':''}></label>`).join('')}
+function locked(msg){return `<div class="card lock">${ic('shield',30)}<h2>No access</h2><p>${msg||'Your role does not include this permission. Ask an owner to turn it on.'}</p><button class="btn ghost" data-go="${home()}">Go to home</button></div>`}
+
+function spark(vals,min,max,col,w=300,h=46){const n=vals.length;const pts=vals.map((v,i)=>`${(i/(n-1)*w).toFixed(1)},${(h-3-(v-min)/(max-min)*(h-6)).toFixed(1)}`).join(' ');
+  const last=pts.split(' ').pop().split(',');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polygon points="0,${h} ${pts} ${w},${h}" fill="${col}" opacity=".12"/><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${col}"/></svg>`}
+
+/* hypno(timeline string, start minute): 3 stage rows; out-of-bed time (inside a session or
+   between merged sessions) is a shaded full-height band */
+function hypno(tl,start){
+  const W=680,H=180,L=58,R=12,T=10,B=30,rh=(H-T-B)/3,ROW={A:0,L:1,D:2};
+  const X=i=>L+(W-L-R)*i/tl.length;
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sleep stages through the night">`;
+  ['Awake','Light','Deep'].forEach((lab,k)=>{const y=T+rh*k+rh/2;s+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke-dasharray="2 4"/><text x="${L-10}" y="${y+4}" text-anchor="end">${lab}</text>`});
+  let i=0;while(i<tl.length){let j=i;while(j<tl.length&&tl[j]===tl[i])j++;const st=tl[i],x=X(i).toFixed(1),w=Math.max(1,X(j)-X(i)-.6).toFixed(1);
+    if(st==='O'){s+=`<rect class="fO" x="${x}" y="${T}" width="${w}" height="${H-T-B}" rx="2"/>`;if(j-i>=3)s+=`<text x="${(X(i)+X(j))/2}" y="${T+12}" text-anchor="middle">out of bed</text>`}
+    else s+=`<rect class="f${st}" x="${x}" y="${(T+rh*ROW[st]+rh*.2).toFixed(1)}" width="${w}" height="${(rh*.6).toFixed(1)}" rx="2"/>`;i=j}
+  const end=start+tl.length*5,step=tl.length>36?60:15;
+  for(let h=Math.ceil(start/step)*step;h<end;h+=step){const x=X((h-start)/5);s+=`<line class="grid" x1="${x}" x2="${x}" y1="${T}" y2="${H-B+4}"/><text x="${x}" y="${H-10}" text-anchor="middle">${hm(h)}</text>`}
+  return s+'</svg>';
+}
+function barChart(vals,labels,maxV,ticks,fmt,col,hi){
+  const W=680,H=210,L=40,R=10,T=12,B=30,n=vals.length,bw=(W-L-R)/n;
+  const Y=v=>T+(H-T-B)*(1-v/maxV);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  ticks.forEach(t=>{s+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(t)}" y2="${Y(t)}"/><text x="${L-8}" y="${Y(t)+4}" text-anchor="end">${fmt(t)}</text>`});
+  vals.forEach((v,i)=>{const x=L+i*bw+bw*.18;s+=`<rect x="${x.toFixed(1)}" y="${Y(v).toFixed(1)}" width="${(bw*.64).toFixed(1)}" height="${(Y(0)-Y(v)).toFixed(1)}" rx="3" fill="${col}" opacity="${i===hi?1:.55}"/>`;
+    if(labels[i]) s+=`<text x="${(x+bw*.32).toFixed(1)}" y="${H-10}" text-anchor="middle">${labels[i]}</text>`});
+  return s+'</svg>';
+}
+function drawQR(cv,text){const N=25,r=rng(hash(text)),ctx=cv.getContext('2d');cv.width=N+4;cv.height=N+4;ctx.fillStyle='#fff';ctx.fillRect(0,0,N+4,N+4);ctx.fillStyle='#000';
+  const fin=(x,y)=>{for(let i=0;i<7;i++)for(let j=0;j<7;j++){const e=i===0||j===0||i===6||j===6||(i>1&&i<5&&j>1&&j<5);if(e)ctx.fillRect(x+i+2,y+j+2,1,1)}};
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){const inF=(i<8&&j<8)||(i>N-9&&j<8)||(i<8&&j>N-9);if(!inF&&r()<.48)ctx.fillRect(i+2,j+2,1,1)}
+  fin(0,0);fin(N-7,0);fin(0,N-7)}
+
+/* ---------- screens ---------- */
+const SCREENS={};
+
+/* AUTH */
+const authArt=`<div class="art"><span class="brand">${LOGO(28)} Argus</span>
+  <div class="stack" style="gap:18px"><h2>Know how they slept, without a wearable.</h2><p class="muted" style="max-width:44ch">A 60&nbsp;GHz radar beside the bed reads breathing, heart rate and movement. You see it live, and get a summary every morning.</p></div>
+  <div class="card" style="background:var(--bg)"><div class="between" style="margin-bottom:8px"><span class="label">Last night · sample</span>${legend}</div><div class="chartbox">${(n=>hypno(n.tl,n.bed))(nightsFor('ARG-24A0012')[0])}</div></div></div>`;
+SCREENS.login=()=>`<div class="auth">${authArt}<div class="side-form"><div class="box">
+  <div class="stack" style="gap:6px"><h1>Log in</h1><p class="muted">Use the phone number you signed up with.</p></div>
+  <form class="form" data-submit="login">
+    <div class="field"><label for="l-ph">Phone number</label><div class="phone">${ccSelect('l-cc')}<input class="inp" id="l-ph" inputmode="tel" autocomplete="tel" value="98250 12345"></div><span class="hint">Saved as <span class="mono">+919825012345</span> (international E.164 format).</span></div>
+    <div class="field"><label for="l-pw">Password</label><input class="inp" id="l-pw" type="password" value="sleepwell24"></div>
+    <button class="btn block" type="submit">Log in</button>
+  </form>
+  <button class="link small" style="align-self:flex-start" data-act="forgot">Forgot password?</button>
+  ${S.forgot?`<div class="card stack" style="gap:10px"><h2>Contact Anantkaal support</h2><p class="small muted">Tell them the phone number you log in with. They'll send you a one-time link to set a new password. It works for 24 hours.</p>
+   <dl class="kv"><dt>Phone / WhatsApp</dt><dd class="mono" style="user-select:all">+91 00000 00000 ${PH}</dd><dt>Email</dt><dd class="mono" style="user-select:all">support@example.com ${PH}</dd><dt>Hours</dt><dd>Mon–Sat, 10:00–18:00 IST ${PH}</dd></dl></div>`:''}
+  <p class="small muted">New to Argus? <button class="link" data-go="signup">Create an account</button></p>
+  <p class="xs muted">Mockup tip: logging in takes you in as the person picked in “View as” at the top.</p>
+</div></div></div>`;
+SCREENS.signup=()=>{const st=S.signupStep;return `<div class="auth">${authArt}<div class="side-form"><div class="box">
+  <div class="steps"><i class="on"></i><i class="${st>1?'on':''}"></i><i class="${st>2?'on':''}"></i></div>
+  ${st===1?`<div class="stack" style="gap:6px"><span class="label">Step 1 of 3</span><h1>Create your account</h1></div>
+  <form class="form" data-submit="signup1">
+    <div class="field"><label for="s-name">Your name</label><input class="inp" id="s-name" value="Priya Shah"></div>
+    <div class="field"><label for="s-ph">Phone number</label><div class="phone">${ccSelect('s-cc')}<input class="inp" id="s-ph" inputmode="tel" value="98250 12345"></div></div>
+    <div class="field"><label for="s-country">Country</label><select class="inp" id="s-country">${countryOptions('India')}</select><span class="hint">Filled in from the phone code. Change it if you live somewhere else.</span></div>
+    <div class="field"><label for="s-pw">Password</label><input class="inp" id="s-pw" type="password" value="sleepwell24"><span class="hint">At least 8 characters.</span></div>
+    <button class="btn block" type="submit">Continue</button>
+  </form><p class="small muted">Already have an account? <button class="link" data-go="login">Log in</button></p>`
+  :st===2?`<div class="stack" style="gap:6px"><span class="label">Step 2 of 3</span><h1>Add your first sensor</h1><p class="muted">Find the QR sticker on the back of the Argus sensor.</p></div>
+  <div class="scan"><span class="c c1"></span><span class="c c2"></span><span class="c c3"></span><span class="c c4"></span><span class="ln"></span>${ic('qr',54)}</div>
+  <button class="btn block" data-act="signupNext">${ic('cam')} Scan the QR sticker</button>
+  <button class="btn ghost block" data-act="signupNext">Type the code instead</button>
+  <button class="link small" data-act="signupNext">Skip for now</button>`
+  :`<div class="stack" style="gap:6px"><span class="label">Step 3 of 3</span><h1>Place the sensor</h1></div>
+  <div class="card stack"><div class="row" style="align-items:flex-start;flex-wrap:nowrap">${ic('bed',22)}<p class="small">Put it on the bedside table at chest height, facing the person, within 1–2 m. ${PH}</p></div>
+  <div class="row" style="align-items:flex-start;flex-wrap:nowrap">${ic('wifi',22)}<p class="small">Keep it plugged in and on your home Wi-Fi.</p></div>
+  <div class="row" style="align-items:flex-start;flex-wrap:nowrap">${ic('moon',22)}<p class="small">Your first sleep summary appears the morning after the first night.</p></div></div>
+  <button class="btn block" data-act="signupDone">Go to my devices</button>`}
+</div></div></div>`};
+
+/* CUSTOMER */
+SCREENS['c-devices']=()=>{const u=P(),list=myDevices();
+ return `<div class="wrap">${head('My devices',u.owner?`${list.length} sensors · ${list.filter(d=>d.online).length} online`:'Sensors shared with you',u.owner?`<button class="btn" data-go="c-claim">${ic('plus')} Add device</button>`:'')}
+ ${list.length?`<div class="dgrid">${list.map(d=>{const n=nightsFor(d.id)[0];return `<div class="card dcard">
+  <div class="between" style="align-items:flex-start"><div class="stack" style="gap:2px;min-width:0"><h2>${esc(d.name)}</h2><span class="xs muted">${esc(d.room)}${!u.owner?' · shared by Priya Shah':''}</span></div>${statusPill(d)}</div>
+  ${d.online?`<div class="vitals"><div class="vital"><span>Heart</span><b>${d.hr}<span> bpm</span></b></div><div class="vital"><span>Breath</span><b>${d.br}<span> /min</span></b></div><div class="vital"><span>Now</span><b style="font-size:15px;padding-block:3px">${d.presence}</b></div></div>`
+   :`<div class="note">${ic('off')}<span>Last seen ${d.seen}. Check that it is plugged in and on Wi-Fi.</span></div>`}
+  <div class="between"><div class="row" style="gap:10px">${can('history.view')?scoreRing(n.score):''}<div class="stack" style="gap:0"><span class="xs muted">Last night</span><b class="small">${dur(n.total)} asleep</b></div></div>
+  <div class="row" style="gap:6px">${can('history.view')?`<button class="btn ghost sm" data-go="c-history" data-dev="${d.id}">Sleep</button>`:''}${can('live.view')?`<button class="btn sm" data-go="c-live" data-dev="${d.id}">Live</button>`:''}</div></div>
+ </div>`}).join('')}</div>`:`<div class="card empty">${ic('bed',30)}<h2>No devices yet</h2><p>Scan the QR sticker on your sensor to add it.</p><button class="btn" data-go="c-claim">Add device</button></div>`}
+ </div>`};
+
+SCREENS['c-live']=()=>{const d=dev(S.dev);
+ const acts=`${can('sharing.manage')?`<button class="btn ghost sm" data-go="c-share">${ic('share',16)} Share</button>`:''}${can('settings.edit')?`<button class="btn ghost sm" data-go="c-settings">${ic('gear',16)} Settings</button>`:''}`;
+ if(!d.online) return `<div class="wrap">${head(esc(d.name),esc(d.room),acts,['c-devices','My devices'])}<div class="card empty">${ic('off',32)}<h2>Sensor is offline</h2><p>Last seen ${d.seen}. Live values show again as soon as it reconnects.</p></div></div>`;
+ return `<div class="wrap">${head(esc(d.name)+` <span class="pill live" style="vertical-align:middle;margin-left:6px"><span class="dot pulse"></span>LIVE</span>`,esc(d.room)+' · updates every few seconds while someone is in bed'+tzTag(d),acts,['c-devices','My devices'])}
+ <div class="g2">
+  <div class="card metric"><div class="top">${ic('person')} Presence ${PH}</div><div class="big" id="lv-pres" style="font-size:36px">${d.presence}</div><span class="small muted" id="lv-pres-sub">In bed since 22:58 · person ${d.dist||85} cm away</span></div>
+  <div class="card metric"><div class="top">${ic('moon')} Sleep stage ${PH}</div><div class="big" id="lv-stage" style="font-size:36px">${d.stage}</div><span class="small muted">Deep, light or awake. The sensor does not report REM.</span></div>
+ </div>
+ <div class="metrics">
+  <div class="card metric"><div class="top">${ic('heart')} Heart rate</div><div class="big"><span id="lv-hr">${d.hr}</span><small>bpm</small></div><div id="lv-hr-sp"></div></div>
+  <div class="card metric"><div class="top">${ic('wind')} Breath rate <span class="sp"></span><span class="pill ok" id="lv-bs">Normal</span></div><div class="big"><span id="lv-br">${d.br}</span><small>/min</small></div><div id="lv-br-sp"></div></div>
+  <div class="card metric"><div class="top">${ic('activity')} Movement range</div><div class="big"><span id="lv-mv">${d.move}</span><small>/ 100</small></div><div class="meter"><i id="lv-mv-m" style="width:${d.move}%"></i></div><span class="xs muted" id="lv-mv-t">Still</span></div>
+ </div>
+ <div class="g2">
+  <div class="card"><div class="between"><div class="top row small muted" style="gap:8px">${ic('wifi')} Signal</div><b class="num" id="lv-rssi">${d.rssi} dBm</b></div></div>
+  <div class="card"><div class="between"><div class="top row small muted" style="gap:8px">${ic('chip')} Firmware</div><b class="mono">${d.fw}</b></div></div>
+ </div>
+ <div class="note">${ic('info')}<span>Live values come straight from the sensor and are <b>not saved</b>. The saved record is the nightly sleep summary.</span></div>
+ ${can('history.view')?`<button class="btn ghost" style="align-self:flex-start" data-go="c-history" data-dev="${d.id}">${ic('moon')} See sleep history</button>`:''}
+ </div>`};
+
+SCREENS['c-history']=()=>{const list=myDevices();const id=S.histDev&&list.some(d=>d.id===S.histDev)?S.histDev:list[0].id;S.histDev=id;
+ const d=dev(id),N=nightsFor(id),rev=[...N].reverse();
+ return `<div class="wrap">${head('Sleep history'+tzTag(d),'One card per night. Trends count the main sleep only, not naps.')}
+ ${list.length>1?`<div class="seg">${list.map(x=>`<button class="${x.id===id?'on':''}" data-act="histDev" data-id="${x.id}">${esc(x.name)}</button>`).join('')}</div>`:''}
+ <div class="tiles">
+  <div class="card tile"><span class="label">Avg sleep</span><div class="v">${dur(Math.round(N.reduce((a,n)=>a+n.total,0)/N.length))}</div></div>
+  <div class="card tile"><span class="label">Avg score ${PH}</span><div class="v">${Math.round(N.reduce((a,n)=>a+n.score,0)/N.length)}<small>/100</small></div></div>
+  <div class="card tile"><span class="label">Avg heart rate</span><div class="v">${Math.round(N.reduce((a,n)=>a+n.hrAvg,0)/N.length)}<small>bpm</small></div></div>
+  <div class="card tile"><span class="label">Wake-ups / night</span><div class="v">${(N.reduce((a,n)=>a+n.wake,0)/N.length).toFixed(1)}</div></div>
+ </div>
+ <div class="card"><div class="ch"><div class="t"><h2>Hours asleep</h2><span class="xs muted">Main sleep only · darker bar = last night</span></div></div>
+  <div class="chartbox">${barChart(rev.map(n=>n.total/60),rev.map((n,i)=>i%2===1?n.date.split(' ')[1]+' '+n.date.split(' ')[2]:''),10,[0,2,4,6,8,10],v=>v+'h','var(--st-light)',13)}</div></div>
+ <div class="card"><div class="ch"><h2>Nights</h2>${legend}</div>
+  ${N.map(n=>`<div class="night" data-go="c-night" data-night="${n.i}"><div class="stack" style="gap:2px"><b class="nd">${n.date}</b><span class="xs muted">${hm(n.bed)} → ${hm(n.wakeAt)}</span>
+   ${n.sessions.length>1||n.nap?`<span class="chips">${n.sessions.length>1?`<span class="pill xs">${n.sessions.length} sessions</span>`:''}${n.nap?`<span class="pill acc xs">+ nap ${n.nap.end-n.nap.start}m</span>`:''}</span>`:''}</div>
+   <div class="nt small"><b>${dur(n.total)}</b><span class="muted"> asleep</span></div><div class="nb">${stageBar(n)}</div>${scoreRing(n.score)}</div>`).join('')}
+ </div></div>`};
+
+SCREENS['c-night']=()=>{const d=dev(S.histDev||S.dev),n=nightsFor(d.id)[S.night];
+ return `<div class="wrap">${head(n.date+' night'+tzTag(d),esc(d.name)+` · ${hm(n.bed)} → ${hm(n.wakeAt)}`,`<button class="btn ghost sm" data-act="night" data-dir="1" ${S.night>=13?'disabled':''}>${ic('back',16)} Earlier</button><button class="btn ghost sm" data-act="night" data-dir="-1" ${S.night<=0?'disabled':''}>Later ${ic('chev',16)}</button>`,['c-history','Sleep history'])}
+ <div class="card"><div class="row" style="gap:24px;align-items:center">${scoreRing(n.score,true)}
+  <div class="stack" style="gap:4px;flex:1;min-width:200px"><span class="label">Sleep score ${PH}</span><h2 style="font-size:22px">${n.score>=80?'A good night':n.score>=65?'A fair night':'A restless night'}</h2><p class="muted small">${dur(n.total)} asleep out of ${dur(n.inBed)} in bed, woke ${n.wake} time${n.wake===1?'':'s'}${n.exits?`, got up ${n.exits} time${n.exits===1?'':'s'}`:''}.</p></div></div></div>
+ <div class="tiles">
+  <div class="card tile"><span class="label">Total sleep</span><div class="v">${dur(n.total)}</div></div>
+  <div class="card tile"><span class="label">Time in bed</span><div class="v">${dur(n.inBed)}</div></div>
+  <div class="card tile"><span class="label">Out of bed</span><div class="v">${n.mins.O}<small>min</small></div></div>
+  <div class="card tile"><span class="label">Efficiency</span><div class="v">${n.eff}<small>%</small></div></div>
+ </div>
+ <div class="card"><div class="ch"><div class="t"><h2>Sleep stages</h2><span class="xs muted">Main sleep, ${n.sessions.length} session${n.sessions.length===1?'':'s'} joined · each block is 5 minutes</span></div>${legend}</div><div class="chartbox">${hypno(n.tl,n.bed)}</div></div>
+ <div class="g2">
+  <div class="card"><h2 style="margin-bottom:14px">Time in each stage</h2><div class="stagelist">${STAGES.map(([k,l,c])=>`<div class="r" style="grid-template-columns:84px minmax(0,1fr) 72px"><span>${l}</span><div class="track"><i class="${c}" style="width:${n.mins[k]/n.span*100}%"></i></div><b class="num" style="text-align:right">${dur(n.mins[k])}</b></div>`).join('')}</div></div>
+  <div class="card"><h2 style="margin-bottom:14px">Sessions</h2><div class="stack" style="gap:10px">
+   ${n.sessions.map((s,k)=>`${k?`<div class="row xs muted" style="padding-left:12px">${ic('person',14)} Out of bed ${s.start-n.sessions[k-1].end} min · joined because the gap is under ${PLATFORM.mergeGap} min</div>`:''}<div class="between"><span class="small"><b>${hm(s.start)} → ${hm(s.end)}</b></span><span class="small muted">${dur(s.end-s.start)}</span></div>`).join('')}
+   ${n.nap?`<div class="divider"></div><div class="between"><span class="small"><span class="pill acc">Nap</span> <b>${hm(n.nap.start)} → ${hm(n.nap.end)}</b></span><span class="small muted">${n.nap.end-n.nap.start} min</span></div><p class="xs muted">Naps are shown here but not counted in the totals or trends.</p>`:''}
+  </div></div>
+ </div>
+ <div class="card"><h2 style="margin-bottom:14px">Body during sleep ${PH}</h2><div class="g2" style="gap:9px 32px"><dl class="kv">
+   <dt>Heart rate avg</dt><dd class="num">${n.hrAvg} bpm</dd><dt>Heart rate min / max</dt><dd class="num">${n.hrMin} / ${n.hrMax} bpm</dd>
+   <dt>Breath rate avg</dt><dd class="num">${n.brAvg} /min</dd><dt>Breath rate min / max</dt><dd class="num">${n.brMin} / ${n.brMax} /min</dd>
+   <dt>Apnea events</dt><dd class="num">${n.apnea}</dd></dl><dl class="kv">
+   <dt>Turn-overs</dt><dd class="num">${n.turns}</dd><dt>Large / small movement</dt><dd class="num">${n.bigMv}% / ${n.smallMv}%</dd>
+   <dt>Bed exits</dt><dd class="num">${n.exits}</dd><dt>Abnormal struggle</dt><dd class="num">${n.struggles}</dd></dl></div></div>
+ </div>`};
+
+SCREENS['c-claim']=()=>{const tab=S.claimTab;
+ if(S.claimStep===2) return `<div class="wrap narrow">${head('Name your sensor','Found <span class="mono">ARG-24A0031</span>. It will appear under this name.','',['c-devices','My devices'])}
+  <div class="card"><form class="form" data-submit="claimDone">
+   <div class="field"><label for="cl-name">Name</label><input class="inp" id="cl-name" value="Nani's room"><span class="hint">Tip: use the person's name or the room.</span></div>
+   <div class="field"><label for="cl-room">Room</label><input class="inp" id="cl-room" value="Ground floor bedroom"></div>
+   <div class="fields2"><div class="field"><label for="cl-tz">Time zone where the sensor is</label><select class="inp" id="cl-tz">${tzOptions(BROWSER_TZ)}</select><span class="hint">Filled in from this phone. Change it if the sensor is in another place.</span></div>
+   <div class="field"><label for="cl-place">Town or city (optional)</label><input class="inp" id="cl-place" value="Surat"><span class="hint">Shown as “Surat time” to family in other time zones. Leave empty to show “India time”.</span></div></div>
+   <div class="row"><button class="btn" type="submit">Add device</button><button class="btn ghost" type="button" data-act="claimBack">Back</button></div>
+  </form></div></div>`;
+ return `<div class="wrap narrow">${head('Add a device','Every Argus sensor has a QR sticker with its serial and claim code.','',['c-devices','My devices'])}
+ <div class="seg"><button class="${tab==='scan'?'on':''}" data-act="claimTab" data-t="scan">${ic('qr',16)} Scan QR</button><button class="${tab==='type'?'on':''}" data-act="claimTab" data-t="type">Type code</button></div>
+ <div class="card">${tab==='scan'?`<div class="stack" style="align-items:center;text-align:center;gap:16px">
+   <div class="scan">${S.scanState==='on'?'<span class="c c1"></span><span class="c c2"></span><span class="c c3"></span><span class="c c4"></span><span class="ln"></span><span class="small muted">Point at the sticker…</span>':`<span class="muted">${ic('cam',44)}</span>`}</div>
+   ${S.scanState==='on'?'<p class="small muted">Looking for a code…</p>':`<p class="small muted" style="max-width:40ch">We need the camera to read the sticker. Nothing is recorded.</p><button class="btn" data-act="scan">${ic('cam')} Turn on camera</button>`}
+  </div>`:`<form class="form" data-submit="claimType">
+   <div class="field"><label for="cl-ser">Serial number</label><input class="inp mono" id="cl-ser" value="ARG-24A0031" autocapitalize="characters"></div>
+   <div class="field"><label for="cl-code">Claim code</label><input class="inp mono" id="cl-code" value="7KQ-4MZ-2PX" autocapitalize="characters"><span class="hint">9 letters and numbers, printed under the QR code.</span></div>
+   <button class="btn" type="submit" style="align-self:flex-start">Find device</button></form>`}</div>
+ </div>`};
+
+/* Invites: phone numbers are not verified (no SMS OTP), so an invite is accepted only by opening
+   its link (one-time token, 7 days). It is never matched to a phone number at sign-up or login. */
+function linkCard(inv,who){return `<div class="card stack" style="gap:12px;border-color:var(--accent)"><div class="stack" style="gap:2px"><h2>Invite link for ${esc(inv.name)}</h2><span class="xs muted">${who}</span></div>
+  <div class="row" style="flex-wrap:nowrap"><input class="inp mono" id="inv-url" value="${inv.url}" readonly style="min-width:0"><button class="btn" data-act="copyLink" data-url="${inv.url}">Copy link</button></div>
+  <p class="hint">Send it to them yourself, on WhatsApp, SMS or email. Anyone who opens it can accept, so send it only to that person. It works once and expires in 7 days.</p>
+  <button class="link small" style="align-self:flex-start" data-act="closeLink">Done</button></div>`}
+SCREENS['c-share']=()=>{const d=dev(S.dev),list=SHARES[d.id]||(SHARES[d.id]=[]);
+ return `<div class="wrap narrow">${head('Share access',esc(d.name)+' · choose what each person can see and do',`<button class="btn" data-act="invite">${ic('plus')} Invite someone</button>`,['c-live',esc(d.name)])}
+ ${S.newLink?linkCard(S.newLink,'Opens a page where they accept with their own Argus account, or create one.'):''}
+ ${S.invite?`<div class="card"><h2 style="margin-bottom:14px">Invite a family member</h2><form class="form" data-submit="inviteSend">
+   <div class="field"><label for="iv-name">Who is it for?</label><input class="inp" id="iv-name" placeholder="e.g. Anita Shah"><span class="hint">Only a label for your list. You get a link to send them.</span></div>
+   <div><span class="label">What they can do</span>${permToggles(FAM_PERMS,['live.view','history.view','alerts.receive'],'iv-perm')}</div>
+   <div class="row"><button class="btn" type="submit">Create invite link</button><button class="btn ghost" type="button" data-act="invite">Cancel</button></div></form></div>`:''}
+ <div class="card">
+  <div class="person"><div class="avatar">PS</div><div class="stack" style="gap:2px;flex:1;min-width:0"><b>Priya Shah <span class="pill acc" style="margin-left:4px">Owner</span></b><span class="xs muted">+91 98250 12345 · can do everything</span></div></div>
+  ${list.map((s,i)=>{const pend=s.status!=='Joined';return `<div class="person"><div class="avatar">${initials(s.name)}</div><div class="stack" style="gap:6px;flex:1;min-width:0">
+   <div class="between" style="align-items:flex-start"><div class="stack" style="gap:2px;min-width:0"><b>${esc(s.name)} ${pend?'<span class="pill warn" style="margin-left:4px">Link not opened yet</span>':''}</b><span class="xs muted">${pend?'Invite link expires '+s.expires:esc(s.phone)}</span></div>
+   ${pend?`<div class="row" style="gap:6px"><button class="btn ghost sm" data-act="copyLink" data-url="${s.url}">Copy link</button><button class="btn danger sm" data-act="removeShare" data-i="${i}">Cancel</button></div>`
+    :`<button class="btn ghost sm" data-act="editShare" data-i="${i}">${S.editShare===i?'Done':'Edit'}</button>`}</div>
+   ${S.editShare===i?`<div>${permToggles(FAM_PERMS,s.perms,'sh-'+i)}</div><button class="btn danger sm" style="align-self:flex-start" data-act="removeShare" data-i="${i}">Remove access</button>`
+    :`<div class="chips">${s.perms.map(p=>`<span class="pill">${FAM_PERMS.find(f=>f[0]===p)[1]}</span>`).join('')}</div>`}
+  </div></div>`}).join('')}
+  ${!list.length?'<p class="muted small" style="padding-top:12px">No one else has access yet.</p>':''}
+ </div>
+ <div class="note">${ic('shield')}<span>These are the same permission switches the Argus team uses for its own staff, so access works the same way everywhere.</span></div>
+ </div>`};
+
+/* the page an invite link opens; works logged in or out */
+SCREENS.accept=()=>{const fam=S.acceptKind!=='staff',u=P();
+ const what=fam?`<h1>Priya Shah invited you to “Mom's bedroom”</h1><p class="muted">An Argus sleep sensor in Surat. You'll be able to:</p>
+   <div class="stack" style="gap:6px">${['live.view','history.view','alerts.receive'].map(p=>`<div class="row small" style="flex-wrap:nowrap">${ic('check',16)} ${FAM_PERMS.find(f=>f[0]===p)[1]}</div>`).join('')}</div>`
+  :`<h1>Devam Gandhi invited you to the Argus team</h1><p class="muted">Role: <b>Support</b>. You'll be able to view devices and customers, send device commands and read the audit log.</p>`;
+ return `<div class="auth">${authArt}<div class="side-form"><div class="box">
+  <span class="label">Invite · expires 10 Nov</span>${what}
+  ${u?`<div class="note">${ic('user')}<span>You're logged in as <b>${u.name}</b> (${u.phone}). Accepting adds this to that account.</span></div>
+   <button class="btn block" data-act="acceptInvite">Accept invite</button><button class="link small" data-act="logoutKeepInvite">Not you? Log in as someone else</button>`
+  :`<button class="btn block" data-go="signup">Create an account and accept</button><button class="btn ghost block" data-go="login">I have an account: log in</button>`}
+  <p class="xs muted">Your phone number doesn't need to match anything. The link is the invite: it works once, for whoever opens it first.</p>
+ </div></div></div>`};
+
+SCREENS['c-settings']=()=>{const d=dev(S.dev);
+ return `<div class="wrap narrow">${head('Device settings',esc(d.name)+' · <span class="mono">'+d.id+'</span>','',['c-live',esc(d.name)])}
+ <div class="card"><h2 style="margin-bottom:14px">General</h2><form class="form" data-submit="saved">
+  <div class="fields2"><div class="field"><label for="ds-name">Name</label><input class="inp" id="ds-name" value="${esc(d.name)}"></div><div class="field"><label for="ds-room">Room</label><input class="inp" id="ds-room" value="${esc(d.room)}"></div></div>
+  <div class="fields2"><div class="field"><label for="ds-tz">Time zone</label><select class="inp" id="ds-tz">${tzOptions(d.tz||BROWSER_TZ)}</select><span class="hint">All times for this sensor are shown in this zone.</span></div>
+  <div class="field"><label for="ds-place">Town or city (optional)</label><input class="inp" id="ds-place" value="${esc(d.place||'')}"><span class="hint">Used in labels like “${esc(d.place||'Surat')} time”. If empty, the time zone is used (“${TZ_COUNTRY[d.tz]||'India'} time”).</span></div></div>
+  <div class="field"><label for="ds-cut">A new night starts at</label><input class="inp" type="time" id="ds-cut" value="${d.cutoff||'12:00'}" style="max-width:160px"><span class="hint">Sleep before this time counts toward the night before. Noon suits most people; change it for night-shift workers.</span></div>
+  <button class="btn" type="submit" style="align-self:flex-start">Save</button></form></div>
+ <div class="card"><h2 style="margin-bottom:6px">Sensor ${PH}</h2><p class="xs muted" style="margin-bottom:10px">Exact options depend on the DFRobot C1001 parameter list.</p>
+  <div class="fields2"><div class="field"><label for="ds-mount">How it is placed</label><select class="inp" id="ds-mount"><option>Bedside, facing the bed</option><option>Ceiling, above the bed</option></select></div>
+  <div class="field"><label for="ds-range">Detection range</label><select class="inp" id="ds-range"><option>Up to 1.5 m</option><option>Up to 2.5 m</option></select></div></div>
+  <label class="tog"><span class="t"><span>Night mode light off</span><span class="xs muted">Turn the status LED off between 22:00 and 07:00</span></span><input type="checkbox" class="sw" id="ds-led" checked></label></div>
+ <div class="card"><h2 style="margin-bottom:12px">Wi-Fi and firmware</h2><dl class="kv"><dt>Wi-Fi network</dt><dd>Shah_Home_5G</dd><dt>Signal</dt><dd class="num">${d.rssi?d.rssi+' dBm':'—'}</dd><dt>Firmware</dt><dd class="mono">${d.fw}</dd></dl>
+  <div class="divider" style="margin-block:12px"></div>
+  <label class="tog"><span class="t"><span>Install updates automatically</span><span class="xs muted">Updates install during the day, never at night</span></span><input type="checkbox" class="sw" id="ds-auto" checked></label>
+  <button class="btn ghost" style="margin-top:8px" data-act="toast" data-msg="Sensor is now in Wi-Fi setup mode. Connect your phone to “Argus-Setup”.">${ic('wifi')} Change Wi-Fi network</button></div>
+ <div class="card"><h2 style="margin-bottom:6px">Remove device</h2><p class="small muted" style="margin-bottom:12px">Removes it from your account and from everyone you shared it with. Sleep history is deleted.</p><button class="btn danger" data-act="toast" data-msg="In the real app this asks you to confirm first.">Remove ${esc(d.name)}</button></div>
+ </div>`};
+
+SCREENS['c-alerts']=()=>{const tab=S.alertTab,list=myDevices();
+ return `<div class="wrap narrow">${head('Alerts','Get told when something at night needs attention')}
+ <div class="seg"><button class="${tab==='inbox'?'on':''}" data-act="alertTab" data-t="inbox">Recent</button><button class="${tab==='rules'?'on':''}" data-act="alertTab" data-t="rules">Alert rules</button></div>
+ ${tab==='inbox'?`<div class="card">${ALERTS.filter(a=>list.some(d=>d.name===a.dev)).map(a=>`<div class="alert"><div class="ico ${a.sev}">${ic(a.icon)}</div><div class="stack" style="gap:2px;flex:1;min-width:0"><div class="between" style="align-items:flex-start"><b>${a.title}</b><span class="xs muted" style="white-space:nowrap">${a.t}</span></div><span class="small">${esc(a.dev)}</span><span class="xs muted">${a.text}</span></div></div>`).join('')}</div>`
+ :`<div class="card"><div class="ch"><div class="t"><h2>Rules ${PH}</h2><span class="xs muted">Thresholds are examples until the sensor data is confirmed</span></div>${list.length>1?`<select class="inp sm" id="ar-dev" aria-label="Device">${list.map(d=>`<option>${esc(d.name)}</option>`).join('')}</select>`:''}</div>
+  <label class="tog"><span class="t"><span>Breathing rate low</span><span class="xs muted">Below <input class="inp sm num" style="width:58px" value="8" aria-label="breaths per minute"> /min for 30 s</span></span><input type="checkbox" class="sw" checked ${can('settings.edit')?'':'disabled'}></label>
+  <label class="tog"><span class="t"><span>Out of bed at night</span><span class="xs muted">Longer than <input class="inp sm num" style="width:58px" value="10" aria-label="minutes"> min between 23:00 and 06:00</span></span><input type="checkbox" class="sw" checked ${can('settings.edit')?'':'disabled'}></label>
+  <label class="tog"><span class="t"><span>Heart rate out of range</span><span class="xs muted">Below <input class="inp sm num" style="width:58px" value="45" aria-label="low bpm"> or above <input class="inp sm num" style="width:58px" value="110" aria-label="high bpm"> bpm</span></span><input type="checkbox" class="sw" checked ${can('settings.edit')?'':'disabled'}></label>
+  <label class="tog"><span class="t"><span>No movement for a long time</span><span class="xs muted">Person in bed, no movement for 3 h</span></span><input type="checkbox" class="sw" ${can('settings.edit')?'':'disabled'}></label>
+  <label class="tog"><span class="t"><span>Sensor offline</span><span class="xs muted">No data for 15 min</span></span><input type="checkbox" class="sw" checked ${can('settings.edit')?'':'disabled'}></label>
+  ${can('settings.edit')?'':'<p class="xs muted" style="margin-top:8px">Only people with “Change device settings” can edit rules.</p>'}</div>
+  <div class="card"><h2 style="margin-bottom:6px">Show me alerts from</h2><p class="xs muted" style="margin-bottom:6px">Just for you. The rules above are shared by everyone on the sensor.</p>
+  ${list.map(d=>`<label class="tog"><span class="t"><span>${esc(d.name)}</span><span class="xs muted">${esc(d.room)}</span></span><input type="checkbox" class="sw" checked></label>`).join('')}</div>
+  <div class="note">${ic('bell')}<span>Alerts appear in the app: here and as a count on the bell in the menu. Phone notifications and SMS may come in a later version.</span></div>`}
+ </div>`};
+
+SCREENS['c-profile']=()=>{const u=P();
+ return `<div class="wrap narrow">${head('Profile','')}
+ <div class="card"><div class="row" style="gap:14px"><div class="avatar" style="width:52px;height:52px;font-size:18px">${initials(u.name)}</div><div class="stack" style="gap:2px"><h2>${u.name}</h2><span class="small muted">${u.phone}</span></div></div></div>
+ <div class="card"><h2 style="margin-bottom:14px">Your details</h2><form class="form" data-submit="saved"><div class="field"><label for="pf-name">Name</label><input class="inp" id="pf-name" value="${u.name}"></div>
+  <div class="field"><label for="pf-ph">Phone number</label><input class="inp" id="pf-ph" value="${u.phone}" disabled><span class="hint">Your phone number is your login. Contact support to change it.</span></div>
+  <div class="field"><label for="pf-country">Country</label><select class="inp" id="pf-country">${countryOptions(u.country)}</select></div><button class="btn" type="submit" style="align-self:flex-start">Save</button></form></div>
+ <div class="card"><h2 style="margin-bottom:14px">Password</h2><form class="form" data-submit="saved"><div class="fields2"><div class="field"><label for="pf-old">Current password</label><input class="inp" type="password" id="pf-old"></div><div class="field"><label for="pf-new">New password</label><input class="inp" type="password" id="pf-new"></div></div><button class="btn ghost" type="submit" style="align-self:flex-start">Change password</button></form></div>
+ ${!u.owner?`<div class="card"><h2 style="margin-bottom:10px">Shared with me</h2>${myDevices().map(d=>`<div class="between" style="padding:8px 0"><span>${esc(d.name)}</span><span class="xs muted">from Priya Shah</span></div>`).join('')}<button class="btn danger sm" style="margin-top:8px" data-act="toast" data-msg="In the real app this asks you to confirm first.">Leave shared devices</button></div>`:''}
+ <div class="card"><h2 style="margin-bottom:6px">Appearance</h2><label class="tog"><span class="t"><span>Dark theme</span><span class="xs muted">Easier on the eyes at night</span></span><input type="checkbox" class="sw" id="pf-dark" data-act="themeSw" ${S.theme==='dark'?'checked':''}></label></div>
+ <div class="row"><button class="btn ghost" data-act="logout">${ic('out')} Log out</button><button class="btn danger" data-act="toast" data-msg="In the real app this asks you to confirm first.">Delete account</button></div>
+ </div>`};
+
+/* ADMIN */
+SCREENS['a-dash']=()=>{const on=[383,381,379,378,377,377,376,378,380,384,386,388,389,390,391,390,389,390,392,393,393,391,391,391];
+ return `<div class="wrap">${head('Dashboard','Monday 3 November 2026')}
+ <div class="tiles">
+  <div class="card tile"><span class="label">Registered devices</span><div class="v">438</div><span class="xs muted">+12 this week</span></div>
+  <div class="card tile"><span class="label">Online now</span><div class="v" style="color:var(--ok)">391</div><span class="xs muted">89% · 27 offline, 20 not claimed</span></div>
+  <div class="card tile"><span class="label">Customers</span><div class="v">312</div><span class="xs muted">+9 this week</span></div>
+  <div class="card tile"><span class="label">OTA rollouts</span><div class="v">1<small>running</small></div><span class="xs muted">1.4.3-beta · 12 of 20 done</span></div>
+ </div>
+ <div class="g21">
+  <div class="card"><div class="ch"><div class="t"><h2>Devices online, last 24 h</h2><span class="xs muted">Hourly, now is the darkest bar</span></div></div><div class="chartbox">${barChart(on,on.map((v,i)=>i%3===0?pad((10+i)%24)+':00':''),450,[0,100,200,300,400],v=>v,'var(--ok)',23)}</div></div>
+  <div class="card"><h2 style="margin-bottom:14px">Firmware in the field</h2><div class="stagelist">${FIRMWARE.map(f=>`<div class="r" style="grid-template-columns:88px minmax(0,1fr) 40px"><span class="mono small">${f.v}</span><div class="track"><i style="width:${f.devices/438*100}%;background:var(--accent)"></i></div><b class="num" style="text-align:right">${f.devices}</b></div>`).join('')}</div>
+   <div class="divider" style="margin-block:16px"></div><div class="stack" style="gap:8px">
+   ${can('devices.register')?`<button class="btn ghost" data-go="a-register">${ic('usb')} Register a device</button>`:''}${can('firmware.rollout')?`<button class="btn ghost" data-go="a-firmware">${ic('upload')} Start a rollout</button>`:''}</div></div>
+ </div>
+ <div class="card"><div class="ch"><h2>Recent activity</h2>${can('audit.view')?'<button class="link small" data-go="a-audit">Open audit log</button>':''}</div>
+  ${AUDIT.slice(0,5).map(a=>`<div class="between" style="padding:9px 0;border-bottom:1px solid var(--line);align-items:flex-start"><div class="stack" style="gap:0;min-width:0"><span class="small"><b>${a[1]}</b> <span class="mono muted">${a[2]}</span> ${a[3]}</span><span class="xs muted">${a[4]}</span></div><span class="xs muted" style="white-space:nowrap">${a[0]}</span></div>`).join('')}</div>
+ </div>`};
+
+SCREENS['a-devices']=()=>{const f=S.devFilter,q=f.q.toLowerCase();
+ const rows=DEVICES.filter(d=>(f.st==='all'||(f.st==='online'&&d.online)||(f.st==='offline'&&!d.online&&d.owner)||(f.st==='unclaimed'&&!d.owner))&&(!q||(d.id+d.name+d.mac+(d.owner?CUSTOMERS[d.owner].name:'')).toLowerCase().includes(q)));
+ return `<div class="wrap">${head('Devices','438 registered · showing a sample of 10',can('devices.register')?`<button class="btn" data-go="a-register">${ic('usb')} Register by USB</button>`:'')}
+ <div class="card"><div class="toolbar"><input class="inp" id="df-q" placeholder="Search serial, MAC, name or owner" value="${esc(f.q)}" data-act="devQ"><select class="inp" id="df-st" data-act="devSt"><option value="all">All statuses</option><option value="online" ${f.st==='online'?'selected':''}>Online</option><option value="offline" ${f.st==='offline'?'selected':''}>Offline</option><option value="unclaimed" ${f.st==='unclaimed'?'selected':''}>Not claimed</option></select></div>
+ <div class="tbl"><table><thead><tr><th>Serial</th><th>Name</th><th>Owner</th><th>Status</th><th>Time zone</th><th>Firmware</th><th>Chip</th><th>Last seen</th></tr></thead><tbody>
+ ${rows.map(d=>`<tr class="click" data-go="a-device" data-dev="${d.id}"><td class="mono">${d.id}</td><td>${esc(d.name)}</td><td>${d.owner?CUSTOMERS[d.owner].name:'<span class="muted">—</span>'}</td><td>${statusPill(d)}</td><td class="mono">${d.tz||'—'}</td><td class="mono">${d.fw}</td><td class="mono">${d.chip}</td><td class="muted">${d.seen}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">No devices match.</td></tr>'}
+ </tbody></table></div></div></div>`};
+
+SCREENS['a-device']=()=>{const d=dev(S.dev),cust=d.owner&&CUSTOMERS[d.owner],log=CMDLOG[d.id]||(CMDLOG[d.id]=[]),cmd=can('devices.command');
+ const CMDS=[['reboot','Restart the sensor'],['config_mode','Open Wi-Fi setup mode'],['ota_check','Check for a firmware update now'],['logs','Upload the last 200 log lines']];
+ return `<div class="wrap">${head(`<span class="mono">${d.id}</span>`,`${esc(d.name)}${cust?' · '+cust.name:''}`,statusPill(d),['a-devices','Devices'])}
+ <div class="g3">
+  <div class="card"><h2 style="margin-bottom:12px">Hardware</h2><dl class="kv"><dt>MAC</dt><dd class="mono">${d.mac}</dd><dt>Chip</dt><dd class="mono">${d.chip}</dd><dt>Radar</dt><dd>DFRobot C1001</dd><dt>Firmware</dt><dd class="mono">${d.fw}</dd><dt>Registered</dt><dd>${d.reg}</dd></dl></div>
+  <div class="card"><h2 style="margin-bottom:12px">Connection</h2><dl class="kv"><dt>Status</dt><dd>${d.online?'Online':'Offline'}</dd><dt>Time zone</dt><dd class="mono">${d.tz||'—'}</dd><dt>New night at</dt><dd class="num">${d.cutoff}</dd><dt>Last seen</dt><dd>${d.seen}</dd><dt>IP</dt><dd class="mono">${d.ip}</dd><dt>Signal</dt><dd class="num">${d.rssi?d.rssi+' dBm':'—'}</dd><dt>Uptime</dt><dd>${d.up}</dd></dl></div>
+  <div class="card"><h2 style="margin-bottom:12px">Owner and access</h2>${cust?`<div class="stack" style="gap:10px"><button class="link" style="text-align:left" data-go="a-customer" data-cust="${cust.id}">${cust.name}</button><span class="xs muted">${cust.phone}</span><span class="small">${(SHARES[d.id]||[]).length} people shared</span>${(SHARES[d.id]||[]).map(s=>`<span class="xs muted">· ${esc(s.name)}</span>`).join('')}</div>`:'<p class="small muted">Not claimed yet. Claim code is printed on its sticker.</p>'}</div>
+ </div>
+ <div class="g2">
+  <div class="card"><div class="ch"><div class="t"><h2>Send a command</h2><span class="xs muted">Goes to the device over MQTT</span></div></div>
+   ${!d.online?'<div class="note" style="margin-bottom:12px">'+ic('off')+'<span>Device is offline. Commands wait in a queue until it reconnects.</span></div>':''}
+   ${S.pendingCmd?`<div class="confirm" style="margin-bottom:12px"><span>Send <b class="mono">${S.pendingCmd}</b> to ${d.id}?</span><span class="sp"></span><button class="btn sm" data-act="cmdSend">Send</button><button class="btn ghost sm" data-act="cmdCancel">Cancel</button></div>`:''}
+   <div class="cmds">${CMDS.map(([c,t])=>`<button class="cmd" data-act="cmd" data-c="${c}" ${cmd?'':'disabled'}><b>${c}</b><span>${t}</span></button>`).join('')}</div>
+   ${cmd?'':'<p class="xs muted" style="margin-top:10px">Your role cannot send commands (needs devices.command).</p>'}</div>
+  <div class="card"><h2 style="margin-bottom:12px">Command history</h2>${log.length?`<div class="tbl" style="margin-bottom:-18px"><table><thead><tr><th>Command</th><th>By</th><th>Sent</th><th>Result</th></tr></thead><tbody>${log.map(l=>`<tr><td class="mono">${l.c}</td><td>${l.by}</td><td class="muted">${l.t}</td><td>${l.s==='Done'?'<span class="pill ok">Done</span>':l.s==='Queued'?'<span class="pill">Queued</span>':'<span class="pill warn"><span class="dot pulse"></span>Sent</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<p class="small muted">No commands sent yet.</p>'}</div>
+ </div>
+ ${log.some(l=>l.c==='logs'&&l.s==='Done'&&l.fresh)?`<div class="card"><h2 style="margin-bottom:12px">Latest logs</h2><div class="term">[06:41:02] I wifi: connected, rssi=${d.rssi||-60}\n[06:41:02] I mqtt: connected to broker\n[06:41:03] I radar: C1001 init ok, mode=sleep\n[06:42:10] I radar: presence=1 hr=${d.hr||60} br=${d.br||14}\n[06:50:00] I summary: night uploaded (88 epochs)\n[07:05:13] W wifi: rssi dropped to -78\n[07:05:19] I wifi: rssi back to ${d.rssi||-60}</div></div>`:''}
+ </div>`};
+
+SCREENS['a-register']=()=>{const R=S.reg;
+ const step=(n,l)=>`<span class="s ${R.step===n?'on':R.step>n?'done':''}"><b>${R.step>n?ic('check',14):n}</b>${l}</span>`;
+ return `<div class="wrap narrow">${head('Register a device','Plug a new sensor into this laptop by USB. We read its MAC address and chip, then make its QR sticker.')}
+ <div class="stepper">${step(1,'Connect')}${step(2,'Details')}${step(3,'Sticker')}</div>
+ ${R.step===1?`<div class="card stack" style="gap:16px"><div class="row" style="flex-wrap:nowrap;align-items:flex-start;gap:14px"><div class="avatar" style="border-radius:12px">${ic('usb')}</div><div class="stack" style="gap:4px"><h2>Connect the board</h2><p class="small muted">Works in Chrome or Edge on a laptop. Close Arduino IDE or any serial monitor first. Nothing is written to the board.</p></div></div>
+   ${R.reading?'<div class="note"><span class="dot pulse" style="color:var(--live);margin-top:6px"></span><span>Reading board… resetting into bootloader, reading eFuse, resetting back.</span></div>':''}
+   <button class="btn" style="align-self:flex-start" data-act="usbRead" ${R.reading?'disabled':''}>${ic('usb')} Connect over USB</button>
+   <p class="xs muted">If it fails: hold BOOT, press RESET, then try again.</p></div>`
+ :R.step===2?`<div class="card"><div class="note" style="margin-bottom:16px;background:var(--ok-soft);color:var(--ok)">${ic('check')}<span>Board read. MAC <b class="mono">${R.mac}</b> · chip <b class="mono">${R.chip}</b></span></div>
+   <form class="form" data-submit="regSave"><div class="fields2">
+    <div class="field"><label for="rg-mac">MAC address</label><input class="inp mono" id="rg-mac" value="${R.mac}" readonly></div>
+    <div class="field"><label for="rg-chip">Chip</label><input class="inp mono" id="rg-chip" value="${R.chip}" readonly></div>
+    <div class="field"><label for="rg-hw">Hardware model</label><select class="inp" id="rg-hw"><option>ARG-S1 (bedside) rev B</option><option>ARG-S1 (bedside) rev A</option></select></div>
+    <div class="field"><label for="rg-batch">Batch</label><input class="inp" id="rg-batch" value="B-2026-11-A"></div>
+    <div class="field"><label for="rg-date">Made on</label><input class="inp" type="date" id="rg-date" value="2026-11-03"></div>
+    <div class="field"><label for="rg-fw">Firmware on board</label><input class="inp mono" id="rg-fw" value="1.4.2" readonly></div></div>
+    <div class="row"><button class="btn" type="submit">Register and make sticker</button><button class="btn ghost" type="button" data-act="regReset">Start over</button></div></form></div>`
+ :`<div class="card stack" style="gap:16px"><div class="stack" style="gap:4px"><h2>Registered ${R.serial}</h2><p class="small muted">Print the sticker and put it on the back of the sensor. The customer scans it to add the device.</p></div>
+   <div class="sticker"><canvas id="qr" aria-label="QR code for ${R.serial}"></canvas><div class="mono"><b style="font-size:16px">${R.serial}</b><br>Code: ${R.code}<br>MAC: ${R.mac}<br>Scan in the Argus app</div></div>
+   <p class="xs muted">Sample QR pattern for the mockup. The real one encodes the serial and claim code.</p>
+   <div class="row"><button class="btn" data-act="toast" data-msg="In the real app this opens the print dialog for a 50 × 30 mm label.">Print sticker</button><button class="btn ghost" data-act="regReset">${ic('usb')} Register the next one</button></div></div>`}
+ <div class="card"><h2 style="margin-bottom:12px">Registered today</h2><div class="tbl"><table><thead><tr><th>Serial</th><th>MAC</th><th>Chip</th><th>By</th><th>Time</th></tr></thead><tbody>
+  ${DEVICES.filter(d=>d.reg==='1 Nov 2026'||d.reg==='3 Nov 2026').reverse().map(d=>`<tr class="click" data-go="a-device" data-dev="${d.id}"><td class="mono">${d.id}</td><td class="mono">${d.mac}</td><td class="mono">${d.chip}</td><td>Kiran Patel</td><td class="muted">${d.reg==='3 Nov 2026'?'just now':'08:52'}</td></tr>`).join('')}
+ </tbody></table></div></div></div>`};
+
+const custTz=c=>[...new Set(DEVICES.filter(d=>d.owner===c.id).map(d=>d.tz))];
+SCREENS['a-customers']=()=>{const q=S.custQ.toLowerCase(),fc=S.custCountry,ft=S.custTz;
+ const all=Object.values(CUSTOMERS),countries=[...new Set(all.map(c=>c.country))],zones=[...new Set(DEVICES.map(d=>d.tz).filter(Boolean))];
+ const rows=all.filter(c=>(!q||(c.name+c.phone).toLowerCase().includes(q))&&(fc==='all'||c.country===fc)&&(ft==='all'||custTz(c).includes(ft)));
+ return `<div class="wrap">${head('Customers','312 accounts · showing a sample of 6')}
+ <div class="card"><div class="toolbar"><input class="inp" id="cu-q" placeholder="Search name or phone" value="${esc(S.custQ)}" data-act="custQ">
+  <select class="inp" id="cu-c" data-act="custCountry" aria-label="Country"><option value="all">All countries</option>${countries.map(c=>`<option ${c===fc?'selected':''}>${c}</option>`).join('')}</select>
+  <select class="inp" id="cu-t" data-act="custTz" aria-label="Time zone"><option value="all">All time zones</option>${zones.map(z=>`<option ${z===ft?'selected':''}>${z}</option>`).join('')}</select></div>
+ <div class="tbl"><table><thead><tr><th>Name</th><th>Phone</th><th>Country</th><th>Device time zones</th><th>Devices</th><th>Family</th><th>Joined</th><th>Last active</th><th>Status</th></tr></thead><tbody>
+ ${rows.map(c=>`<tr class="click" data-go="a-customer" data-cust="${c.id}"><td><b>${c.name}</b></td><td class="mono">${c.phone}</td><td>${c.country}</td><td class="mono">${custTz(c).join(', ')||'<span class="muted">—</span>'}</td><td>${DEVICES.filter(d=>d.owner===c.id).length}</td><td>${c.family.length}</td><td class="muted">${c.joined}</td><td class="muted">${c.active}</td><td>${c.status==='Active'?'<span class="pill ok">Active</span>':'<span class="pill bad">Disabled</span>'}</td></tr>`).join('')||'<tr><td colspan="9" class="muted">No customers match.</td></tr>'}
+ </tbody></table></div></div></div>`};
+
+SCREENS['a-customer']=()=>{const c=CUSTOMERS[S.cust],ds=DEVICES.filter(d=>d.owner===c.id),ed=can('customers.edit');
+ return `<div class="wrap">${head(c.name,c.phone+' · '+c.country+' · joined '+c.joined,c.status==='Active'?'<span class="pill ok">Active</span>':'<span class="pill bad">Disabled</span>',['a-customers','Customers'])}
+ <div class="g21">
+  <div class="card"><h2 style="margin-bottom:12px">Devices</h2>${ds.length?`<div class="tbl"><table><thead><tr><th>Serial</th><th>Name</th><th>Status</th><th>Firmware</th><th>Last seen</th></tr></thead><tbody>${ds.map(d=>`<tr class="click" data-go="a-device" data-dev="${d.id}"><td class="mono">${d.id}</td><td>${esc(d.name)}</td><td>${statusPill(d)}</td><td class="mono">${d.fw}</td><td class="muted">${d.seen}</td></tr>`).join('')}</tbody></table></div>`:'<p class="small muted">No devices claimed.</p>'}</div>
+  <div class="stack" style="gap:16px">
+   <div class="card"><h2 style="margin-bottom:12px">Family members</h2>${c.family.length?c.family.map(f=>`<div class="row" style="padding:6px 0"><div class="avatar" style="width:30px;height:30px;font-size:12px">${initials(f)}</div><span class="small">${f}</span></div>`).join(''):'<p class="small muted">Not shared with anyone.</p>'}</div>
+   <div class="card"><h2 style="margin-bottom:12px">Account actions</h2><div class="stack" style="gap:8px">
+    <button class="btn ghost" ${ed?'':'disabled'} data-act="toast" data-msg="Reset link created and copied. Send it to the customer yourself; it works once and expires in 24 h.">Create password reset link</button>
+    <button class="btn danger" ${ed?'':'disabled'} data-act="toast" data-msg="In the real app this asks for a reason and confirmation.">${c.status==='Active'?'Disable account':'Enable account'}</button>
+    ${ed?'':'<p class="xs muted">Needs customers.edit.</p>'}</div></div>
+  </div>
+ </div></div>`};
+
+SCREENS['a-firmware']=()=>{const t=S.fwTab,up=can('firmware.upload'),ro=can('firmware.rollout');
+ return `<div class="wrap">${head('Firmware and OTA','Upload builds, then roll them out to devices over the air',`${ro?`<button class="btn" data-act="newRollout">${ic('upload')} New rollout</button>`:''}`)}
+ ${S.newRollout?`<div class="card"><h2 style="margin-bottom:14px">New rollout</h2><form class="form" data-submit="rollout"><div class="fields2">
+  <div class="field"><label for="ro-v">Version</label><select class="inp mono" id="ro-v">${FIRMWARE.map(f=>`<option>${f.v}</option>`).join('')}</select></div>
+  <div class="field"><label for="ro-t">Send to</label><select class="inp" id="ro-t"><option>A percentage of devices</option><option>All devices</option><option>Chosen serial numbers</option><option>Devices on a firmware version</option></select></div>
+  <div class="field"><label for="ro-p">Percentage</label><input class="inp num" id="ro-p" value="10"><span class="hint">Start small, check for failures, then increase.</span></div>
+  <div class="field"><label for="ro-w">Install window (device local time)</label><select class="inp" id="ro-w"><option>10:00 – 18:00 (not during sleep)</option><option>Any time</option></select></div></div>
+  <div class="row"><button class="btn" type="submit">Start rollout</button><button class="btn ghost" type="button" data-act="newRollout">Cancel</button></div></form></div>`:''}
+ <div class="card"><div class="ch"><h2>Rollouts</h2></div><div class="stack" style="gap:18px">${ROLLOUTS.map(r=>{const tot=r.done+r.dl+r.pending+r.failed;return `<div class="stack" style="gap:8px">
+  <div class="between" style="align-items:flex-start"><div class="stack" style="gap:2px"><b><span class="mono">${r.v}</span> → ${r.target}</b><span class="xs muted">${r.id} · started ${r.started} by ${r.by}</span></div>${r.state==='Running'?'<span class="pill live"><span class="dot pulse"></span>Running</span>':'<span class="pill">Finished</span>'}</div>
+  <div class="progress"><i style="width:${r.done/tot*100}%;background:var(--ok)"></i><i style="width:${r.dl/tot*100}%;background:var(--accent)"></i><i style="width:${r.failed/tot*100}%;background:var(--bad)"></i></div>
+  <div class="legend"><span><i style="background:var(--ok)"></i>Updated ${r.done}</span><span><i style="background:var(--accent)"></i>Downloading ${r.dl}</span><span><i style="background:var(--panel-2);border:1px solid var(--line)"></i>Waiting ${r.pending}</span><span><i style="background:var(--bad)"></i>Failed ${r.failed}</span>${r.state==='Running'&&ro?'<span class="sp"></span><button class="btn ghost sm" data-act="toast" data-msg="Rollout paused. Devices already updated keep the new version.">Pause</button>':''}</div></div>`}).join('<div class="divider"></div>')}</div></div>
+ <div class="g21">
+  <div class="card"><h2 style="margin-bottom:12px">Versions</h2><div class="tbl"><table><thead><tr><th>Version</th><th>Channel</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Notes</th></tr></thead><tbody>
+   ${FIRMWARE.map(f=>`<tr><td class="mono"><b>${f.v}</b></td><td>${f.ch==='beta'?'<span class="pill warn">beta</span>':'<span class="pill ok">stable</span>'}</td><td class="muted">${f.date}</td><td>${f.size}</td><td>${f.devices}</td><td class="muted" style="white-space:normal;min-width:220px">${f.notes}</td></tr>`).join('')}</tbody></table></div></div>
+  <div class="card"><h2 style="margin-bottom:14px">Upload a build</h2><form class="form" data-submit="fwUpload">
+   <div class="field"><label for="fw-file">Firmware file (.bin)</label><input class="inp" type="file" id="fw-file" accept=".bin" ${up?'':'disabled'}></div>
+   <div class="field"><label for="fw-v">Version</label><input class="inp mono" id="fw-v" placeholder="1.4.4" ${up?'':'disabled'}></div>
+   <div class="field"><label for="fw-ch">Channel</label><select class="inp" id="fw-ch" ${up?'':'disabled'}><option>beta</option><option>stable</option></select></div>
+   <div class="field"><label for="fw-n">What changed</label><textarea class="inp" id="fw-n" rows="2" ${up?'':'disabled'}></textarea></div>
+   <button class="btn" type="submit" ${up?'':'disabled'}>Upload</button>${up?'':'<p class="xs muted">Needs firmware.upload.</p>'}</form></div>
+ </div></div>`};
+
+SCREENS['a-team']=()=>{const roles=Object.keys(ROLES);
+ return `<div class="wrap">${head('Team and permissions','Who on the Argus team can do what',`<button class="btn" data-act="teamInvite">${ic('plus')} Invite member</button>`)}
+ ${S.newLink?linkCard(S.newLink,'Opens a page where they accept with their own Argus account, or create one, and join with this role.'):''}
+ ${S.teamInvite?`<div class="card"><h2 style="margin-bottom:14px">Invite a team member</h2><form class="form" data-submit="teamInviteSend"><div class="fields2">
+  <div class="field"><label for="ti-name">Who is it for?</label><input class="inp" id="ti-name" placeholder="e.g. Meet Shah"><span class="hint">Only a label. You get a link to send them.</span></div>
+  <div class="field"><label for="ti-role">Role</label><select class="inp" id="ti-role">${roles.filter(r=>r!=='Owner').map(r=>`<option>${r}</option>`).join('')}</select></div></div>
+  <div class="row"><button class="btn" type="submit">Create invite link</button><button class="btn ghost" type="button" data-act="teamInvite">Cancel</button></div></form></div>`:''}
+ ${TEAM_INVITES.length?`<div class="card"><h2 style="margin-bottom:8px">Open invites</h2>${TEAM_INVITES.map((t,i)=>`<div class="between" style="padding:9px 0;border-bottom:1px solid var(--line)"><div class="stack" style="gap:0"><b class="small">${esc(t.name)} · ${t.role}</b><span class="xs muted">Link not opened yet · expires ${t.expires}</span></div><div class="row" style="gap:6px"><button class="btn ghost sm" data-act="copyLink" data-url="${t.url}">Copy link</button><button class="btn danger sm" data-act="cancelTeamInvite" data-i="${i}">Cancel</button></div></div>`).join('')}</div>`:''}
+ <div class="card"><h2 style="margin-bottom:12px">Members</h2><div class="tbl"><table><thead><tr><th>Name</th><th>Phone</th><th>Role</th><th>Last active</th></tr></thead><tbody>
+  ${TEAM.map((m,i)=>`<tr><td><b>${m.name}</b></td><td class="mono">${m.phone}</td><td><select class="inp sm" data-act="teamRole" data-i="${i}" aria-label="Role for ${m.name}" ${m.role==='Owner'?'disabled':''}>${roles.map(r=>`<option ${r===m.role?'selected':''}>${r}</option>`).join('')}</select></td><td class="muted">${m.active}</td></tr>`).join('')}
+ </tbody></table></div></div>
+ <div class="card"><div class="ch"><div class="t"><h2>Roles</h2><span class="xs muted">Switch a permission on or off for a whole role. Owner always has everything.</span></div><button class="btn ghost sm" data-act="toast" data-msg="New role added. Give it a name and switch on its permissions.">${ic('plus',16)} Add role</button></div>
+ <div class="tbl"><table class="matrix"><thead><tr><th>Permission</th>${roles.map(r=>`<th>${r}</th>`).join('')}</tr></thead><tbody>
+  ${ADMIN_PERMS.map(([k,l])=>`<tr><td><span>${l}</span><br><span class="xs muted mono">${k}</span></td>${roles.map(r=>`<td><input type="checkbox" class="sw" data-act="rolePerm" data-r="${r}" data-p="${k}" aria-label="${l} for ${r}" ${ROLES[r].includes(k)?'checked':''} ${r==='Owner'?'disabled':''}></td>`).join('')}</tr>`).join('')}
+ </tbody></table></div></div>
+ <div class="note">${ic('shield')}<span>Customers use the same system when they share a sensor with family: a list of permissions, switched on per person. Try “View as Kiran” to see a Manufacturing view.</span></div>
+ </div>`};
+
+SCREENS['a-audit']=()=>{const q=S.auditQ.toLowerCase(),a=S.auditA;const rows=AUDIT.filter(r=>(a==='all'||r[2].startsWith(a))&&(!q||r.join(' ').toLowerCase().includes(q)));
+ return `<div class="wrap">${head('Audit log','Every change by staff or customers, newest first. Entries cannot be edited.')}
+ <div class="card"><div class="toolbar"><input class="inp" id="au-q" placeholder="Search person, device, detail" value="${esc(S.auditQ)}" data-act="auditQ"><select class="inp" id="au-a" data-act="auditA">${[['all','All actions'],['device','Devices'],['ota','OTA'],['firmware','Firmware'],['share','Sharing'],['customer','Customers'],['team','Team']].map(([v,l])=>`<option value="${v}" ${a===v?'selected':''}>${l}</option>`).join('')}</select></div>
+ <div class="tbl"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody>
+ ${rows.map(r=>`<tr><td class="muted">${r[0]}</td><td>${r[1]}</td><td class="mono">${r[2]}</td><td class="mono">${r[3]}</td><td class="muted">${r[4]}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Nothing matches.</td></tr>'}
+ </tbody></table></div></div></div>`};
+
+SCREENS['a-settings']=()=>{const ex=nightsFor('ARG-24A0012')[0];
+ return `<div class="wrap narrow">${head('Sleep rules','How device sessions are grouped into nights. Applies to every device.')}
+ <div class="card"><h2 style="margin-bottom:14px">Grouping sessions into a night</h2><form class="form" data-submit="platformSave">
+  <div class="fields2"><div class="field"><label for="ps-gap">Join sessions less than this apart</label><div class="row" style="flex-wrap:nowrap"><input class="inp num" id="ps-gap" type="number" min="0" value="${PLATFORM.mergeGap}" style="max-width:110px"><span class="muted">min</span></div><span class="hint">Getting up for the bathroom shouldn't split the night in two.</span></div>
+  <div class="field"><label for="ps-min">Hide sessions shorter than</label><div class="row" style="flex-wrap:nowrap"><input class="inp num" id="ps-min" type="number" min="0" value="${PLATFORM.minSession}" style="max-width:110px"><span class="muted">min</span></div><span class="hint">Short sessions are still stored, just not shown in history or trends.</span></div>
+  <div class="field"><label for="ps-cut">New devices start a new night at</label><input class="inp" id="ps-cut" type="time" value="${PLATFORM.cutoff}" style="max-width:160px"><span class="hint">In the device's own time zone. Customers can change it per device.</span></div></div>
+  <button class="btn" type="submit" style="align-self:flex-start">Save rules</button></form></div>
+ <div class="card"><h2 style="margin-bottom:12px">How it works</h2><div class="stack small" style="gap:8px">
+  <p>1. Every time someone gets into bed and out again, the sensor sends one <b>session</b>.</p>
+  <p>2. Sessions on the same date (cut off at the time above) that are less than ${PLATFORM.mergeGap} min apart are joined. The gap shows as “out of bed”.</p>
+  <p>3. The longest joined group is the <b>main sleep</b>. Any other group is a <b>nap</b>: it gets a badge but doesn't count in trends.</p></div>
+  <div class="chartbox" style="margin-top:14px">${hypno(ex.tl,ex.bed)}</div><p class="xs muted">Example: Mom's bedroom, ${ex.date}, ${ex.sessions.length} sessions joined.</p></div>
+ </div>`};
+
+/* ---------- render ---------- */
+/* unread in-app alerts: the count on the bell (v1 alerts are in-app only) */
+const badge=n=>n.id==='c-alerts'&&S.unread?`<span class="badge" aria-label="${S.unread} new alerts">${S.unread}</span>`:'';
+function renderShell(){
+  const u=P(),nav=navFor(),active=PARENT[S.screen]||S.screen;
+  if(!u||S.screen==='login'||S.screen==='signup'||S.screen==='accept'){return (SCREENS[S.screen]||SCREENS.login)()}
+  let body;
+  const need=SCREEN_PERM[S.screen];const kindOk=S.screen[0]===(u.kind==='admin'?'a':'c');
+  if(!SCREENS[S.screen]||!kindOk) body=locked('This screen belongs to the '+(u.kind==='admin'?'customer':'admin')+' side.');
+  else if(need&&!can(need)) body=locked();
+  else if(S.screen==='c-claim'&&!u.owner) body=locked('Only the owner of an account can add devices.');
+  else if(u.kind==='customer'&&!myDevices().length&&S.screen!=='c-devices'&&S.screen!=='c-profile'&&S.screen!=='c-claim') body=SCREENS['c-devices']();
+  else body=SCREENS[S.screen]();
+  const max=4,tabs=nav.length>5?nav.slice(0,max):nav,rest=nav.length>5?nav.slice(max):[];
+  return `<div class="shell">
+  <aside class="side"><span class="label sec">${u.kind==='admin'?'Admin · '+u.role:'My home'}</span>
+   ${nav.map(n=>`<button class="nav ${active===n.id?'on':''}" data-go="${n.id}">${ic(n.icon,20)}<span>${n.label}</span>${badge(n)}</button>`).join('')}
+   <div class="foot"><div class="who small"><b>${u.name}</b><span class="xs muted">${u.phone}</span></div><button class="btn ghost sm" data-act="logout">${ic('out',16)} Log out</button></div>
+  </aside>
+  <main class="main">${body}</main></div>
+  <nav class="tabbar">${tabs.map(n=>`<button class="${active===n.id?'on':''}" data-go="${n.id}">${ic(n.icon,22)}<span>${n.label}</span>${badge(n)}</button>`).join('')}${rest.length?`<button class="${rest.some(n=>n.id===active)?'on':''}" data-act="more">${ic('more',22)}<span>More</span></button>`:''}</nav>
+  ${S.more?`<div class="scrim" data-act="more"></div><div class="sheet"><div class="grab"></div>${rest.map(n=>`<button class="nav ${active===n.id?'on':''}" data-go="${n.id}">${ic(n.icon,20)}<span>${n.label}</span></button>`).join('')}<div class="divider"></div><button class="nav" data-act="logout">${ic('out',20)}<span>Log out</span></button></div>`:''}`;
+}
+function render(){
+  stopLive();
+  $('#app').innerHTML=renderShell();
+  $('#persona').value=P()?S.persona:(S.screen==='accept'?'inv-'+S.acceptKind:'out');
+  if(S.screen==='c-live') startLive();
+  if(S.screen==='a-register'&&S.reg.step===3){const c=$('#qr');if(c) drawQR(c,S.reg.serial)}
+  try{history.replaceState(null,'','#'+S.screen)}catch(e){}
+}
+function go(id,el){
+  if(el){if(el.dataset.dev){S.dev=el.dataset.dev;S.histDev=el.dataset.dev}if(el.dataset.night!==undefined)S.night=+el.dataset.night;if(el.dataset.cust)S.cust=el.dataset.cust}
+  if(id==='c-alerts')S.unread=0;
+  if(id!==S.screen){S.pendingCmd=null;S.forgot=false;S.invite=false;S.editShare=null;S.newRollout=false;S.newLink=null;S.teamInvite=false}
+  S.screen=id;S.more=false;render();window.scrollTo(0,0);
+}
+
+/* ---------- fake live stream (stands in for Socket.IO) ---------- */
+let liveT=null;const LH={hr:[],br:[]};
+function startLive(){const d=dev(S.dev);if(!d.online) return;
+  LH.hr=[];LH.br=[];const r=rng(hash(d.id));let hr=d.hr,br=d.br,mv=d.move;
+  for(let i=0;i<40;i++){LH.hr.push(hr+Math.round((r()-.5)*4));LH.br.push(br+Math.round((r()-.5)*2))}
+  const draw=()=>{const a=$('#lv-hr-sp'),b=$('#lv-br-sp');if(a)a.innerHTML=spark(LH.hr,d.hr-12,d.hr+12,'var(--bad)');if(b)b.innerHTML=spark(LH.br,d.br-6,d.br+6,'var(--live)')};draw();
+  liveT=setInterval(()=>{hr=Math.max(d.hr-8,Math.min(d.hr+8,hr+Math.round((Math.random()-.5)*3)));br=Math.max(d.br-3,Math.min(d.br+3,br+Math.round((Math.random()-.5)*1.4)));
+   mv=Math.max(0,Math.min(100,Math.round(mv*.7+(Math.random()<.15?Math.random()*40:Math.random()*6))));
+   LH.hr.push(hr);LH.hr.shift();LH.br.push(br);LH.br.shift();
+   const set=(id,v)=>{const e=$(id);if(e)e.textContent=v};set('#lv-hr',hr);set('#lv-br',br);set('#lv-mv',mv);set('#lv-mv-t',mv<10?'Still':mv<35?'Small movements':'Moving a lot');
+   const m=$('#lv-mv-m');if(m)m.style.width=mv+'%';set('#lv-rssi',(d.rssi+Math.round((Math.random()-.5)*4))+' dBm');draw()},2000)}
+function stopLive(){if(liveT){clearInterval(liveT);liveT=null}}
+
+/* ---------- actions ---------- */
+let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2800)}
+const ACT={
+ toast:el=>toast(el.dataset.msg),
+ logout:()=>{S.persona='out';S.signupStep=1;go('login')},
+ more:()=>{S.more=!S.more;render()},
+ signupNext:()=>{S.signupStep++;render()},
+ signupDone:()=>{S.persona='priya';S.signupStep=1;go('c-devices');toast('Welcome to Argus')},
+ histDev:el=>{S.histDev=el.dataset.id;render()},
+ night:el=>{S.night=Math.max(0,Math.min(13,S.night+ +el.dataset.dir));render()},
+ claimTab:el=>{S.claimTab=el.dataset.t;S.scanState='idle';render()},
+ scan:()=>{S.scanState='on';render();setTimeout(()=>{if(S.screen==='c-claim'&&S.scanState==='on'){S.scanState='idle';S.claimStep=2;render();toast('Sticker read: ARG-24A0031')}},2200)},
+ claimBack:()=>{S.claimStep=1;render()},
+ invite:()=>{S.invite=!S.invite;S.newLink=null;render()},
+ teamInvite:()=>{S.teamInvite=!S.teamInvite;S.newLink=null;render()},
+ closeLink:()=>{S.newLink=null;render()},
+ forgot:()=>{S.forgot=!S.forgot;render()},
+ cancelTeamInvite:el=>{const t=TEAM_INVITES.splice(+el.dataset.i,1)[0];render();toast('Invite for '+t.name+' cancelled. The link no longer works.')},
+ copyLink:el=>{const u=el.dataset.url;const done=()=>toast('Link copied. Paste it into WhatsApp, SMS or email.');
+   try{navigator.clipboard.writeText(u).then(done,()=>{const i=$('#inv-url');if(i){i.select()}toast('Select the link and copy it')})}catch(e){toast('Select the link and copy it')}},
+ acceptInvite:()=>{const staff=S.acceptKind==='staff';S.pendingInvite=null;if(staff){S.persona='devam';go('a-dash');toast('You joined the Argus team as Support')}else{if(!P()||P().kind!=='customer')S.persona='rohan';go('c-devices');toast("Mom's bedroom added to your devices")}},
+ logoutKeepInvite:()=>{S.persona='out';S.pendingInvite=S.acceptKind;render()},
+ editShare:el=>{const i=+el.dataset.i;if(S.editShare===i){const s=SHARES[S.dev][i];s.perms=[...document.querySelectorAll(`input[name="sh-${i}"]:checked`)].map(x=>x.value);toast('Access updated for '+s.name);S.editShare=null}else S.editShare=i;render()},
+ removeShare:el=>{const s=SHARES[S.dev].splice(+el.dataset.i,1)[0];S.editShare=null;render();toast(s.status==='Joined'?s.name+' no longer has access':'Invite cancelled. The link no longer works.')},
+ alertTab:el=>{S.alertTab=el.dataset.t;render()},
+ themeSw:()=>setTheme(S.theme==='dark'?'light':'dark'),
+ cmd:el=>{S.pendingCmd=el.dataset.c;render()},
+ cmdCancel:()=>{S.pendingCmd=null;render()},
+ cmdSend:()=>{const d=dev(S.dev),c=S.pendingCmd,entry={c,by:P().name,t:'3 Nov, now',s:d.online?'Sent':'Queued',fresh:true};CMDLOG[d.id].unshift(entry);S.pendingCmd=null;render();toast(d.online?c+' sent to '+d.id:c+' queued until the device is back online');
+   if(d.online) setTimeout(()=>{entry.s='Done';if(S.screen==='a-device')render();toast(d.id+' finished '+c)},2000)},
+ usbRead:()=>{S.reg.reading=true;render();setTimeout(()=>{Object.assign(S.reg,{reading:false,step:2,mac:'34:85:18:A1:18:'+['1A','2F','3C','47'][Math.floor(Math.random()*4)],chip:'ESP32-S3'});if(S.screen==='a-register')render()},1800)},
+ regReset:()=>{S.reg={step:1,reading:false,mac:'',chip:'',serial:'',code:''};render()},
+ newRollout:()=>{S.newRollout=!S.newRollout;render()},
+ rolePerm:el=>{const r=el.dataset.r,p=el.dataset.p,set=new Set(ROLES[r]);el.checked?set.add(p):set.delete(p);ROLES[r]=[...set];toast(`${r}: ${p} ${el.checked?'on':'off'}`);render()},
+ teamRole:el=>{TEAM[+el.dataset.i].role=el.value;toast(TEAM[+el.dataset.i].name+' is now '+el.value)},
+};
+const SUBMIT={
+ login:()=>{if(S.pendingInvite){S.persona=S.pendingInvite==='staff'?'kiran':'rohan';go('accept');return}if(S.persona==='out'||!P())S.persona='priya';go(home())},
+ signup1:()=>{if(S.pendingInvite){S.persona=S.pendingInvite==='staff'?'kiran':'rohan';S.signupStep=1;go('accept');return}S.signupStep=2;render()},
+ claimType:()=>{S.claimStep=2;render();toast('Found ARG-24A0031')},
+ claimDone:()=>{S.claimStep=1;S.scanState='idle';go('c-devices');toast('Device added. Live values appear once it connects.')},
+ inviteSend:()=>{const n=$('#iv-name').value.trim()||'Family member';const perms=[...document.querySelectorAll('input[name="iv-perm"]:checked')].map(x=>x.value);
+   const url='https://app.argus.example/invite/'+Math.random().toString(36).slice(2,12);
+   SHARES[S.dev].push({name:n,phone:'',perms,status:'Pending',expires:'10 Nov',url});S.invite=false;S.newLink={name:n,url};render();toast('Invite link created')},
+ teamInviteSend:()=>{const n=$('#ti-name').value.trim()||'Team member',role=$('#ti-role').value;const url='https://app.argus.example/invite/'+Math.random().toString(36).slice(2,12);
+   TEAM_INVITES.unshift({name:n,role,expires:'10 Nov',url});S.teamInvite=false;S.newLink={name:n,url};render();toast('Invite link created')},
+ saved:()=>toast('Saved'),
+ regSave:()=>{const n=33+DEVICES.filter(d=>d.reg==='3 Nov 2026').length;const serial='ARG-24A00'+n;const ch='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let code='';for(let i=0;i<9;i++){code+=ch[Math.floor(Math.random()*ch.length)];if(i===2||i===5)code+='-'}
+   Object.assign(S.reg,{step:3,serial,code});DEVICES.push({id:serial,name:'—',room:'—',owner:null,online:false,fw:'1.4.2',chip:S.reg.chip,mac:S.reg.mac,seen:'Never',hr:null,br:null,presence:'—',move:0,stage:'—',rssi:null,reg:'3 Nov 2026',ip:'—',up:'—'});
+   AUDIT.unshift(['3 Nov, now',P().name,'device.register',serial,'MAC '+S.reg.mac+' · '+S.reg.chip]);render();toast('Registered '+serial)},
+ rollout:()=>{const v=$('#ro-v').value;ROLLOUTS.unshift({id:'R-08',v,target:$('#ro-p').value+'% of devices',by:P().name,started:'3 Nov, now',done:0,dl:3,pending:39,failed:0,state:'Running'});S.newRollout=false;render();toast('Rollout of '+v+' started')},
+ platformSave:()=>{PLATFORM.mergeGap=+$('#ps-gap').value;PLATFORM.minSession=+$('#ps-min').value;PLATFORM.cutoff=$('#ps-cut').value;render();toast('Sleep rules saved')},
+ fwUpload:()=>{const v=$('#fw-v').value.trim();if(!v){toast('Enter a version number, for example 1.4.4');return}FIRMWARE.unshift({v,ch:$('#fw-ch').value,date:'3 Nov 2026',size:'1.25 MB',sha:'—',devices:0,notes:$('#fw-n').value||'—'});render();toast('Uploaded '+v)},
+};
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-go]');if(g&&!e.target.closest('[data-act]')){e.preventDefault();go(g.dataset.go,g);return}
+  const a=e.target.closest('[data-act]');if(a&&ACT[a.dataset.act]&&a.tagName!=='SELECT'&&a.tagName!=='INPUT'){ACT[a.dataset.act](a)}
+});
+document.addEventListener('change',e=>{if(e.target.id==='s-cc'){const c=$('#s-country');if(c)c.value=COUNTRY_BY_CODE[e.target.value]}
+  const a=e.target.closest('[data-act]');if(!a)return;
+  if(a.dataset.act==='rolePerm'||a.dataset.act==='teamRole'||a.dataset.act==='themeSw')ACT[a.dataset.act](a);
+  if(a.dataset.act==='devSt'){S.devFilter.st=a.value;render()}
+  if(a.dataset.act==='auditA'){S.auditA=a.value;render()}
+  if(a.dataset.act==='custCountry'){S.custCountry=a.value;render()}
+  if(a.dataset.act==='custTz'){S.custTz=a.value;render()}});
+document.addEventListener('input',e=>{const a=e.target;const k=a.dataset&&a.dataset.act;if(!k)return;
+  const keep=()=>{render();const n=document.getElementById(a.id);if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length)}};
+  if(k==='devQ'){S.devFilter.q=a.value;keep()} if(k==='custQ'){S.custQ=a.value;keep()} if(k==='auditQ'){S.auditQ=a.value;keep()}});
+document.addEventListener('submit',e=>{e.preventDefault();const f=e.target.dataset.submit;if(SUBMIT[f])SUBMIT[f]()});
+
+function setTheme(t){S.theme=t;document.documentElement.setAttribute('data-theme',t);$('#themebtn').innerHTML=ic(t==='dark'?'sun':'moon');try{localStorage.setItem('argus-theme',t)}catch(e){}if(S.screen==='c-profile')render();else{const b=$('#brand');b.innerHTML=LOGO(26)+' Argus'}}
+$('#persona').addEventListener('change',e=>{const v=e.target.value;if(v.startsWith('inv-')){S.persona='out';S.acceptKind=S.pendingInvite=v.slice(4);go('accept');return}S.persona=v;S.reg.step=1;go(v==='out'?'login':home())});
+$('#phbtn').innerHTML=ic('tag');
+$('#phbtn').addEventListener('click',()=>{S.ph=!S.ph;document.body.classList.toggle('noph',!S.ph);toast(S.ph?'Placeholder tags shown':'Placeholder tags hidden')});
+$('#themebtn').addEventListener('click',()=>setTheme(S.theme==='dark'?'light':'dark'));
+
+/* boot */
+(function(){let t='dark';try{t=localStorage.getItem('argus-theme')||'dark'}catch(e){}setTheme(t);$('#brand').innerHTML=LOGO(26)+' Argus';
+  const h=(location.hash||'').slice(1);
+  if(h){if(h.startsWith('a-')){S.persona='devam'}else if(h==='login'||h==='signup'||h==='accept'){S.persona='out';if(h==='accept')S.pendingInvite='family'}
+    if(SCREENS[h]){S.screen=h}}
+  if(S.persona==='out'&&S.screen!=='signup'&&S.screen!=='accept')S.screen='login';
+  render()})();
+</script>
