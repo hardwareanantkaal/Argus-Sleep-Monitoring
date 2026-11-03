@@ -10,6 +10,9 @@ This is the data the Argus device (ESP32 + DFRobot C1001, sleep mode) sends, and
   - `<d>` = MAC as 12 lowercase hex characters
   - QR payload `ARG1:<12-char code>`
 - **Source of truth:** `docs/API.md` wins wherever it differs from this draft.
+- **MQTT login:**
+  - username = clientId = MAC (12 lowercase hex characters).
+  - The password is ignored, but it **must not be empty**: the broker (go-auth) refuses empty passwords before the check runs. Send any dummy string, e.g. `"x"`.
 
 ---
 

@@ -1,0 +1,96 @@
+# Argus PRODUCTION stack, for the shared Contabo VPS (water tank + magicoutline run there too).
+# Rules (same as the water project):
+#   * This stack NEVER binds 80/443. The host Nginx + certbot owns them and
+#     proxies the Argus domain to 127.0.0.1:${GATEWAY_PORT}.
+#   * Only the device MQTT TLS port is public. Postgres, backend, web and
+#     plain MQTT stay on the internal Docker network.
+# Run from /opt/argus:
+#   docker compose -f docker-compose.prod.yml up -d --build
+name: argus-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: prod
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      BACKEND_PORT: 3100
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MIGRATIONS_DIR: /app/database/migrations
+      MQTT_URL: mqtt://mosquitto:1883
+      TRUST_PROXY: 2            # host Nginx + gateway container
+      OTA_DIR: /srv/ota
+    volumes:
+      - ota_files:/srv/ota
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3101
+      HOSTNAME: 0.0.0.0
+      BACKEND_URL: http://backend:3100
+    networks: [internal]
+    depends_on: [backend]
+
+  # Small Nginx in front of backend + web: one local port for the host Nginx.
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./deploy/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8090}:80"
+    networks: [internal]
+    depends_on: [backend, web]
+
+  # Start this only AFTER the TLS certificate exists (see DEPLOY.md), otherwise
+  # Mosquitto restart-loops on the missing cert files.
+  mosquitto:
+    image: iegomez/mosquitto-go-auth:3.0.0-mosquitto_2.0.18
+    restart: unless-stopped
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro
+      - ./deploy/certs/mosquitto:/mosquitto/certs:ro
+      - mosquitto_data:/var/lib/mosquitto
+    command: ["/usr/sbin/mosquitto", "-c", "/etc/mosquitto/mosquitto.conf"]
+    ports:
+      - "${MQTT_TLS_PORT:-8884}:8883"          # devices, TLS, public
+      - "127.0.0.1:${MQTT_LOCAL_PORT:-1886}:1883" # plain, this server only (debugging)
+    networks: [internal]
+    depends_on: [backend]
+
+networks:
+  internal:
+
+volumes:
+  pgdata:
+  ota_files:
+  mosquitto_data:
