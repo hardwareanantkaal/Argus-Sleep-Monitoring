@@ -1,0 +1,25 @@
+/* Argus theme: the ONLY place for brand colours and fonts.
+   The owner will supply the final brand; change the values here and nothing else.
+   Dark night palette is the default; the light palette applies when data-theme="light". */
+:root{
+  --bg:#0a0f1f; --panel:#111a2e; --panel-2:#18233d; --line:#25314f; --ink:#e7ebf6; --muted:#8c97b6;
+  --accent:#93a8ff; --accent-ink:#0a0f1f; --accent-soft:rgba(147,168,255,.14);
+  --live:#4fd6bd; --live-soft:rgba(79,214,189,.14);
+  --ok:#4cd38a; --ok-soft:rgba(76,211,138,.14); --warn:#f2b45c; --warn-soft:rgba(242,180,92,.15); --bad:#ff7a7a; --bad-soft:rgba(255,122,122,.15);
+  --st-deep:#5468e0; --st-light:#93a8ff; --st-awake:#f2b45c;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --display:var(--font-display),"Segoe UI",system-ui,sans-serif;
+  --body:var(--font-body),"Segoe UI",system-ui,sans-serif;
+  --mono:var(--font-mono),ui-monospace,Menlo,Consolas,monospace;
+  --bar:0px;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#f2f4fb; --panel:#ffffff; --panel-2:#eaeef8; --line:#d9dfee; --ink:#121831; --muted:#58628a;
+  --accent:#3b52d1; --accent-ink:#ffffff; --accent-soft:rgba(59,82,209,.1);
+  --live:#0b937c; --live-soft:rgba(11,147,124,.1);
+  --ok:#17834c; --ok-soft:rgba(23,131,76,.1); --warn:#a35f00; --warn-soft:rgba(163,95,0,.1); --bad:#c8352d; --bad-soft:rgba(200,53,45,.1);
+  --st-deep:#3346b8; --st-light:#8193ee; --st-awake:#e09a35;
+  --shadow:0 10px 30px rgba(20,30,70,.12);
+  color-scheme:light;
+}
