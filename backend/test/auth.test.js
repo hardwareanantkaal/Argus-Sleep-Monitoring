@@ -5,7 +5,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const path = require('node:path');
 const jwt = require('jsonwebtoken');
-const { db, Client, phone, registered } = require('./helpers');
+const { db, Client, phone, registered, insertDevice } = require('./helpers');
 
 const run = promisify(execFile);
 const JWT_SECRET = process.env.TEST_JWT_SECRET || 'dev-only-jwt-secret-change-me';
@@ -174,14 +174,23 @@ test('a disabled user is blocked at once', async () => {
   assert.equal((await new Client().post('/auth/login', { phone: p, password })).body.error.code, 'USER_DISABLED');
 });
 
-test('notification prefs: defaults, validation, no SMS in v1', async () => {
-  const { c } = await registered();
+test('alert prefs: quiet hours and per-device mutes (in-app only)', async () => {
+  const { c, user } = await registered();
   assert.deepEqual((await c.get('/me/notification-prefs')).body,
-    { pushEnabled: true, smsEnabled: false, quietEnabled: false, quietFrom: null, quietTo: null });
+    { quietEnabled: false, quietFrom: null, quietTo: null, mutedDeviceIds: [] });
   assert.equal((await c.patch('/me/notification-prefs', { quietEnabled: true })).status, 400);
-  assert.equal((await c.patch('/me/notification-prefs', { smsEnabled: true })).body.error.code, 'SMS_NOT_ENABLED');
+  assert.equal((await c.patch('/me/notification-prefs', { smsEnabled: true })).status, 400, 'no SMS switch any more');
   const ok = await c.patch('/me/notification-prefs', { quietEnabled: true, quietFrom: '22:00', quietTo: '07:00' });
   assert.deepEqual([ok.status, ok.body.quietFrom, ok.body.quietTo], [200, '22:00', '07:00']);
+
+  const mine = await insertDevice({ ownerId: user.id });
+  const notMine = await insertDevice();
+  const denied = await c.patch('/me/notification-prefs', { mutedDeviceIds: [notMine.id] });
+  assert.equal(denied.status, 404, 'cannot mute a device you cannot see');
+  const muted = await c.patch('/me/notification-prefs', { mutedDeviceIds: [mine.id, mine.id] });
+  assert.deepEqual([muted.status, muted.body.mutedDeviceIds, muted.body.quietEnabled], [200, [mine.id], true]);
+  const cleared = await c.patch('/me/notification-prefs', { mutedDeviceIds: [] });
+  assert.deepEqual(cleared.body.mutedDeviceIds, []);
 });
 
 test('push subscriptions answer 501 in v1 (alerts are in-app only)', async () => {

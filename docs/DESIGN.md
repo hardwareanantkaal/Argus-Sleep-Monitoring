@@ -47,7 +47,7 @@ erDiagram
   devices ||--o{ ota_rollout_devices : ""
 ```
 
-There are 29 tables and 3 views, grouped below. The SQL has the full column list, with a comment on each column.
+There are 30 tables and 3 views, grouped below. The SQL has the full column list, with a comment on each column.
 
 ## 3. People and permissions
 
@@ -58,8 +58,8 @@ There are 29 tables and 3 views, grouped below. The SQL has the full column list
 | `staff_role_permissions` | Which staff permissions each role has | The Team → Roles table in the mockup. |
 | `permissions` | The 16 permission codes (11 staff, 5 device), e.g. `history.view`, `firmware.rollout` | One list. Each code is either `staff` or `device`, and the database refuses to mix them up. |
 | `device_shares` + `device_share_permissions` | Which family member can do what on which sensor | The Share access screen (one switch per person). |
-| `device_invites`, `staff_invites` | Pending SMS invites | You can invite someone before they have an account. They join when they sign up with that phone number. |
-| `refresh_tokens`, `otp_codes`, `push_tokens`, `user_notification_prefs` | Sessions, SMS codes, where to send push notifications, and the "How to reach me" settings | Same as Water Tank, plus the alert preferences. |
+| `device_invites`, `staff_invites` | Pending invite **links** (migration 002: no phone; a `label` like "Rohan (son)" instead) | Link-only (owner, 3 Nov): whoever opens the link and is logged in accepts it, once. Works before the person has an account. |
+| `refresh_tokens`, `otp_codes`, `push_tokens`, `user_notification_prefs`, `user_device_alert_mutes` | Sessions, SMS codes (unused in v1), push targets (unused in v1), in-app quiet hours, and per-person muted sensors ("Show me alerts from") | Alerts are in-app only in v1 (002 dropped the push/SMS switches). A mute affects only that one person. |
 
 **How a permission is checked.** The backend asks one view, so the rules live in one place:
 
@@ -125,7 +125,7 @@ The backend does this with luxon, in each session's own time zone, so daylight-s
 | `alert_deliveries` | Who was told, by push or SMS, whether it worked, and when they read it. |
 
 - **Rules belong to the sensor.** Everyone on that sensor shares the same rules, and editing them needs `settings.edit`, as the mockup shows.
-- **How you are reached belongs to you** (`user_notification_prefs`: push, SMS, quiet hours).
+- **What you see belongs to you:** quiet hours (`user_notification_prefs`) and which sensors you've muted (`user_device_alert_mutes`). Alerts are in-app only in v1.
 - **No repeat spam.** The database allows only **one open alert per sensor per type**, so a breathing alert that stays low for an hour stays one alert.
 
 ## 7. Factory, commands, firmware, audit
@@ -144,7 +144,7 @@ The backend does this with luxon, in each session's own time zone, so daylight-s
 
 | Kept as is | Changed | Dropped | New |
 |---|---|---|---|
-| UUID keys, UTC times, `set_updated_at`, hashed secrets, refresh tokens, OTP codes, push tokens, settings sync trigger, commands, events, OTA tables, audit log, `admin_stats` view | `users`: phone + password required, Google login removed, `staff_role_id` replaces `role`. `devices`: one board (MAC column on the device), adds batch / chip / room / time zone / place / cut-off. `firmware_releases`: `channel` replaces `is_stable`. `ota_rollouts`: targets, install window, pause. `audit_log`: cannot be edited | `device_boards`, `pump_runs`, `timers`, pump enums, the tank columns in settings and state, the old `notifications` and `alert_settings` | `permissions`, `staff_roles`, `staff_role_permissions`, `device_share_permissions`, `staff_invites`, `sleep_sessions`, `app_settings`, `alert_rules`, `alerts`, `alert_deliveries`, `user_notification_prefs`, `device_log_uploads`, `fleet_stats_hourly` |
+| UUID keys, UTC times, `set_updated_at`, hashed secrets, refresh tokens, OTP codes, push tokens, settings sync trigger, commands, events, OTA tables, audit log, `admin_stats` view | `users`: phone + password required, Google login removed, `staff_role_id` replaces `role`. `devices`: one board (MAC column on the device), adds batch / chip / room / time zone / place / cut-off. `firmware_releases`: `channel` replaces `is_stable`. `ota_rollouts`: targets, install window, pause. `audit_log`: cannot be edited | `device_boards`, `pump_runs`, `timers`, pump enums, the tank columns in settings and state, the old `notifications` and `alert_settings` | `permissions`, `staff_roles`, `staff_role_permissions`, `device_share_permissions`, `staff_invites`, `user_device_alert_mutes`, `sleep_sessions`, `app_settings`, `alert_rules`, `alerts`, `alert_deliveries`, `user_notification_prefs`, `device_log_uploads`, `fleet_stats_hourly` |
 
 **Clean-up job** (runs every 6 h, as in Water Tank):
 

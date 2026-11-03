@@ -71,37 +71,58 @@ router.delete('/', async (req, res) => {
   res.status(204).end();
 });
 
-// 2.5 / 2.6 "How to reach me". No row yet = defaults.
-const PREFS_DEFAULT = { pushEnabled: true, smsEnabled: false, quietEnabled: false, quietFrom: null, quietTo: null };
-const prefsView = (r) => (r ? {
-  pushEnabled: r.push_enabled, smsEnabled: r.sms_enabled, quietEnabled: r.quiet_enabled,
-  quietFrom: r.quiet_from?.slice(0, 5) ?? null, quietTo: r.quiet_to?.slice(0, 5) ?? null,
-} : PREFS_DEFAULT);
+// 2.5 / 2.6 In-app alert preferences: quiet hours + muted sensors
+// ("Show me alerts from"). Alerts are in-app only in v1. No row = defaults.
+async function prefsView(userId, q = db) {
+  const r = await q.query('SELECT * FROM user_notification_prefs WHERE user_id = $1', [userId]);
+  const m = await q.query('SELECT device_id FROM user_device_alert_mutes WHERE user_id = $1 ORDER BY created_at', [userId]);
+  const p = r.rows[0];
+  return {
+    quietEnabled: p?.quiet_enabled ?? false,
+    quietFrom: p?.quiet_from?.slice(0, 5) ?? null,
+    quietTo: p?.quiet_to?.slice(0, 5) ?? null,
+    mutedDeviceIds: m.rows.map((x) => x.device_id),
+  };
+}
 
 router.get('/notification-prefs', async (req, res) => {
-  res.json(prefsView(await db.one('SELECT * FROM user_notification_prefs WHERE user_id = $1', [req.user.id])));
+  res.json(await prefsView(req.user.id));
 });
 
 const hhmm = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'Time must be HH:mm');
 router.patch('/notification-prefs', async (req, res) => {
   const body = parse(z.object({
-    pushEnabled: z.boolean().optional(), smsEnabled: z.boolean().optional(), quietEnabled: z.boolean().optional(),
-    quietFrom: hhmm.nullable().optional(), quietTo: hhmm.nullable().optional(),
+    quietEnabled: z.boolean().optional(),
+    quietFrom: hhmm.nullable().optional(),
+    quietTo: hhmm.nullable().optional(),
+    mutedDeviceIds: z.array(z.uuid()).max(200).optional(),
   }).strict(), req.body);
-  if (body.smsEnabled) throw E.invalid('SMS_NOT_ENABLED', 'SMS alerts are not available yet', 'smsEnabled');
-  const cur = prefsView(await db.one('SELECT * FROM user_notification_prefs WHERE user_id = $1', [req.user.id]));
-  const next = { ...cur, ...body };
-  if (next.quietEnabled && (!next.quietFrom || !next.quietTo)) {
-    throw E.bad('VALIDATION', 'Quiet hours need a start and end time', 'quietFrom');
-  }
-  const row = await db.one(
-    `INSERT INTO user_notification_prefs (user_id, push_enabled, sms_enabled, quiet_enabled, quiet_from, quiet_to)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (user_id) DO UPDATE SET push_enabled = $2, sms_enabled = $3, quiet_enabled = $4,
-       quiet_from = $5, quiet_to = $6
-     RETURNING *`,
-    [req.user.id, next.pushEnabled, next.smsEnabled, next.quietEnabled, next.quietFrom, next.quietTo]);
-  res.json(prefsView(row));
+  const result = await db.tx(async (c) => {
+    const next = { ...(await prefsView(req.user.id, c)), ...body };
+    if (next.quietEnabled && (!next.quietFrom || !next.quietTo)) {
+      throw E.bad('VALIDATION', 'Quiet hours need a start and end time', 'quietFrom');
+    }
+    await c.query(
+      `INSERT INTO user_notification_prefs (user_id, quiet_enabled, quiet_from, quiet_to)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id) DO UPDATE SET quiet_enabled = $2, quiet_from = $3, quiet_to = $4`,
+      [req.user.id, next.quietEnabled, next.quietFrom, next.quietTo]);
+    if (body.mutedDeviceIds) {
+      const ids = [...new Set(body.mutedDeviceIds)];
+      // Only devices this user can access (same 404 as any other device route).
+      const { rows } = await c.query(
+        'SELECT DISTINCT device_id FROM device_user_permissions WHERE user_id = $1 AND device_id = ANY($2::uuid[])',
+        [req.user.id, ids]);
+      if (rows.length !== ids.length) throw E.notFound('Device not found');
+      await c.query('DELETE FROM user_device_alert_mutes WHERE user_id = $1', [req.user.id]);
+      if (ids.length) {
+        await c.query(
+          `INSERT INTO user_device_alert_mutes (user_id, device_id) SELECT $1, unnest($2::uuid[])`, [req.user.id, ids]);
+      }
+    }
+    return prefsView(req.user.id, c);
+  });
+  res.json(result);
 });
 
 // 2.7 / 2.8 Web Push subscriptions. Alerts are in-app only in v1 (owner,

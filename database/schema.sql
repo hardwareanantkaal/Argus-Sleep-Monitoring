@@ -175,25 +175,33 @@ CREATE TABLE push_tokens (
 );
 CREATE INDEX push_tokens_user_idx ON push_tokens (user_id);
 
--- "How to reach me" on the Alerts screen. One row per user.
+-- In-app alert preferences on the Alerts screen. One row per user.
+-- (push_enabled / sms_enabled were dropped in 002: alerts are in-app only.)
 CREATE TABLE user_notification_prefs (
   user_id        UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  push_enabled   BOOLEAN NOT NULL DEFAULT true,
-  sms_enabled    BOOLEAN NOT NULL DEFAULT false,
-  quiet_enabled  BOOLEAN NOT NULL DEFAULT false,    -- in quiet hours only critical alerts are sent
+  quiet_enabled  BOOLEAN NOT NULL DEFAULT false,    -- in quiet hours only critical alerts pop up in the app
   quiet_from     TIME,                              -- user's local time
   quiet_to       TIME,
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT prefs_quiet_times CHECK (NOT quiet_enabled OR (quiet_from IS NOT NULL AND quiet_to IS NOT NULL))
 );
+COMMENT ON COLUMN user_notification_prefs.quiet_enabled IS 'in quiet hours only critical alerts pop up in the app';
 CREATE TRIGGER user_notification_prefs_updated BEFORE UPDATE ON user_notification_prefs
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Invite someone to the Argus team (SMS link). They join with this role.
+-- "Show me alerts from": one person mutes one sensor for themselves only (002).
+CREATE TABLE user_device_alert_mutes (
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_id   UUID        NOT NULL,                -- FK added after devices (below)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, device_id)
+);
+
+-- Invite someone to the Argus team. LINK-ONLY (002): no phone; whoever opens
+-- the link and is logged in joins with this role, once.
 CREATE TABLE staff_invites (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  full_name    TEXT        NOT NULL,
-  phone        TEXT        NOT NULL CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
+  label        TEXT        NOT NULL,                -- the inviter's own note, 1-60 chars
   role_id      INTEGER     NOT NULL REFERENCES staff_roles(id) ON DELETE CASCADE,
   token_hash   TEXT        NOT NULL UNIQUE,
   invited_by   UUID        REFERENCES users(id) ON DELETE SET NULL,
@@ -201,9 +209,10 @@ CREATE TABLE staff_invites (
   accepted_at  TIMESTAMPTZ,
   accepted_by  UUID        REFERENCES users(id) ON DELETE SET NULL,
   revoked_at   TIMESTAMPTZ,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT staff_invites_label_length CHECK (char_length(btrim(label)) BETWEEN 1 AND 60)
 );
-CREATE INDEX staff_invites_phone_idx ON staff_invites (phone) WHERE accepted_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX staff_invites_open_idx ON staff_invites (created_at DESC) WHERE accepted_at IS NULL AND revoked_at IS NULL;
 
 -- ---------------------------------------------------------------------
 -- 3. Firmware (before devices)
@@ -378,12 +387,11 @@ CREATE TABLE device_share_permissions (
 CREATE TRIGGER device_share_permissions_scope BEFORE INSERT OR UPDATE ON device_share_permissions
   FOR EACH ROW EXECUTE FUNCTION check_permission_scope('device');
 
--- Invite by phone; works before the person has an account
+-- Invite LINK (002: no phone). Whoever opens it and is logged in can accept once.
 CREATE TABLE device_invites (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id    UUID        NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  full_name    TEXT        NOT NULL,
-  phone        TEXT        NOT NULL CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
+  label        TEXT        NOT NULL,                -- "Rohan (son)", 1-60 chars
   permissions  TEXT[]      NOT NULL,                -- copied into device_share_permissions on accept
   token_hash   TEXT        NOT NULL UNIQUE,
   invited_by   UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -392,10 +400,12 @@ CREATE TABLE device_invites (
   accepted_by  UUID        REFERENCES users(id) ON DELETE SET NULL,
   revoked_at   TIMESTAMPTZ,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT device_invites_has_perms CHECK (cardinality(permissions) > 0)
+  CONSTRAINT device_invites_has_perms CHECK (cardinality(permissions) > 0),
+  CONSTRAINT device_invites_label_length CHECK (char_length(btrim(label)) BETWEEN 1 AND 60)
 );
-CREATE INDEX device_invites_phone_idx ON device_invites (phone) WHERE accepted_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX device_invites_device_idx ON device_invites (device_id) WHERE accepted_at IS NULL AND revoked_at IS NULL;
+ALTER TABLE user_device_alert_mutes
+  ADD FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE;
 
 -- ---------------------------------------------------------------------
 -- 6. Sleep sessions  (THE saved health record)

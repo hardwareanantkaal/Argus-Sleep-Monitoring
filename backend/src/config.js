@@ -35,7 +35,8 @@ module.exports = {
   refreshTokenTtlDays: int('REFRESH_TOKEN_TTL_DAYS', 30),
   // Secure cookies need https; on by default in production, off for http://localhost.
   cookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProd,
-  publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:3101',
+  // Invite and reset links are built from this, so production must set it.
+  publicBaseUrl: required('PUBLIC_BASE_URL', 'http://localhost:3101').replace(/\/+$/, ''),
   // Web Push for alerts: off in v1 (alerts are in-app only).
   webPushEnabled: process.env.WEB_PUSH_ENABLED === 'true',
 
