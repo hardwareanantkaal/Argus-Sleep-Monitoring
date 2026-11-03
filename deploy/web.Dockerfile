@@ -6,6 +6,11 @@ COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
 RUN mkdir -p public
+# NEXT_PUBLIC_* values are baked in at build time, so they come in as build args.
+ARG NEXT_PUBLIC_API_MODE=live
+ARG NEXT_PUBLIC_LIVE_AREAS=
+ARG BACKEND_URL=http://backend:3100
+ENV NEXT_PUBLIC_API_MODE=$NEXT_PUBLIC_API_MODE NEXT_PUBLIC_LIVE_AREAS=$NEXT_PUBLIC_LIVE_AREAS BACKEND_URL=$BACKEND_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

@@ -51,6 +51,11 @@ services:
     build:
       context: .
       dockerfile: deploy/web.Dockerfile
+      args:
+        # While the backend is still being built, screens without a real API
+        # yet use sample data: mode "mixed" + the areas that are live.
+        NEXT_PUBLIC_API_MODE: ${WEB_API_MODE:-live}
+        NEXT_PUBLIC_LIVE_AREAS: ${WEB_LIVE_AREAS:-}
     restart: unless-stopped
     environment:
       NODE_ENV: production
