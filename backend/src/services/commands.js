@@ -1,7 +1,8 @@
 // Device commands (docs/API.md §3.8, §8.8–8.10, §11 cmd / cmd/ack / logs).
 // Decision D4: an OFFLINE sensor's command waits in device_commands and is
-// sent when it reconnects. config_mode expires after 30 s (opening Wi-Fi
-// setup hours later would surprise the customer); the others after 24 h.
+// sent when it reconnects. config_mode and recalibrate expire after 30 s
+// (interactive buttons: firing hours later would surprise the customer);
+// the others after 24 h.
 //   pending -> sent -> acked | failed        (expired when its time runs out)
 const db = require('../db');
 const log = require('../logger');
@@ -9,7 +10,7 @@ const mqtt = require('./mqtt');
 const live = require('./live');
 const realtime = require('./realtime');
 
-const TTL_S = { config_mode: 30, reboot: 24 * 3600, ota_check: 24 * 3600, logs: 24 * 3600 };
+const TTL_S = { config_mode: 30, recalibrate: 30, reboot: 24 * 3600, ota_check: 24 * 3600, logs: 24 * 3600 };
 const LOG_MAX = 65536;
 
 const isOnline = (deviceId) => !!live.getStatus(deviceId)?.online;

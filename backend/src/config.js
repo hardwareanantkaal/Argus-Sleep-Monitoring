@@ -49,5 +49,12 @@ module.exports = {
   },
 
   deviceStaleS: int('DEVICE_STALE_S', 90),
+
+  // OTA: where uploaded .bin files live, how long a download link works, and
+  // the address sensors use to fetch firmware (the gateway serves /fw/).
+  otaDir: process.env.OTA_DIR || require('path').join(__dirname, '../../ota'),
+  otaTokenTtlS: int('OTA_TOKEN_TTL_S', 600),
+  otaMaxBytes: int('OTA_MAX_BYTES', 4 * 1024 * 1024),
+  fwBaseUrl: (process.env.FW_BASE_URL || process.env.PUBLIC_BASE_URL || 'http://localhost:3100').replace(/\/+$/, ''),
   commandTtlS: int('COMMAND_TTL_S', 30),
 };

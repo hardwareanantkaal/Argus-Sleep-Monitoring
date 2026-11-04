@@ -256,7 +256,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | 8.5 | PATCH | `/admin/devices/:id` | `devices.command` | `{isDisabled, disabledReason?}` → `{id, serial, isDisabled, disabledReason}`. A reason is required when disabling (`400 VALIDATION`). Disabling refuses new MQTT logins at once; an already-connected sensor loses topic access within about 60 s (the broker's ACL cache). |
 | 8.6 | POST | `/admin/devices/:id/claim-code` | `devices.register` | → `{serial, claimCode, qrPayload, qrPngBase64}`. A new code; the old one stops working. For a lost sticker or a resold device. On a device that still has an owner the code only works after unclaim (claim gives `409 ALREADY_CLAIMED`). |
 | 8.7 | POST | `/admin/devices/:id/unclaim` | `customers.edit` | `{reason}` → `204`. Same effect as 3.9 (history deleted). `409 NOT_CLAIMED` if it has no owner. |
-| 8.8 | POST | `/admin/devices/:id/commands` | `devices.command` | `{type: "reboot" \| "config_mode" \| "ota_check" \| "logs"}` → `202 {commandId, status: "sent" \| "queued"}`. Offline sensors: `config_mode` expires after 30 s, the others **wait up to 24 h** (D4) and are sent when the sensor reconnects. |
+| 8.8 | POST | `/admin/devices/:id/commands` | `devices.command` | `{type: "reboot" \| "config_mode" \| "ota_check" \| "logs" \| "recalibrate"}` → `202 {commandId, status: "sent" \| "queued"}`. Offline sensors: `config_mode` and `recalibrate` expire after 30 s, the others **wait up to 24 h** (D4) and are sent when the sensor reconnects. |
 | 8.9 | GET | `/admin/devices/:id/commands?limit&cursor` | `devices.view` | → `{items: [{id, type, requestedBy, status, error, createdAt, sentAt, ackedAt}]}` |
 | 8.10 | GET | `/admin/devices/:id/logs` | `devices.view` | → `{items: [{id, createdAt, content}]}`. The last 5 uploads from the `logs` command. |
 | 8.11 | GET | `/admin/devices/:id/events?limit&cursor` | `devices.view` | → `{items: [{id, type, detail, createdAt}], nextCursor}`, newest first. |
@@ -268,14 +268,16 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
 | 9.1 | GET | `/admin/firmware` | `firmware.view` | → `{items: [{id, version, channel, chipModel, fileSize, sha256, notes, uploadedBy, createdAt, deviceCount}]}` |
-| 9.2 | POST | `/admin/firmware` | `firmware.upload` | multipart: `file` (.bin, max **4 MB**; the first byte must be `0xE9`), `version`, `channel`, `notes` → `201 release`. The backend computes sha256 and saves the file under `OTA_DIR`. 409 `VERSION_EXISTS`, 422 `NOT_ESP_IMAGE`. |
+| 9.2 | POST | `/admin/firmware` | `firmware.upload` | multipart: `file` (.bin, max **4 MB**; the first byte must be `0xE9`), `version` (e.g. `1.4.3` or `1.4.3-beta`), `channel` (`beta` default, or `stable`), `notes?`, `chipModel?` → `201 release`. The backend computes sha256 and writes the file atomically under `OTA_DIR`. 409 `VERSION_EXISTS`, 422 `NOT_ESP_IMAGE`, 413 `FILE_TOO_LARGE`. |
 | 9.3 | PATCH | `/admin/firmware/:id` | `firmware.upload` | `{channel?, notes?}` → release |
-| 9.4 | DELETE | `/admin/firmware/:id` | `firmware.upload` | → `204`. Refused while a rollout uses it (409). |
-| 9.5 | POST | `/admin/ota/rollouts` | `firmware.rollout` | `{releaseId, target: "all" \| "percent" \| "serials" \| "from_version", percent?, serials?[], fromVersion?, installWindow: {from: "10:00", to: "18:00"} \| null}` → `201 {rolloutId, devices: n}`. The device list is fixed now. Devices with `autoUpdate = false` are left out unless listed by serial. |
-| 9.6 | GET | `/admin/ota/rollouts` | `firmware.view` | → `{items: [{id, version, target, createdBy, createdAt, status, counts: {done, downloading, waiting, failed}}]}`. `status` is `running`, `paused`, `finished` or `cancelled`. |
+| 9.4 | DELETE | `/admin/firmware/:id` | `firmware.upload` | → `204` (the file is removed too). Refused while any rollout uses it: `409 RELEASE_IN_USE`. |
+| 9.5 | POST | `/admin/ota/rollouts` | `firmware.rollout` | `{releaseId, target: "all" \| "percent" \| "serials" \| "from_version", percent?, serials?[], fromVersion?, installWindow: {from: "10:00", to: "18:00"} \| null, notes?}` → `201 {rolloutId, devices: n}`. The device list is fixed now: disabled devices and devices already on that version are left out; devices with `autoUpdate = false` are left out unless listed by serial; a device still open in an older rollout moves to the new one (old row `skipped`). A rollout with 0 devices is `finished` at once. `422 UNKNOWN_SERIAL` lists serials that don't exist. |
+| 9.6 | GET | `/admin/ota/rollouts` | `firmware.view` | → `{items: [{id, releaseId, version, target, percent, fromVersion, installWindow, createdBy, createdAt, finishedAt, status, notes, counts: {done, downloading, waiting, failed, skipped}}]}` (newest 100). `downloading` counts devices that were sent the message or report downloading. `status` is `running`, `paused`, `finished` or `cancelled`. |
 | 9.7 | GET | `/admin/ota/rollouts/:id` | `firmware.view` | → rollout + `devices[{deviceId, serial, status, fromVersion, error, updatedAt}]` |
-| 9.8 | POST | `/admin/ota/rollouts/:id/pause` · `/resume` · `/cancel` · `/retry` | `firmware.rollout` | → `204`. Pause stops new sends; devices already updated keep the new version. Cancel marks `pending` devices as `skipped`. Retry re-sends to `failed` devices. |
-| 9.9 | GET | `/fw/:releaseId.bin?t=<token>` | device | Firmware download for OTA, outside `/api/v1`. The token is in the MQTT `ota` message and lasts 10 min. Responses include `Content-Length` and `x-MD5`. |
+| 9.8 | POST | `/admin/ota/rollouts/:id/pause` · `/resume` · `/cancel` · `/retry` | `firmware.rollout` | → `204`, or `409 ROLLOUT_STATE` when not allowed (e.g. pausing a paused one). Pause stops new sends; devices already updated keep the new version. Cancel marks `pending` devices `skipped`. Retry sets `failed` devices back to `pending` and the rollout back to `running` (also after `finished`). |
+| 9.9 | GET | `/fw/:releaseId.bin?t=<token>` | device | Firmware download for OTA, outside `/api/v1` (the gateway proxies `/fw/`). The token is in the MQTT `ota` message, is valid for one release only and lasts 10 min (`OTA_TOKEN_TTL_S`); otherwise `403`. Headers: `Content-Length`, `x-MD5` (hex), `Cache-Control: no-store`, `Content-Type: application/octet-stream`. |
+
+**When the OTA message is sent:** to each `pending` device of a `running` rollout as soon as it is online **and** its local time is inside `installWindow` (windows may cross midnight). Checked on rollout start, resume and retry, whenever a device comes online, and once a minute. A device reports `downloading`, `success` or `failed` on `ota/status`; a device that comes back with `fw ==` the new version (in `info` or `state`) also counts as `success`. The rollout becomes `finished` when no device is still pending, sent or downloading.
 
 **OTA install window:** an OTA is only sent when the device's local time is inside `installWindow`. Combined with the `tz` column, that means "daytime only, never during sleep".
 
@@ -338,7 +340,7 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 | `<p>/<d>/event` | device → | 1 | `bed_in`, `bed_out`, `struggle`, `unattended`, `reboot`, `config_mode`, `radar_fault`, `radar_ok` → `device_events`. |
 | `<p>/<d>/session` | device → | 1 | One session summary (DEVICE-DATA §4). Validated, then `INSERT … ON CONFLICT (device_id, started_at) DO NOTHING`, with `timezone` = the device's current `tz`. **The `session/ack` is always sent, even for a duplicate** (so the device can clear its flash). If the device is **unclaimed**, the session is acked and dropped (nobody owns it). If validation fails: acked with `{"sid":N,"ok":0,"err":"..."}` and logged as an event, so a bad message can't block the flash queue. |
 | `<p>/<d>/session/ack` | → device | 1 | `{"sid":128}`. The device deletes that session from flash. |
-| `<p>/<d>/cmd` | → device | 1, not retained | `{"id":812,"c":"reboot"}`. Commands: `reboot`, `config_mode`, `ota_check`, `logs`. |
+| `<p>/<d>/cmd` | → device | 1, not retained | `{"id":812,"c":"reboot"}`. Commands: `reboot`, `config_mode`, `ota_check`, `logs`, `recalibrate` (§11a). |
 | `<p>/<d>/cmd/ack` | device → | 1 | `{"id":812,"ok":1}` or `{"id":812,"ok":0,"err":"..."}` → `device_commands` + `command:status` |
 | `<p>/<d>/logs` | device → | 1 | Reply to `logs`: `{"id":812,"part":1,"of":4,"text":"..."}`, each part ≤ 3 KB (the broker limit is 4 KB). The backend joins the parts into `device_log_uploads`. The device sends `cmd/ack` after the last part. |
 | `<p>/<d>/settings/set` | → device | 1, **retained** | `{"v":4,"exit_s":300,"live_s":5,"idle_s":60,"struggle":1,"unattended":0,"unatt_min":30}` |
@@ -408,8 +410,9 @@ These are fields the old Firebase site showed. **Live only, never stored.**
 | 401 | `NOT_LOGGED_IN`, `TOKEN_EXPIRED`, `REFRESH_INVALID`, `BAD_CREDENTIALS` |
 | 403 | `FORBIDDEN` (staff permission missing), `USER_DISABLED`, `DEVICE_DISABLED`, `BAD_ORIGIN` |
 | 404 | `NOT_FOUND` (also used when you have no access to a device), `INVALID_CODE`, `INVITE_INVALID` |
-| 409 | `PHONE_TAKEN`, `ALREADY_CLAIMED`, `ALREADY_SHARED`, `ALREADY_STAFF`, `NOT_CLAIMED`, `MAC_EXISTS`, `VERSION_EXISTS`, `ROLE_EXISTS`, `ROLE_LOCKED`, `ROLE_IN_USE`, `DEVICE_IN_USE` |
-| 422 | `INVALID_TIMEZONE`, `BAD_PERMISSION`, `BAD_RULE`, `CONFIRM_MISMATCH`, `OWN_ROLE`, `LAST_OWNER`, `NOT_ESP_IMAGE`, `OWNER_CANNOT_LEAVE` |
+| 409 | `PHONE_TAKEN`, `ALREADY_CLAIMED`, `ALREADY_SHARED`, `ALREADY_STAFF`, `NOT_CLAIMED`, `RELEASE_IN_USE`, `ROLLOUT_STATE`, `MAC_EXISTS`, `VERSION_EXISTS`, `ROLE_EXISTS`, `ROLE_LOCKED`, `ROLE_IN_USE`, `DEVICE_IN_USE` |
+| 422 | `INVALID_TIMEZONE`, `BAD_PERMISSION`, `BAD_RULE`, `CONFIRM_MISMATCH`, `OWN_ROLE`, `LAST_OWNER`, `NOT_ESP_IMAGE`, `OWNER_CANNOT_LEAVE`, `UNKNOWN_SERIAL` |
+| 413 | `FILE_TOO_LARGE` (firmware upload over 4 MB) |
 | 429 | `RATE_LIMITED` (+`retryAfterS`) |
 | 501 | `NOT_ENABLED` (OTP / SMS and push subscriptions in v1) |
 

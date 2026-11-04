@@ -24,6 +24,8 @@ function createApp({ mqttConnected = () => false } = {}) {
 
   // Mosquitto go-auth hooks: private addresses only, outside /api/v1.
   app.use('/mqtt', require('./routes/mqttAuth').router);
+  // Firmware downloads for OTA (signed link from the MQTT ota message).
+  app.use('/fw', require('./routes/firmwareFiles'));
 
   const api = express.Router();
   api.use(cors({ origin: config.corsOrigins, credentials: true }));
@@ -38,6 +40,7 @@ function createApp({ mqttConnected = () => false } = {}) {
   const admin = express.Router();
   admin.use(requireUser);
   admin.use(require('./routes/admin/devices'));
+  admin.use(require('./routes/admin/firmware'));
   api.use('/admin', admin);
 
   api.use((req, res) => {

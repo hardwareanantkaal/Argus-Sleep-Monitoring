@@ -39,7 +39,7 @@ CREATE TYPE event_type       AS ENUM ('online', 'offline', 'reboot', 'config_mod
                                       'ota_started', 'ota_success', 'ota_failed',
                                       'claimed', 'unclaimed', 'disabled', 'enabled');
 CREATE TYPE event_severity   AS ENUM ('info', 'warning', 'critical');
-CREATE TYPE command_type     AS ENUM ('reboot', 'config_mode', 'ota_check', 'logs');
+CREATE TYPE command_type     AS ENUM ('reboot', 'config_mode', 'ota_check', 'logs', 'recalibrate');  -- recalibrate: 004
 CREATE TYPE command_status   AS ENUM ('pending', 'sent', 'acked', 'failed', 'expired', 'cancelled');
 CREATE TYPE fw_channel       AS ENUM ('beta', 'stable');
 CREATE TYPE rollout_target   AS ENUM ('all', 'percent', 'serials', 'from_version');
@@ -286,7 +286,7 @@ CREATE TABLE device_settings (
   device_id          UUID PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
   exit_s             SMALLINT     NOT NULL DEFAULT 300 CHECK (exit_s BETWEEN 30 AND 3600),
                                                     -- bed-exit timeout: a shorter exit keeps the session going
-  live_s             SMALLINT     NOT NULL DEFAULT 5  CHECK (live_s BETWEEN 1 AND 60),   -- live rate in bed
+  live_s             SMALLINT     NOT NULL DEFAULT 2  CHECK (live_s BETWEEN 1 AND 60),   -- live rate while present (004: 5 -> 2)
   idle_s             SMALLINT     NOT NULL DEFAULT 60 CHECK (idle_s BETWEEN 10 AND 600), -- live rate, empty bed
   struggle           BOOLEAN      NOT NULL DEFAULT true,   -- C1001 abnormal-struggle detection
   unattended         BOOLEAN      NOT NULL DEFAULT false,  -- C1001 unattended detection
@@ -467,6 +467,8 @@ CREATE TABLE app_settings (
   merge_gap_min    SMALLINT NOT NULL DEFAULT 30 CHECK (merge_gap_min BETWEEN 0 AND 240),
   min_session_min  SMALLINT NOT NULL DEFAULT 25 CHECK (min_session_min BETWEEN 0 AND 240),
   default_sleep_cutoff TIME NOT NULL DEFAULT '12:00',   -- copied into devices.sleep_cutoff at claim
+  -- shortest group (minutes in bed) that can be a date's main sleep; shorter = nap (003)
+  main_sleep_min   SMALLINT NOT NULL DEFAULT 180 CHECK (main_sleep_min BETWEEN 60 AND 600),
   updated_by       UUID     REFERENCES users(id) ON DELETE SET NULL,
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -487,7 +489,7 @@ CREATE TABLE alert_rules (
   high_value    NUMERIC(5,1),         -- hr_out_of_range: 110 bpm
   duration_s    INTEGER CHECK (duration_s IS NULL OR duration_s > 0),
                                       -- breath 30 s, hr 60 s, out_of_bed 600 s, no_movement 10800 s, offline 900 s
-                                      -- (live data arrives every live_s = 5 s, so 30 s = ~6 readings)
+                                      -- (live data arrives every live_s = 2 s, so 30 s = ~15 readings)
   window_from   TIME,                 -- out_of_bed: only between 23:00 ...
   window_to     TIME,                 --             ... and 06:00 (device local time)
   updated_by    UUID        REFERENCES users(id) ON DELETE SET NULL,

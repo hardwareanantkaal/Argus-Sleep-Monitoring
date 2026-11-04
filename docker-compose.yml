@@ -35,12 +35,15 @@ services:
       MQTT_URL: mqtt://mosquitto:1883
       MQTT_BACKEND_USERNAME: ${MQTT_BACKEND_USERNAME:-argus-backend}
       MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:-dev-only-mqtt-password}
+      OTA_DIR: /srv/ota
+      FW_BASE_URL: http://localhost:3100
     ports:
       - "127.0.0.1:3100:3100"
     volumes:
       - ./backend/src:/app/backend/src
       - ./backend/scripts:/app/backend/scripts
       - ./database/migrations:/app/database/migrations:ro
+      - otadata:/srv/ota
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,3 +64,4 @@ services:
 volumes:
   pgdata:
   mqttdata:
+  otadata:

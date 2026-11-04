@@ -10,7 +10,8 @@
 //    group by the device's cut-off in the session's own time zone -> the
 //    longest group on a date is the main sleep, the others are naps.
 //    Owner decision (4 Nov): a date with ONLY naps has NO main sleep. A group
-//    counts as a main sleep only if it is at least MAIN_SLEEP_MIN in bed.
+//    counts as a main sleep only if it is at least app_settings.main_sleep_min
+//    in bed (default 180, admin-editable on the Sleep rules screen).
 const { DateTime } = require('luxon');
 const db = require('../db');
 const log = require('../logger');
@@ -96,12 +97,10 @@ function start() {
 
 // ---- 2. nights ---------------------------------------------------------
 const minutes = (a, b) => (new Date(b) - new Date(a)) / 60000;
-// Shortest group that can be a main sleep (in bed, minutes). Shorter = nap.
-const MAIN_SLEEP_MIN = 180;
 
 async function rules(deviceId) {
   return db.one(
-    `SELECT a.merge_gap_min, a.min_session_min, d.sleep_cutoff, d.timezone, d.place
+    `SELECT a.merge_gap_min, a.min_session_min, a.main_sleep_min, d.sleep_cutoff, d.timezone, d.place
        FROM app_settings a, devices d WHERE a.id = 1 AND d.id = $1`, [deviceId]);
 }
 
@@ -216,7 +215,7 @@ async function nights(deviceId, fromDate, toDate) {
   const out = [];
   for (const [sleepDate, groups] of byDate) {
     groups.sort((a, b) => minutes(b.start, b.end) - minutes(a.start, a.end));
-    const main = groups[0].inBedMin >= MAIN_SLEEP_MIN ? groups[0] : null;
+    const main = groups[0].inBedMin >= r.main_sleep_min ? groups[0] : null;
     const naps = (main ? groups.slice(1) : groups).sort((a, b) => new Date(a.start) - new Date(b.start));
     out.push({ sleepDate, main, naps });
   }
@@ -283,6 +282,6 @@ async function lastNight(deviceId) {
 }
 
 module.exports = {
-  MAIN_SLEEP_MIN, start, onSession, validate, nights, nightCard, nightDetail, averages, localToday, lastNight, rules,
+  start, onSession, validate, nights, nightCard, nightDetail, averages, localToday, lastNight, rules,
   _internal: { sleepDateOf, mergeGroups, summarize },
 };

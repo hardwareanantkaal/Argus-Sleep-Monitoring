@@ -131,3 +131,23 @@ test('stale sweep marks a silent sensor offline', async () => {
   await live.sweep(Date.now() + 10 * 60_000);
   assert.equal((await db.query('SELECT is_online FROM device_state WHERE device_id = $1', [d.id])).rows[0].is_online, false);
 });
+
+test('device events (bed_in, bed_out, reboot, struggle) are stored', async () => {
+  const { user } = await registered();
+  const d = await insertDevice({ ownerId: user.id });
+  const dev = await sensor(d.mac);
+  const ts = Math.floor(Date.now() / 1000) - 60;
+  await dev.publishAsync(`argus/${d.mac}/event`, JSON.stringify({ t: 'bed_in', ts }), { qos: 1 });
+  await dev.publishAsync(`argus/${d.mac}/event`, JSON.stringify({ t: 'struggle', ts }), { qos: 1 });
+  await dev.publishAsync(`argus/${d.mac}/event`, JSON.stringify({ t: 'reboot', reason: 'power' }), { qos: 1 });
+  await dev.publishAsync(`argus/${d.mac}/event`, JSON.stringify({ t: 'made_up' }), { qos: 1 });
+  await dev.publishAsync(`argus/${d.mac}/info`, JSON.stringify({ fw: '2.0.0', radar: 'C1001 v?' }), { qos: 1 });
+  await sleep(600);
+  const { rows } = await db.query(
+    "SELECT type, severity, message, extract(epoch FROM occurred_at)::int AS at FROM device_events WHERE device_id = $1 AND type NOT IN ('online','offline') ORDER BY id", [d.id]);
+  assert.deepEqual(rows.map((r) => [r.type, r.severity]), [['bed_in', 'info'], ['struggle', 'warning'], ['reboot', 'info']]);
+  assert.equal(rows[0].at, ts, 'device timestamp kept');
+  assert.equal(rows[2].message, 'reason: power');
+  assert.equal((await db.query("SELECT radar_ok FROM device_state WHERE device_id = $1", [d.id])).rows[0].radar_ok, null,
+    'a radar name string is not a fault');
+});

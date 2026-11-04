@@ -10,6 +10,7 @@ const sleep = require('./services/sleep');
 const deviceViews = require('./services/deviceViews');
 const settingsSync = require('./services/settingsSync');
 const commands = require('./services/commands');
+const ota = require('./services/ota');
 
 async function main() {
   if (!(await db.ping())) {
@@ -28,6 +29,7 @@ async function main() {
   sleep.start();
   settingsSync.start();
   commands.start();
+  ota.start();
   deviceViews.setLastNight(sleep.lastNight);
   server.listen(config.port, () => {
     log.info({ port: config.port }, 'argus backend listening');

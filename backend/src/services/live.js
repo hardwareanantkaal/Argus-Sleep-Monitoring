@@ -86,11 +86,18 @@ function parseJson(payload) {
 
 // Keep only the documented live keys, as numbers (DEVICE-DATA.md §2).
 const LIVE_KEYS = ['pr', 'bed', 'ss', 'hr', 'br', 'bs', 'mv', 'mr', 'dist', 'rssi'];
+// Firmware 2.0.0+ extras (API.md §11a), passed through unchanged, never stored.
+const PASS_NUM = ['seq', 'radar'];
+const PASS_OBJ = ['sess', 'cmp', 'ngt'];
 function cleanLive(s) {
   const out = {};
   for (const k of LIVE_KEYS) {
     const n = Number(s[k]);
     out[k] = s[k] === undefined || s[k] === null || !Number.isFinite(n) ? null : n;
+  }
+  for (const k of PASS_NUM) if (typeof s[k] === 'number' && Number.isFinite(s[k])) out[k] = s[k];
+  for (const k of PASS_OBJ) {
+    if (s[k] && typeof s[k] === 'object' && !Array.isArray(s[k]) && JSON.stringify(s[k]).length <= 1000) out[k] = s[k];
   }
   return out;
 }
@@ -116,9 +123,12 @@ async function onInfo(mac, payload, packet) {
   // backend restart): it says nothing about whether the device is online.
   // Only the retained status message decides that.
   if (!packet?.retain) await seen(mac, d);
-  const radarOk = info.radar === undefined ? null : Number(info.radar) === 1;
+  // `radar` may be a health flag (1/0, true/false) or just the module name and
+  // version ("C1001 v?", DEVICE-DATA §3a). Only a flag says anything about health.
+  const radarOk = typeof info.radar === 'number' || typeof info.radar === 'boolean' ? !!info.radar : null;
   const prev = await db.one('SELECT radar_ok FROM device_state WHERE device_id = $1', [d.deviceId]);
   d.fw = typeof info.fw === 'string' ? info.fw.slice(0, 40) : d.fw;
+  if (typeof info.fw === 'string') firmwareListeners.forEach((fn) => Promise.resolve().then(() => fn(d, d.fw)).catch((err) => log.error({ err }, 'firmware listener failed')));
   await db.query(
     `UPDATE device_state SET fw_version = COALESCE($2, fw_version), ip = COALESCE($3::inet, ip),
             wifi_ssid = COALESCE($4, wifi_ssid), radar_ok = COALESCE($5, radar_ok),
@@ -141,6 +151,7 @@ async function onState(mac, payload) {
   d.live = { ...live, at: d.lastSeenAt };
   const fwChanged = typeof s.fw === 'string' && s.fw !== d.fw;
   if (typeof s.fw === 'string') d.fw = s.fw.slice(0, 40);
+  if (fwChanged) firmwareListeners.forEach((fn) => Promise.resolve().then(() => fn(d, d.fw)).catch((err) => log.error({ err }, 'firmware listener failed')));
   d.rssi = live.rssi;
   d.uptimeS = Number.isFinite(Number(s.up)) ? Number(s.up) : d.uptimeS;
   realtime.emitLive(d.deviceId, { deviceId: d.deviceId, serial: d.serial, ...d.live });
@@ -157,6 +168,31 @@ async function onState(mac, payload) {
   }
 }
 
+// event: {"t":"bed_in","ts":1762200000, ...} -> device_events (DEVICE-DATA §3).
+const EVENT_TYPES = new Set(['bed_in', 'bed_out', 'struggle', 'unattended', 'reboot', 'config_mode', 'radar_fault', 'radar_ok']);
+const WARNING_EVENTS = new Set(['struggle', 'unattended', 'radar_fault']);
+async function onEvent(mac, payload) {
+  const d = await entry(mac);
+  const m = parseJson(payload);
+  if (!d || !m) return;
+  await seen(mac, d);
+  if (!EVENT_TYPES.has(m.t)) {
+    log.debug({ mac, t: m.t }, 'unknown device event type ignored');
+    return;
+  }
+  // Device time if it looks synced (after 2020, not in the future), else now.
+  const ts = Number.isInteger(m.ts) && m.ts > 1_600_000_000 && m.ts < Date.now() / 1000 + 3600 ? new Date(m.ts * 1000) : new Date();
+  const message = m.t === 'reboot' && typeof m.reason === 'string' ? `reason: ${m.reason.slice(0, 60)}` : null;
+  const { t, ts: _ts, ...extra } = m;
+  await db.query(
+    'INSERT INTO device_events (device_id, type, severity, occurred_at, message, data) VALUES ($1, $2, $3, $4, $5, $6)',
+    [d.deviceId, t, WARNING_EVENTS.has(t) ? 'warning' : 'info', ts, message,
+      Object.keys(extra).length ? JSON.stringify(extra).slice(0, 2000) : null]);
+  eventListeners.forEach((fn) => Promise.resolve().then(() => fn(d, m)).catch((err) => log.error({ err }, 'event listener failed')));
+}
+const eventListeners = [];
+const firmwareListeners = [];
+
 // Stale sweep: online devices silent for longer than DEVICE_STALE_S.
 async function sweep(now = Date.now()) {
   for (const [mac, d] of devices) {
@@ -172,6 +208,7 @@ function start() {
   mqtt.on('status', (mac, p) => withLock(mac, () => onStatus(mac, p)));
   mqtt.on('info', (mac, p, packet) => withLock(mac, () => onInfo(mac, p, packet)));
   mqtt.on('state', (mac, p) => withLock(mac, () => onState(mac, p)));
+  mqtt.on('event', (mac, p) => withLock(mac, () => onEvent(mac, p)));
   setInterval(() => sweep().catch((err) => log.error({ err }, 'stale sweep failed')), SWEEP_MS).unref();
 }
 
@@ -193,6 +230,9 @@ module.exports = {
   start, sweep, getLive, getStatus, forget, withLock, entry,
   onOnline: (fn) => onlineListeners.push(fn),
   onLive: (fn) => liveListeners.push(fn),
+  onEvent: (fn) => eventListeners.push(fn),
+  // fn(d, fw): the device reported a firmware version (info, or a change in state)
+  onFirmware: (fn) => firmwareListeners.push(fn),
   // exposed for tests
-  _handlers: { onStatus, onInfo, onState },
+  _handlers: { onStatus, onInfo, onState, onEvent },
 };
