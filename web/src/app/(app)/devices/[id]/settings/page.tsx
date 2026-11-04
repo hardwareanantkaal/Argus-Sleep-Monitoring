@@ -243,7 +243,7 @@ function Placement({ id, online, recal, onRecalibrate }: { id: string; online: b
   const on = status[id]?.online ?? online;
   const checks: [string, boolean][] = [
     ['Presence detected', lv?.pr === 1],
-    ['Holding still', !!lv && (lv.mv ?? 0) <= 1 && (lv.mr ?? 0) <= 15],
+    ['Holding still', !!lv && lv.pr === 1 && (lv.mr ?? 0) < 25],
     ['Breathing detected', (lv?.br ?? 0) > 0],
     ['Heart rate locked', (lv?.hr ?? 0) > 0],
   ];
