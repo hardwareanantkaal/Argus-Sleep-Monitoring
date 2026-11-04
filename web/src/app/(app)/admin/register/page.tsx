@@ -258,7 +258,7 @@ function Bulk({ onDone }: { onDone(): void }) {
 function Today() {
   const router = useRouter();
   const start = new Date(); start.setHours(0, 0, 0, 0);
-  const q = useApi<List<AdminDeviceRow>>(`/admin/devices${qs({ registeredFrom: start.toISOString(), limit: 100 })}`);
+  const q = useApi<List<AdminDeviceRow>>(`/admin/devices${qs({ registeredFrom: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`, limit: 100 })}`);
   const tz = browserTz();
   return (
     <div className="card"><h2 style={{ marginBottom: 12 }}>Registered today</h2>
