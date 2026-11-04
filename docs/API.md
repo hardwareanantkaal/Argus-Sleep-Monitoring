@@ -149,7 +149,7 @@ Screens: **Sleep history** and **Night detail**. All of this is computed from `s
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
 | 4.1 | GET | `/devices/:id/nights?days=14` | `history.view` | → `{device: {tz, place}, nights: [nightCard], averages}`. Newest first. `days` 1–90. Also accepts `?from=2026-10-01&to=2026-10-31` (sleep dates). |
-| 4.2 | GET | `/devices/:id/nights/:sleepDate` | `history.view` | → `nightDetail`. 404 when there's no main sleep on that date. |
+| 4.2 | GET | `/devices/:id/nights/:sleepDate` | `history.view` | → `nightDetail` (`hasMainSleep:false` for a nap-only date). 404 only when the date has no sessions at all. |
 
 **`nightCard`:**
 ```json

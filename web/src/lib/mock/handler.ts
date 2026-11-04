@@ -67,13 +67,14 @@ export function liveSnapshot(d: MDevice) {
 function card(u: MUser, d: MDevice): DeviceCard {
   const p = permsOn(u, d);
   const owner = db.users.find((x) => x.id === d.ownerId);
-  const n = p.includes('history.view') ? nightsFor(d.id, d.tz!)[0] : null;
+  // lastNight is never a nap-only day (API.md §4)
+  const n = p.includes('history.view') ? nightsFor(d.id, d.tz!).find((x) => x.hasMainSleep) : null;
   return {
     id: d.id, serial: d.serial, name: d.name || d.serial, room: d.room, tz: d.tz!, place: d.place,
     isOwner: d.ownerId === u.id, sharedBy: d.ownerId === u.id ? null : { fullName: owner?.fullName || '' },
     myPermissions: p, status: { online: d.online, lastSeenAt: d.lastSeenAt },
     live: p.includes('live.view') ? liveSnapshot(d) : undefined,
-    lastNight: n ? { sleepDate: n.sleepDate, score: n.score, totalSleepMin: n.totalSleepMin } : undefined,
+    lastNight: n ? { sleepDate: n.sleepDate, score: n.score!, totalSleepMin: n.totalSleepMin! } : undefined,
   };
 }
 function detail(u: MUser, d: MDevice): DeviceDetail {
@@ -207,17 +208,18 @@ on('DELETE', '/devices/([^/]+)/me', (m) => { const u = me(); const d = device(u,
 on('GET', '/devices/([^/]+)/nights', (m, _b, q) => {
   const u = me(); const d = device(u, m[1], 'history.view');
   const all = nightsFor(d.id, d.tz!).slice(0, Math.min(90, Number(q.get('days') || 14)));
-  const n = all.length || 1;
+  const main = all.filter((x) => x.hasMainSleep); // nap-only days are left out of averages
+  const n = main.length || 1;
   return {
     device: { tz: d.tz, place: d.place }, nights: all.map(nightCard),
-    averages: { nights: all.length, totalSleepMin: Math.round(all.reduce((a, x) => a + x.totalSleepMin, 0) / n), score: Math.round(all.reduce((a, x) => a + x.score, 0) / n),
-      hrAvg: Math.round(all.reduce((a, x) => a + x.hr.avg, 0) / n), wakeUps: Math.round((all.reduce((a, x) => a + x.wakeUps, 0) / n) * 10) / 10 },
+    averages: { nights: main.length, totalSleepMin: Math.round(main.reduce((a, x) => a + x.totalSleepMin!, 0) / n), score: Math.round(main.reduce((a, x) => a + x.score!, 0) / n),
+      hrAvg: Math.round(main.reduce((a, x) => a + x.hr!.avg, 0) / n), wakeUps: Math.round((main.reduce((a, x) => a + x.wakeUps!, 0) / n) * 10) / 10 },
   };
 });
 on('GET', '/devices/([^/]+)/nights/(\\d{4}-\\d{2}-\\d{2})', (m) => {
   const u = me(); const d = device(u, m[1], 'history.view');
   const n = nightsFor(d.id, d.tz!).find((x) => x.sleepDate === m[2]);
-  if (!n) fail(404, 'NOT_FOUND', 'No main sleep on that date');
+  if (!n) fail(404, 'NOT_FOUND', 'No sleep recorded on that date'); // a nap-only date returns hasMainSleep: false
   return n;
 });
 

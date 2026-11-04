@@ -35,7 +35,8 @@ export interface DeviceCard {
   myPermissions: DevicePerm[];
   status: { online: boolean; lastSeenAt: string | null };
   live?: LiveValues | null;
-  lastNight?: { sleepDate: string; score: number; totalSleepMin: number } | null;
+  /** never a nap-only day (API.md §4); fields typed nullable only so the UI stays defensive */
+  lastNight?: { sleepDate: string; score: number | null; totalSleepMin: number | null } | null;
 }
 
 export interface SensorSettings {
@@ -53,31 +54,37 @@ export interface DeviceDetail extends DeviceCard {
 
 export interface StageMin { deep: number; light: number; awake: number; outOfBed: number }
 
+// A date with only naps has NO main sleep (owner, 4 Nov; API.md §4): hasMainSleep false,
+// every main-sleep field null, sessionCount 0, naps still filled. Left out of averages and lastNight.
 export interface NightCard {
   sleepDate: string;
-  start: string;
-  end: string;
-  score: number;
-  totalSleepMin: number;
-  inBedMin: number;
-  stageMin: StageMin;
+  hasMainSleep: boolean;
+  start: string | null;
+  end: string | null;
+  score: number | null;
+  totalSleepMin: number | null;
+  inBedMin: number | null;
+  stageMin: StageMin | null;
   sessionCount: number;
   naps: { start: string; end: string }[];
 }
 
 export interface NightDetail extends NightCard {
-  efficiencyPct: number;
-  wakeUps: number;
-  exits: number;
-  oobMin: number;
-  sessions: { start: string; end: string }[];
+  efficiencyPct: number | null;
+  wakeUps: number | null;
+  exits: number | null;
+  oobMin: number | null;
+  sessions: { start: string; end: string }[] | null;
   epochS: number;
-  hyp: string;
-  hr: { avg: number; min: number; max: number };
-  br: { avg: number; min: number; max: number };
-  turns: number; bigMvPct: number; smallMvPct: number; apnea: number; struggles: number;
+  hyp: string | null;
+  hr: { avg: number; min: number; max: number } | null;
+  br: { avg: number; min: number; max: number } | null;
+  turns: number | null; bigMvPct: number | null; smallMvPct: number | null; apnea: number | null; struggles: number | null;
   naps: { start: string; end: string; totalSleepMin?: number; hyp?: string }[];
 }
+/** A night that has a main sleep: the main-sleep fields are present. */
+export type MainNight<T extends NightCard = NightDetail> = T & { hasMainSleep: true; start: string; end: string; score: number; totalSleepMin: number; inBedMin: number; stageMin: StageMin };
+export const isMain = <T extends NightCard>(n: T): n is MainNight<T> => n.hasMainSleep && n.start != null && n.stageMin != null;
 
 export interface NightsResponse {
   device: { tz: string; place: string | null };

@@ -46,8 +46,8 @@ export default function DevicesPage() {
                 ) : <div className="note"><Icon name="info" /><span>{canLive ? 'Waiting for the first reading…' : 'You can see sleep history for this sensor, not live values.'}</span></div>}
                 <div className="between">
                   <div className="row" style={{ gap: 10 }}>
-                    {canHist && d.lastNight ? <>
-                      <ScoreRing v={d.lastNight.score} />
+                    {canHist && d.lastNight && d.lastNight.totalSleepMin != null ? <>
+                      {d.lastNight.score != null && <ScoreRing v={d.lastNight.score} />}
                       <div className="stack" style={{ gap: 0 }}><span className="xs muted">Last night</span><b className="small">{dur(d.lastNight.totalSleepMin)} asleep</b></div>
                     </> : <span className="xs muted">{canHist ? 'No nights yet' : ''}</span>}
                   </div>

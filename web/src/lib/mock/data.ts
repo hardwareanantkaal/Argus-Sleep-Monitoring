@@ -189,6 +189,15 @@ export function nightsFor(deviceId: string, tz: string): NightDetail[] {
     const day = new Date(Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate() - 1 - i));
     const sleepDate = day.toISOString().slice(0, 10);
     const iso = (localMin: number) => new Date(day.getTime() + (localMin - off) * 60000).toISOString();
+    if (i === 3) {
+      // A nap-only day (e.g. a night away from home): no group reached 3 h in bed, so no main sleep.
+      const s = 15 * 60 + 10, l = 45;
+      out.push({ sleepDate, hasMainSleep: false, start: null, end: null, score: null, totalSleepMin: null, inBedMin: null, stageMin: null, sessionCount: 0,
+        naps: [{ start: iso(s), end: iso(s + l), totalSleepMin: l - 10, hyp: genHyp(r, l / 5) }],
+        efficiencyPct: null, wakeUps: null, exits: null, oobMin: null, sessions: null, epochS: 300, hyp: null, hr: null, br: null,
+        turns: null, bigMvPct: null, smallMvPct: null, apnea: null, struggles: null });
+      continue;
+    }
     const bed = 22 * 60 + 40 + Math.floor(r() * 14) * 5;
     const len = 390 + Math.floor(r() * 18) * 5;
     let ses = [{ s: bed, e: bed + len }];
@@ -216,7 +225,7 @@ export function nightsFor(deviceId: string, tz: string): NightDetail[] {
       naps.push({ start: iso(s), end: iso(s + l), totalSleepMin: l - 10, hyp: genHyp(r, l / 5) });
     }
     out.push({
-      sleepDate, start: iso(bed), end: iso(bed + span), score, totalSleepMin: total, inBedMin: inBed,
+      sleepDate, hasMainSleep: true, start: iso(bed), end: iso(bed + span), score, totalSleepMin: total, inBedMin: inBed,
       stageMin: { deep: cnt.D * 5, light: cnt.L * 5, awake: cnt.A * 5, outOfBed: cnt.O * 5 },
       sessionCount: ses.length, naps,
       efficiencyPct: Math.round((total / span) * 100), wakeUps: wake, exits, oobMin: cnt.O * 5,
@@ -237,6 +246,6 @@ export function sampleHyp(): string {
 }
 
 export function nightCard(n: NightDetail): NightCard {
-  const { sleepDate, start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount, naps } = n;
-  return { sleepDate, start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount, naps: naps.map(({ start, end }) => ({ start, end })) };
+  const { sleepDate, hasMainSleep, start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount, naps } = n;
+  return { sleepDate, hasMainSleep, start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount, naps: naps.map(({ start, end }) => ({ start, end })) };
 }

@@ -9,9 +9,29 @@ import { Hypnogram } from '@/components/charts';
 import { Icon } from '@/components/Icon';
 import { Async, Head, Legend, Loading, PH, ScoreRing, STAGES, TzTag, useApi } from '@/components/ui';
 import { dur, minutesIn, sleepDateLabel, timeIn } from '@/lib/format';
-import type { DeviceDetail, NightDetail, NightsResponse } from '@/lib/types';
+import { isMain, type DeviceDetail, type MainNight, type NightDetail, type NightsResponse } from '@/lib/types';
 
 const mins = (a: string, b: string) => Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
+const ZERO = { avg: 0, min: 0, max: 0 };
+
+/** A main night with every detail field filled in, so the screen never trips on a stray null. */
+function full(n: MainNight) {
+  return {
+    ...n, efficiencyPct: n.efficiencyPct ?? 0, wakeUps: n.wakeUps ?? 0, exits: n.exits ?? 0, oobMin: n.oobMin ?? 0,
+    sessions: n.sessions ?? [], hyp: n.hyp ?? '', hr: n.hr ?? ZERO, br: n.br ?? ZERO, turns: n.turns ?? 0,
+    bigMvPct: n.bigMvPct ?? 0, smallMvPct: n.smallMvPct ?? 0, apnea: n.apnea ?? 0, struggles: n.struggles ?? 0,
+  };
+}
+
+/** Naps: listed and drawn, never counted in the night's totals or trends. */
+function NapCharts({ naps, tz, epochMin }: { naps: NightDetail['naps']; tz: string; epochMin: number }) {
+  return <>{naps.filter((p) => p.hyp).map((p) => (
+    <div className="card" key={`h${p.start}`}>
+      <div className="ch"><div className="t"><h2>Nap · {timeIn(p.start, tz)} → {timeIn(p.end, tz)}</h2><span className="xs muted">{p.totalSleepMin != null ? `${dur(p.totalSleepMin)} asleep · ` : ''}not counted in totals or trends</span></div><Legend /></div>
+      <div className="chartbox"><Hypnogram hyp={p.hyp!} startMin={minutesIn(p.start, tz)} epochMin={epochMin} label="Nap sleep stages" /></div>
+    </div>
+  ))}</>;
+}
 
 export default function NightPage() {
   const { id, date } = useParams<{ id: string; date: string }>();
@@ -31,14 +51,32 @@ export default function NightPage() {
   </>;
 
   return (
-    <Async q={q}>{(n) => {
+    <Async q={q}>{(raw) => {
       if (!tz) return <Loading />;
+      const devName = dev.data?.name ? dev.data.name + ' · ' : '';
+      if (!isMain(raw)) return (
+        // A date with only naps has no main sleep (API.md §4): no score, no totals.
+        <div className="wrap">
+          <Head title={<>{sleepDateLabel(raw.sleepDate)}<TzTag tz={tz} place={place} /></>} sub={`${devName}naps only`} actions={nav} back={[`/history/${id}`, 'Sleep history']} />
+          <div className="card empty"><Icon name="moon" size={30} /><h2>No main sleep this day</h2>
+            <p>The sensor only saw {raw.naps.length === 1 ? 'a nap' : `${raw.naps.length} naps`}, none of them long enough to count as a night&apos;s sleep (3 h or more in bed). Naps don&apos;t count in the averages or trends.</p></div>
+          <div className="card"><h2 style={{ marginBottom: 14 }}>Naps</h2><div className="stack" style={{ gap: 10 }}>
+            {raw.naps.map((p) => (
+              <div key={p.start} className="between"><span className="small"><span className="pill acc">Nap</span> <b>{timeIn(p.start, tz)} → {timeIn(p.end, tz)}</b></span>
+                <span className="small muted">{mins(p.start, p.end)} min{p.totalSleepMin != null ? ` · ${dur(p.totalSleepMin)} asleep` : ''}</span></div>
+            ))}
+            {!raw.naps.length && <p className="small muted">Nothing recorded.</p>}
+          </div></div>
+          <NapCharts naps={raw.naps} tz={tz} epochMin={(raw.epochS || 300) / 60} />
+        </div>
+      );
+      const n = full(raw);
       const total = n.stageMin.deep + n.stageMin.light + n.stageMin.awake + n.stageMin.outOfBed || 1;
       const verdict = n.score >= 80 ? 'A good night' : n.score >= 65 ? 'A fair night' : 'A restless night';
       return (
         <div className="wrap">
           <Head title={<>{sleepDateLabel(n.sleepDate)} night<TzTag tz={tz} place={place} /></>}
-            sub={`${dev.data?.name ? dev.data.name + ' · ' : ''}${timeIn(n.start, tz)} → ${timeIn(n.end, tz)}`}
+            sub={`${devName}${timeIn(n.start, tz)} → ${timeIn(n.end, tz)}`}
             actions={nav} back={[`/history/${id}`, 'Sleep history']} />
           <div className="card"><div className="row" style={{ gap: 24, alignItems: 'center' }}>
             <ScoreRing v={n.score} lg />
@@ -83,12 +121,7 @@ export default function NightPage() {
               </>}
             </div></div>
           </div>
-          {n.naps.filter((p) => p.hyp).map((p) => (
-            <div className="card" key={`h${p.start}`}>
-              <div className="ch"><div className="t"><h2>Nap · {timeIn(p.start, tz)} → {timeIn(p.end, tz)}</h2><span className="xs muted">{p.totalSleepMin != null ? `${dur(p.totalSleepMin)} asleep · ` : ''}not counted in the night&apos;s totals</span></div></div>
-              <div className="chartbox"><Hypnogram hyp={p.hyp!} startMin={minutesIn(p.start, tz)} epochMin={n.epochS / 60} label="Nap sleep stages" /></div>
-            </div>
-          ))}
+          <NapCharts naps={n.naps} tz={tz} epochMin={n.epochS / 60} />
           <div className="card"><h2 style={{ marginBottom: 14 }}>Body during sleep <PH /></h2><div className="g2" style={{ gap: '9px 32px' }}>
             <dl className="kv">
               <dt>Heart rate avg</dt><dd className="num">{n.hr.avg} bpm</dd>
