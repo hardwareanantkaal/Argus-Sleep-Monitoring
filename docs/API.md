@@ -353,6 +353,53 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 
 **Broker limits:** `message_size_limit 4096` (largest message: a session, under 1 KB; log parts are ≤ 3 KB), `max_keepalive 300`, `max_queued_messages 200`.
 
+
+### 11a. Extra live fields and the recalibrate command (firmware 2.0.0+, added 4 Nov 2026)
+
+These are fields the old Firebase site showed. **Live only, never stored.**
+
+- **Send rate:**
+  - `state` every **2 s** while someone is present (`live_s` default **2**)
+  - every 60 s when nobody is there
+  - immediately when `pr`, `bed` or `ss` changes
+- **Vitals:** `hr` and `br` are `0` unless the person is present AND in bed.
+- **New command `recalibrate`:** `{"id":813,"c":"recalibrate"}`.
+  - The radar resets (about 11 s).
+  - The device acks when it's done.
+  - It replaces the old "Placement check" button.
+  - Allowed in 8.8 and in the device commands list.
+- **Extra `state` fields**, passed through unchanged in `device:live`:
+  - `seq`: read counter
+  - `radar`: 1 = OK, 0 = fault
+  - `sess`: present only while a session runs
+    - `st`: stage, 0 deep / 1 light / 2 awake / 3 none
+    - `start`: Unix UTC
+    - minutes: `bed`, `slp`, `dp`, `lt`, `aw`
+    - `on`: sleep onset (min)
+    - `wk`: awakenings
+    - `tn`: turnovers
+    - `sc`: live score
+  - `cmp`: C1001 composite
+    - `dis`: disturbance 0–3
+    - `abn`: struggle, 0 none / 1 normal / 2 abnormal
+    - `rat`: quality rating 0–3
+    - `resp`, `hr`: averages
+    - `apn`: apnea events
+    - `turn`: turnovers
+    - `lg`, `mn`: large / minor movement %
+  - `ngt`: C1001 night statistics
+    - `sc`: score
+    - `slp`: sleep min
+    - `wk`: wake
+    - `sh`, `dp`: light % / deep %
+    - `oob`: out-of-bed min
+    - `ex`: bed exits
+    - `tn`: turnovers
+    - `resp`, `hr`: averages
+    - `apn`: apnea events
+- **Live hypnogram:** the browser draws it from `sess.st` over time. After the session ends, the stored `session.hyp` is used.
+- **Size:** about 450 bytes, under the 4 KB limit.
+
 ## 12. Error codes
 
 | Status | Codes |
