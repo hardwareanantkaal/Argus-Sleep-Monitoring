@@ -211,7 +211,7 @@ Screen: **Alerts** (kept for v1, C2). Rules belong to the device; how you're rea
 
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
-| 6.1 | GET | `/alerts?deviceId=&limit&cursor` | user | → `{items: [{id, deviceId, deviceName, type, severity, title, detail, value, startedAt, endedAt}]}`. Only devices where I have `alerts.receive`. Newest first. |
+| 6.1 | GET | `/alerts?deviceId=&limit&cursor` | user | → `{items: [{id, deviceId, deviceName, serial, type, severity, title, detail, value, startedAt, endedAt}], nextCursor}`. Only devices where I have `alerts.receive` and that I haven't muted. Newest first. |
 | 6.2 | GET | `/devices/:id/alert-rules` | `alerts.receive` or `settings.edit` | → `{rules: [alertRule], canEdit}` |
 | 6.3 | PUT | `/devices/:id/alert-rules` | `settings.edit` | `{rules: [alertRule]}` → the saved rules. 422 `BAD_RULE` (e.g. low ≥ high). |
 
@@ -298,8 +298,8 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
 | 9.19 | GET | `/admin/audit?q&action&actorId&targetType&targetId&from&to&limit&cursor` | `audit.view` | `action` is a prefix (`device`, `ota`, `firmware`, `share`, `customer`, `team`). → `{items: [{id, at, actorName, action, targetType, targetLabel, detail}]}`. Read-only. `from` / `to` are `YYYY-MM-DD`, inclusive, in UTC. |
-| 9.20 | GET | `/admin/platform-settings` | `platform.settings` | → `{mergeGapMin: 30, minSessionMin: 25, defaultSleepCutoff: "12:00"}` |
-| 9.21 | PATCH | `/admin/platform-settings` | `platform.settings` | same fields → saved. History regroups on the next read. The default cut-off applies only to devices claimed afterwards. |
+| 9.20 | GET | `/admin/platform-settings` | `platform.settings` | → `{mergeGapMin: 30, minSessionMin: 25, defaultSleepCutoff: "12:00", mainSleepMin: 180}`. `mainSleepMin` = the shortest group (minutes in bed) that can be a date's main sleep (60–600, migration 003). |
+| 9.21 | PATCH | `/admin/platform-settings` | `platform.settings` | any of the same fields → saved. Ranges: `mergeGapMin` / `minSessionMin` 0–240, `mainSleepMin` 60–600. History regroups on the next read. The default cut-off applies only to devices claimed afterwards. |
 
 ---
 

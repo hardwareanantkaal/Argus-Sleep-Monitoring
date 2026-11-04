@@ -21,6 +21,7 @@ const devices = new Map();
 // mac -> promise chain: messages of one device are handled one at a time.
 const locks = new Map();
 const onlineListeners = [];
+const presenceListeners = [];
 
 function withLock(mac, fn) {
   const prev = locks.get(mac) || Promise.resolve();
@@ -65,6 +66,7 @@ async function setOnline(mac, d, online, reason) {
     [d.deviceId, online ? 'online' : 'offline', reason]);
   if (!online) d.live = null;
   realtime.emitDeviceStatus(d.deviceId, statusPayload(d));
+  presenceListeners.forEach((fn) => Promise.resolve().then(() => fn(d, online)).catch((err) => log.error({ err }, 'presence listener failed')));
   log.info({ mac, online, reason }, 'device presence');
   if (online) for (const fn of onlineListeners) Promise.resolve().then(() => fn(mac, d)).catch((err) => log.error({ err }, 'online listener failed'));
 }
@@ -233,6 +235,8 @@ module.exports = {
   onEvent: (fn) => eventListeners.push(fn),
   // fn(d, fw): the device reported a firmware version (info, or a change in state)
   onFirmware: (fn) => firmwareListeners.push(fn),
+  // fn(d, online): every online/offline change
+  onPresence: (fn) => presenceListeners.push(fn),
   // exposed for tests
   _handlers: { onStatus, onInfo, onState, onEvent },
 };
