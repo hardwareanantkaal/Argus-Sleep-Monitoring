@@ -242,6 +242,7 @@ CREATE TABLE devices (
   secret_hash      TEXT,                            -- RESERVED, unused: devices log in with the MAC only (owner
                                                     -- decision C1, as Water Tank migration 003). Kept for a later secret.
   claim_code_hash  TEXT,                            -- HMAC of the 12-char sticker claim code (D2). NULL once claimed
+  claim_code_enc   BYTEA,                           -- the same code AES-256-GCM encrypted, for reprinting the sticker (006). NULL once claimed
   chip_model       TEXT        NOT NULL,            -- 'ESP32-S3' (read over USB)
   hw_model         TEXT        NOT NULL,            -- 'ARG-S1 rev B'
   batch            TEXT,                            -- 'B-2026-11-A'

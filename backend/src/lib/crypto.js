@@ -23,4 +23,20 @@ function safeEqual(a, b) {
   return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 
-module.exports = { sha256, hmac, randomToken, hashPassword, checkPassword, safeEqual };
+// Small secrets we must be able to read back (the sticker claim code).
+// AES-256-GCM, key derived from HASH_PEPPER with HKDF, so no extra env var.
+// Layout: 12-byte IV | 16-byte tag | ciphertext.
+const keyFor = (info) => Buffer.from(crypto.hkdfSync('sha256', config.hashPepper, 'argus', info, 32));
+function encrypt(text, info) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', keyFor(info), iv);
+  const body = Buffer.concat([c.update(text, 'utf8'), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), body]);
+}
+function decrypt(buf, info) {
+  const d = crypto.createDecipheriv('aes-256-gcm', keyFor(info), buf.subarray(0, 12));
+  d.setAuthTag(buf.subarray(12, 28));
+  return Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString('utf8');
+}
+
+module.exports = { sha256, hmac, randomToken, hashPassword, checkPassword, safeEqual, encrypt, decrypt };

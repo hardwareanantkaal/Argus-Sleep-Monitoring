@@ -105,7 +105,7 @@ router.post('/claim', async (req, res) => {
   const deviceId = await db.tx(async (c) => {
     const d = await findClaimable(req, code, body.serial, c, 'FOR UPDATE');
     await c.query(
-      `UPDATE devices SET owner_id = $2, claimed_at = now(), claim_code_hash = NULL,
+      `UPDATE devices SET owner_id = $2, claimed_at = now(), claim_code_hash = NULL, claim_code_enc = NULL,
               name = $3, room = $4, timezone = $5, place = $6,
               sleep_cutoff = (SELECT default_sleep_cutoff FROM app_settings WHERE id = 1)
         WHERE id = $1`,

@@ -370,7 +370,7 @@ on('GET', '/admin/devices/([^/]+)', (m): AdminDeviceDetail => {
     tz: d!.tz, place: d!.place, sleepCutoff: d!.sleepCutoff, isDisabled: d!.isDisabled, disabledReason: d!.disabledReason,
     owner: o ? { id: o.id, fullName: o.fullName, phone: o.phone } : null,
     shares: db.shares.filter((s) => s.deviceId === d!.id).map((s) => { const x = db.users.find((y) => y.id === s.userId)!; return { fullName: x.fullName, phone: x.phone }; }),
-    claimCodeActive: !!d!.claimCode, sensorSettings: d!.ownerId ? d!.sensor : null };
+    claimCodeActive: !!d!.claimCode, stickerAvailable: !!d!.claimCode && !d!.ownerId, sensorSettings: d!.ownerId ? d!.sensor : null };
 });
 on('POST', '/admin/devices', (_m, b) => {
   const u = me(); needStaff(u, 'devices.register');
@@ -399,6 +399,13 @@ on('POST', '/admin/devices/([^/]+)/claim-code', (m) => {
   d!.claimCode = newCode();
   audit(u, 'device.claim_code', 'device', d!.serial, 'New claim code; the old one stopped working');
   return fakeSticker(d!.serial, d!.claimCode);
+});
+on('GET', '/admin/devices/([^/]+)/sticker', (m) => {
+  needStaff(me(), 'devices.register');
+  const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
+  if (!d!.claimCode || d!.ownerId) fail(409, 'NO_ACTIVE_CODE', 'Device already claimed. Create a new code to print a sticker.');
+  const s = fakeSticker(d!.serial, d!.claimCode!);
+  return { serial: s.serial, claimCode: s.claimCode, qrPayload: s.qrPayload, qrPngBase64: s.qrPngBase64 };
 });
 on('POST', '/admin/devices/([^/]+)/unclaim', (m, b) => {
   const u = me(); needStaff(u, 'customers.edit');

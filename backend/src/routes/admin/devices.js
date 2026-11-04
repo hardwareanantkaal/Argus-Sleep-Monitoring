@@ -154,6 +154,7 @@ router.get('/devices/:id', requireStaff('devices.view'), async (req, res) => {
     owner: owner ? { id: owner.id, fullName: owner.full_name, phone: owner.phone, country: owner.country } : null,
     shares: shares.map((x) => ({ userId: x.id, fullName: x.full_name, phone: x.phone, permissions: x.perms.filter(Boolean) })),
     claimCodeActive: !!d.claim_code_hash,
+    stickerAvailable: !!d.claim_code_enc && !d.owner_id,
     sensorSettings: set ? { exitS: set.exit_s, liveS: set.live_s, idleS: set.idle_s, struggle: set.struggle,
       unattended: set.unattended, unattMin: set.unatt_min, version: set.version, appliedVersion: set.applied_version } : null,
   });
@@ -183,11 +184,11 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     }
     const serial = await claim.nextSerial(c);
     const { rows: [d] } = await c.query(
-      `INSERT INTO devices (serial_no, mac, mqtt_username, claim_code_hash, chip_model, hw_model, batch,
+      `INSERT INTO devices (serial_no, mac, mqtt_username, claim_code_hash, claim_code_enc, chip_model, hw_model, batch,
                             manufactured_at, fw_at_register, registered_by)
-       VALUES ($1, $2::macaddr, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, serial_no, created_at`,
+       VALUES ($1, $2::macaddr, $3, $4, $11, $5, $6, $7, $8, $9, $10) RETURNING id, serial_no, created_at`,
       [serial, body.mac, body.mac, claim.hashCode(code), body.chip, body.hwModel, body.batch || null,
-        body.manufacturedAt || null, body.fwOnBoard || null, req.user.id]);
+        body.manufacturedAt || null, body.fwOnBoard || null, req.user.id, claim.sealCode(code)]);
     await c.query('INSERT INTO device_settings (device_id) VALUES ($1)', [d.id]);
     await audit(req, { action: 'device.register', targetType: 'device', targetId: d.id, targetLabel: serial,
       detail: `MAC ${macColons(body.mac)} · ${body.chip}` }, c);
@@ -223,10 +224,24 @@ router.post('/devices/:id/claim-code', requireStaff('devices.register'), async (
   const d = await loadDevice(req.params.id);
   const code = claim.newCode();
   await db.tx(async (c) => {
-    await c.query('UPDATE devices SET claim_code_hash = $2 WHERE id = $1', [d.id, claim.hashCode(code)]);
+    await c.query('UPDATE devices SET claim_code_hash = $2, claim_code_enc = $3 WHERE id = $1', [d.id, claim.hashCode(code), claim.sealCode(code)]);
     await audit(req, { action: 'device.claim_code', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
       detail: d.owner_id ? 'issued while claimed (works only after unclaim)' : null }, c);
   });
+  res.json(await codeResponse(d.serial_no, code));
+});
+
+// 8.6b Reprint the sticker: the stored code of an unclaimed device.
+router.get('/devices/:id/sticker', requireStaff('devices.register'), async (req, res) => {
+  const d = await loadDevice(req.params.id);
+  if (!d.claim_code_enc || d.owner_id) {
+    throw E.conflict('NO_ACTIVE_CODE', d.owner_id ? 'This device is claimed; issue a new code after unclaiming' : 'No stored code: issue a new one');
+  }
+  let code;
+  try { code = claim.openCode(d.claim_code_enc); } catch {
+    throw E.conflict('NO_ACTIVE_CODE', 'The stored code cannot be read (HASH_PEPPER changed?); issue a new one');
+  }
+  await audit(req, { action: 'device.sticker.view', targetType: 'device', targetId: d.id, targetLabel: d.serial_no });
   res.json(await codeResponse(d.serial_no, code));
 });
 

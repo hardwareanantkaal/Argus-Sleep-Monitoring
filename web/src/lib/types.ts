@@ -153,6 +153,8 @@ export interface AdminDeviceDetail {
   owner: { id: string; fullName: string; phone: string } | null;
   shares: { fullName: string; phone: string }[];
   claimCodeActive: boolean;
+  /** 8.3: the current code can be printed again (GET /admin/devices/:id/sticker) */
+  stickerAvailable?: boolean;
   sensorSettings: SensorSettings | null;
 }
 export type CommandType = 'reboot' | 'config_mode' | 'ota_check' | 'logs' | 'recalibrate';

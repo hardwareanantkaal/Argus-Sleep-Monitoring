@@ -6,7 +6,7 @@
 //         nothing about the device.
 const crypto = require('crypto');
 const QRCode = require('qrcode');
-const { hmac } = require('./crypto');
+const { hmac, encrypt, decrypt } = require('./crypto');
 
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LEN = 12;
@@ -30,6 +30,9 @@ function normalizeCode(s) {
 const formatCode = (c) => c.match(/.{4}/g).join('-');
 const hashCode = (c) => hmac('claim', c);
 const qrPayload = (c) => `${QR_PREFIX}:${c}`;
+// Encrypted copy for reprinting the sticker (devices.claim_code_enc).
+const sealCode = (c) => encrypt(c, 'claim-sticker');
+const openCode = (buf) => decrypt(buf, 'claim-sticker');
 
 // "ARG1:K7P29XQM4HTR" -> "K7P29XQM4HTR", or null.
 function codeFromQr(qr) {
@@ -61,4 +64,4 @@ async function nextSerial(c, now = new Date()) {
   return `ARG-${yy}${letter}${String(n).padStart(4, '0')}`;
 }
 
-module.exports = { newCode, normalizeCode, formatCode, hashCode, qrPayload, codeFromQr, qrPng, nextSerial, QR_PREFIX };
+module.exports = { sealCode, openCode, newCode, normalizeCode, formatCode, hashCode, qrPayload, codeFromQr, qrPng, nextSerial, QR_PREFIX };

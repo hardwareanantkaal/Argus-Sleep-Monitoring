@@ -11,7 +11,7 @@ import { Icon } from '@/components/Icon';
 import { useAuth, useToast } from '@/components/Providers';
 import { RequireStaff } from '@/components/Shell';
 import { Async, ErrorBox, Head, useApi } from '@/components/ui';
-import { del, errText, patch, post } from '@/lib/api';
+import { ApiError, del, errText, get, patch, post } from '@/lib/api';
 import { ago, dateTime, day, prettyPhone, uptime } from '@/lib/format';
 import type { AdminDeviceDetail, CommandRow, CommandType, DeviceEvent, List } from '@/lib/types';
 
@@ -153,6 +153,13 @@ function Inner() {
               ) : <p className="small muted">No events yet.</p>}</Async>
             </div>
             <div className="card stack" style={{ gap: 12 }}><h2>Manage</h2>
+              {can('devices.register') && d.stickerAvailable && <div className="stack" style={{ gap: 8 }}>
+                <span className="small"><b>Print sticker</b> <span className="muted">· the current claim code, same 50 × 30 mm label as Register</span></span>
+                <button className="btn ghost" style={{ alignSelf: 'flex-start' }} onClick={async () => {
+                  try { const r = await get<StickerData>(`/admin/devices/${id}/sticker`); setSticker({ ...r, mac: d.hardware.mac }); setTimeout(() => printStickers(['stk-detail']), 50); }
+                  catch (e) { toast(e instanceof ApiError && e.code === 'NO_ACTIVE_CODE' ? 'Device already claimed. Create a new code to print a sticker.' : errText(e)); q.reload(); }
+                }}><Icon name="qr" /> Print sticker</button>
+              </div>}
               {can('devices.register') && <div className="stack" style={{ gap: 8 }}>
                 <span className="small"><b>New claim code</b> <span className="muted">· for a lost sticker or a resold sensor. The old code stops working.</span></span>
                 <button className="btn ghost" style={{ alignSelf: 'flex-start' }} onClick={async () => {
