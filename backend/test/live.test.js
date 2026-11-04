@@ -151,3 +151,19 @@ test('device events (bed_in, bed_out, reboot, struggle) are stored', async () =>
   assert.equal((await db.query("SELECT radar_ok FROM device_state WHERE device_id = $1", [d.id])).rows[0].radar_ok, null,
     'a radar name string is not a fault');
 });
+
+test('firmware 2.0.0 extra live fields pass through unchanged (never stored)', async () => {
+  const { c, user } = await registered();
+  const d = await insertDevice({ ownerId: user.id });
+  const s = keep(await socketConnect(c));
+  await ask(s, 'live:subscribe', { deviceId: d.id });
+  const dev = await sensor(d.mac);
+  const extra = { seq: 41, radar: 1, sess: { st: 1, start: 1762200000, bed: 120, slp: 100, dp: 30, lt: 60, aw: 10, on: 12, wk: 2, tn: 9, sc: 77 },
+    cmp: { dis: 1, abn: 0, rat: 2, resp: 14, hr: 61, apn: 0, turn: 9, lg: 5, mn: 20 },
+    ngt: { sc: 80, slp: 420, wk: 15, sh: 58, dp: 34, oob: 9, ex: 1, tn: 14, resp: 14, hr: 60, apn: 0 } };
+  const got = nextEvent(s, 'device:live', (p) => p.deviceId === d.id);
+  await dev.publishAsync(`argus/${d.mac}/state`, JSON.stringify({ pr: 1, bed: 1, ss: 1, hr: 60, br: 14, ...extra, bogus: { x: 1 } }), { qos: 0 });
+  const l = await got;
+  assert.deepEqual([l.seq, l.radar, l.sess, l.cmp, l.ngt], [extra.seq, extra.radar, extra.sess, extra.cmp, extra.ngt]);
+  assert.equal(l.bogus, undefined, 'only documented fields');
+});

@@ -56,7 +56,7 @@ test('sensor settings: change -> retained settings/set -> ack -> applied', async
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.settings.version, r.body.settings.sync, r.body.settings.exitS], [2, 'sending', 600]);
   const msg = await until(() => s.got['settings/set'].find((m) => m.v === 2));
-  assert.deepEqual(msg, { v: 2, exit_s: 600, live_s: 5, idle_s: 60, struggle: 1, unattended: 1, unatt_min: 30 });
+  assert.deepEqual(msg, { v: 2, exit_s: 600, live_s: 2, idle_s: 60, struggle: 1, unattended: 1, unatt_min: 30 });
 
   const synced = nextEvent(sock, 'settings:sync', (p) => p.deviceId === d.id && p.sync === 'applied');
   await s.pub('settings/ack', { v: 2 });
@@ -72,10 +72,10 @@ test('sensor settings: change -> retained settings/set -> ack -> applied', async
 
 test('sensor settings: offline change reaches the sensor when it connects', async () => {
   const { owner, d } = await ownedDevice();
-  const r = await owner.c.patch(`/devices/${d.id}/sensor-settings`, { liveS: 2 });
+  const r = await owner.c.patch(`/devices/${d.id}/sensor-settings`, { liveS: 3 });
   assert.equal(r.body.settings.sync, 'queued_offline');
   const s = await sensor(d.mac);
-  const msg = await until(() => s.got['settings/set'].find((m) => m.live_s === 2));
+  const msg = await until(() => s.got['settings/set'].find((m) => m.live_s === 3));
   assert.equal(msg.v, 2);
 });
 
@@ -171,4 +171,18 @@ test('command permissions: devices.command only', async () => {
   assert.equal((await cust.c.post(`/admin/devices/${d.id}/commands`, { type: 'reboot' })).status, 403);
   const owner = await staff('Owner');
   assert.equal((await owner.c.post(`/admin/devices/${d.id}/commands`, { type: 'selfdestruct' })).status, 400);
+});
+
+test('recalibrate (firmware 2.0.0): sent to an online sensor, 30 s when offline', async () => {
+  const { d } = await ownedDevice();
+  const admin = await staff('Support');
+  const s = await sensor(d.mac);
+  await until(() => s.got['settings/set'].length);
+  const r = await admin.c.post(`/admin/devices/${d.id}/commands`, { type: 'recalibrate' });
+  assert.deepEqual([r.status, r.body.status], [202, 'sent']);
+  assert.deepEqual(await until(() => s.got.cmd.find((m) => m.id === r.body.commandId)), { id: r.body.commandId, c: 'recalibrate' });
+  const off = await ownedDevice();
+  const q = await admin.c.post(`/admin/devices/${off.d.id}/commands`, { type: 'recalibrate' });
+  const ttl = (await db.query('SELECT extract(epoch FROM expires_at - created_at)::int AS s FROM device_commands WHERE id = $1', [q.body.commandId])).rows[0].s;
+  assert.deepEqual([q.body.status, ttl], ['queued', 30]);
 });
