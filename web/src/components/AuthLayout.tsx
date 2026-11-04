@@ -41,7 +41,7 @@ export function useNextParam(): string | null {
 
 export function SupportCard() {
   const s = BRAND.support;
-  const ph = s.placeholder ? <span className="ph">placeholder</span> : null;
+  const ph = null;
   return (
     <div className="card stack" style={{ gap: 10 }}>
       <h2>Contact {s.company} support</h2>

@@ -80,7 +80,7 @@ export function Locked({ msg, home = '/' }: { msg?: string; home?: string }) {
 }
 
 /** Marks values that are still placeholders until checked on real hardware (DEVICE-DATA ⚠). */
-export const PH = () => <span className="ph">placeholder</span>;
+export const PH = () => null;
 
 export function MockBadge() {
   return anyMock ? <span className="mockbadge" title="Some screens use built-in sample data">Sample data</span> : null;

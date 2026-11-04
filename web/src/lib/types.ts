@@ -21,7 +21,16 @@ export interface User {
 export interface LiveValues {
   pr: number; bed: number; ss: number; hr: number; br: number;
   bs?: number; mv?: number; mr?: number; dist?: number; rssi?: number; at: string;
+  /* API.md §11a (firmware 2.0.0+), live only. sess/cmp/ngt are present only while a session runs. */
+  up?: number; fw?: string; seq?: number; radar?: number;
+  sess?: LiveSess; cmp?: LiveCmp; ngt?: LiveNgt;
 }
+/** current session: st 0 deep / 1 light / 2 awake / 3 none; start = Unix UTC seconds; durations in minutes */
+export interface LiveSess { st: number; start: number; bed: number; slp: number; dp: number; lt: number; aw: number; on: number; wk: number; tn: number; sc: number }
+/** C1001 composite: dis 0–3, abn 0 none / 1 normal / 2 abnormal, rat 0–3, lg/mn = % */
+export interface LiveCmp { dis: number; abn: number; rat: number; resp: number; hr: number; apn: number; turn: number; lg: number; mn: number }
+/** C1001 night statistics: sh/dp = light/deep %, slp/oob minutes */
+export interface LiveNgt { sc: number; slp: number; wk: number; sh: number; dp: number; oob: number; ex: number; tn: number; resp: number; hr: number; apn: number }
 
 export interface DeviceCard {
   id: string;

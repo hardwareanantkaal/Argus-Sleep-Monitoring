@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { Spark } from '@/components/charts';
 import { Icon } from '@/components/Icon';
+import { CompositeCard, firstLocalMin, pushStage, SessionCard } from '@/components/LiveTelemetry';
 import { Async, Head, PH, TzTag, useApi } from '@/components/ui';
 import { ago, BREATH_STATE, moveText, presenceText, STAGE_NAME } from '@/lib/format';
 import { useLive, type LiveMsg } from '@/lib/useLive';
@@ -20,10 +21,12 @@ export default function LivePage() {
   const d = q.data;
   const canLive = !!d?.myPermissions.includes('live.view');
   const hist = useRef<{ hr: number[]; br: number[] }>({ hr: [], br: [] });
+  const stages = useRef<{ first: number | null; mins: string[] }>({ first: null, mins: [] }); // live hypnogram from sess.st
   const [, bump] = useState(0);
   const { live, status } = useLive(d ? [d.id] : [], d && canLive ? [d.id] : [], (m: LiveMsg) => {
     if (m.hr) hist.current.hr = [...hist.current.hr, m.hr].slice(-KEEP);
     if (m.br) hist.current.br = [...hist.current.br, m.br].slice(-KEEP);
+    if (d) pushStage(stages.current, m, d.tz);
     bump((n) => n + 1);
   });
 
@@ -81,6 +84,8 @@ export default function LivePage() {
             <div className="card"><div className="between"><div className="row small muted" style={{ gap: 8 }}><Icon name="wifi" /> Signal</div><b className="num">{lv?.rssi ?? d.connection?.rssi ?? '—'} dBm</b></div></div>
             <div className="card"><div className="between"><div className="row small muted" style={{ gap: 8 }}><Icon name="chip" /> Serial</div><b className="mono">{d.serial}</b></div></div>
           </div>
+          <CompositeCard lv={lv} fw={d.connection?.fw} rssi={d.connection?.rssi} />
+          <SessionCard lv={lv} tz={d.tz} stages={stages.current.mins.join('')} firstMin={firstLocalMin(stages.current.first, d.tz)} />
           <div className="note"><Icon name="info" /><span>Live values come straight from the sensor and are <b>not saved</b>. The saved record is the nightly sleep summary.</span></div>
           {histBtn}
         </div>

@@ -38,13 +38,27 @@ const timers: Record<string, ReturnType<typeof setInterval>> = {};
 function startMockLive(deviceId: string) {
   const d = mockDevice(deviceId);
   if (!d || !d.online || timers[deviceId]) return;
-  let hr = d.base.hr, br = d.base.br, mr = d.base.bed ? 8 : 0;
+  let hr = d.base.hr, br = d.base.br, mr = d.base.bed ? 8 : 0, seq = 1000, st = d.base.ss;
+  // sample §11a session blocks: a session that started ~95 min ago
+  const start = Math.floor(Date.now() / 1000) - 95 * 60;
+  const sess = { st, start, bed: 95, slp: 78, dp: 26, lt: 52, aw: 17, on: 12, wk: 2, tn: 6, sc: 74 };
   timers[deviceId] = setInterval(() => {
     hr = Math.max(d.base.hr - 8, Math.min(d.base.hr + 8, hr + Math.round((Math.random() - 0.5) * 3)));
     br = Math.max(d.base.br - 3, Math.min(d.base.br + 3, br + Math.round((Math.random() - 0.5) * 1.4)));
     mr = d.base.bed ? Math.max(0, Math.min(100, Math.round(mr * 0.7 + (Math.random() < 0.15 ? Math.random() * 40 : Math.random() * 6)))) : 0;
+    seq++;
+    if (Math.random() < 0.12) st = [0, 1, 1, 2][Math.floor(Math.random() * 4)];
+    const el = Math.round((Date.now() / 1000 - start) / 60);
+    Object.assign(sess, { st, bed: el, slp: Math.round(el * 0.82), dp: Math.round(el * 0.27), lt: Math.round(el * 0.55), aw: Math.round(el * 0.18) });
+    const inSession = !!d.base.bed;
     mockEmit('device:live', {
-      deviceId, serial: d.serial, pr: d.base.bed ? 1 : 0, bed: d.base.bed, ss: d.base.ss, hr: d.base.bed ? hr : 0, br: d.base.bed ? br : 0,
+      seq, radar: 1, up: (d.uptimeS ?? 0) + seq * 2, fw: d.fw,
+      ...(inSession ? {
+        sess: { ...sess },
+        cmp: { dis: mr > 30 ? 2 : 1, abn: 1, rat: 2, resp: d.base.br, hr: d.base.hr, apn: 0, turn: 6, lg: 4, mn: 18 },
+        ngt: { sc: 74, slp: sess.slp, wk: 2, sh: 67, dp: 33, oob: 4, ex: 1, tn: 6, resp: d.base.br, hr: d.base.hr, apn: 0 },
+      } : {}),
+      deviceId, serial: d.serial, pr: d.base.bed ? 1 : 0, bed: d.base.bed, ss: d.base.bed ? st : 3, hr: d.base.bed ? hr : 0, br: d.base.bed ? br : 0,
       bs: 1, mv: mr > 30 ? 2 : mr > 0 ? 1 : 0, mr, dist: d.base.bed ? 85 + Math.round(Math.random() * 4) : 0,
       rssi: (d.rssi ?? -60) + Math.round((Math.random() - 0.5) * 4), at: new Date().toISOString(),
     });
