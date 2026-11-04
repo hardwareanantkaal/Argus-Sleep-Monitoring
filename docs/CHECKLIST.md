@@ -80,5 +80,5 @@ Updated 4 Nov 2026. Live site: https://argus.ecobridgers.com
 
 ## 7. Open decisions
 - [ ] D8: serial number format
-- [ ] Days with only naps: count them as "main sleep", or keep them out of history and trends?
+- [x] Days with only naps: kept OUT of main sleep and trends; their naps still show (owner, 4 Nov)
 - [ ] Hypnogram resolution: 5 min (default) or 1 min

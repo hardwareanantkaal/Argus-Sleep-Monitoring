@@ -13,6 +13,8 @@ const views = require('../services/deviceViews');
 const { releaseDevice } = require('../services/devices');
 const realtime = require('../services/realtime');
 const sleep = require('../services/sleep');
+const settingsSync = require('../services/settingsSync');
+const commands = require('../services/commands');
 const { DateTime } = require('luxon');
 const { E, ApiError } = require('../errors');
 
@@ -154,6 +156,36 @@ router.patch('/:id', device('settings.edit'), async (req, res) => {
       targetLabel: req.device.serial_no, data: body });
   }
   res.json(await views.detail(await views.rowFor(req.user.id, req.device.id), req.user.id));
+});
+
+// 3.6 / 3.7 Sensor settings (sent to the sensor, retained + versioned).
+router.get('/:id/sensor-settings', device('settings.edit'), async (req, res) => {
+  res.json(await settingsSync.get(req.device.id));
+});
+
+router.patch('/:id/sensor-settings', device('settings.edit'), async (req, res) => {
+  const body = parse(z.object({
+    exitS: z.number().int().min(30).max(3600).optional(),
+    liveS: z.number().int().min(1).max(60).optional(),
+    idleS: z.number().int().min(10).max(600).optional(),
+    struggle: z.boolean().optional(),
+    unattended: z.boolean().optional(),
+    unattMin: z.number().int().min(1).max(180).optional(),
+  }).strict(), req.body);
+  const settings = await settingsSync.update(req.device.id, body, req.user.id);
+  if (Object.keys(body).length) {
+    await audit(req, { action: 'device.sensor_settings', targetType: 'device', targetId: req.device.id,
+      targetLabel: req.device.serial_no, data: body });
+  }
+  res.json({ settings });
+});
+
+// 3.8 "Change Wi-Fi network" = config_mode command (expires after 30 s).
+router.post('/:id/wifi-setup', device('settings.edit'), async (req, res) => {
+  const c = await commands.create(req.device.id, 'config_mode', req.user.id);
+  await audit(req, { action: 'device.command.config_mode', targetType: 'device', targetId: req.device.id,
+    targetLabel: req.device.serial_no, detail: commands.apiStatus(c.status) });
+  res.status(202).json({ commandId: c.id, status: commands.apiStatus(c.status) });
 });
 
 // 4.1 Nights (main sleeps) for the last `days` sleep dates, or from..to.

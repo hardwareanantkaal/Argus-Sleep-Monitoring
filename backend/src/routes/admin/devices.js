@@ -10,6 +10,8 @@ const { releaseDevice } = require('../../services/devices');
 const live = require('../../services/live');
 const realtime = require('../../services/realtime');
 const mqttAuth = require('../mqttAuth');
+const commands = require('../../services/commands');
+const settingsSync = require('../../services/settingsSync');
 const { E } = require('../../errors');
 
 const router = express.Router();
@@ -255,7 +257,64 @@ router.delete('/devices/:id', requireStaff('devices.register'), async (req, res)
   });
   mqttAuth.forget(d.mqtt_username);
   live.forget(d.mqtt_username);
+  settingsSync.clear(d.mqtt_username);   // empty retained message = device deleted
   res.status(204).end();
+});
+
+// 8.8 Send a command. Offline sensors: queued (config_mode 30 s, others 24 h).
+router.post('/devices/:id/commands', requireStaff('devices.command'), async (req, res) => {
+  const body = parse(z.object({ type: z.enum(['reboot', 'config_mode', 'ota_check', 'logs']) }), req.body);
+  const d = await loadDevice(req.params.id);
+  const c = await commands.create(d.id, body.type, req.user.id);
+  await audit(req, { action: `device.command.${body.type}`, targetType: 'device', targetId: d.id,
+    targetLabel: d.serial_no, detail: commands.apiStatus(c.status) });
+  res.status(202).json({ commandId: c.id, status: commands.apiStatus(c.status) });
+});
+
+// Keyset paging by id (newest first) for commands and events.
+const pageQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.coerce.number().int().positive().optional(),
+});
+
+// 8.9 Command history
+router.get('/devices/:id/commands', requireStaff('devices.view'), async (req, res) => {
+  const q = parse(pageQuery, req.query);
+  const d = await loadDevice(req.params.id);
+  const rows = await db.many(
+    `SELECT c.id, c.type, c.status, c.error, c.created_at, c.sent_at, c.acked_at, c.expires_at, u.full_name
+       FROM device_commands c LEFT JOIN users u ON u.id = c.requested_by
+      WHERE c.device_id = $1 AND ($2::bigint IS NULL OR c.id < $2)
+      ORDER BY c.id DESC LIMIT $3`, [d.id, q.cursor ?? null, q.limit + 1]);
+  const more = rows.length > q.limit;
+  res.json({
+    items: rows.slice(0, q.limit).map((r) => ({ id: r.id, type: r.type, requestedBy: r.full_name, status: commands.apiStatus(r.status),
+      error: r.error, createdAt: r.created_at, sentAt: r.sent_at, ackedAt: r.acked_at, expiresAt: r.expires_at })),
+    nextCursor: more ? String(rows[q.limit - 1].id) : null,
+  });
+});
+
+// 8.10 The last 5 uploads from the logs command
+router.get('/devices/:id/logs', requireStaff('devices.view'), async (req, res) => {
+  const d = await loadDevice(req.params.id);
+  const rows = await db.many(
+    'SELECT id, created_at, content FROM device_log_uploads WHERE device_id = $1 ORDER BY id DESC LIMIT 5', [d.id]);
+  res.json({ items: rows.map((r) => ({ id: r.id, createdAt: r.created_at, content: r.content })) });
+});
+
+// 8.11 Device events
+router.get('/devices/:id/events', requireStaff('devices.view'), async (req, res) => {
+  const q = parse(pageQuery, req.query);
+  const d = await loadDevice(req.params.id);
+  const rows = await db.many(
+    `SELECT id, type, severity, message, occurred_at FROM device_events
+      WHERE device_id = $1 AND ($2::bigint IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`,
+    [d.id, q.cursor ?? null, q.limit + 1]);
+  const more = rows.length > q.limit;
+  res.json({
+    items: rows.slice(0, q.limit).map((r) => ({ id: r.id, type: r.type, severity: r.severity, detail: r.message, createdAt: r.occurred_at })),
+    nextCursor: more ? String(rows[q.limit - 1].id) : null,
+  });
 });
 
 module.exports = router;

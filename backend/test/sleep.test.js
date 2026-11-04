@@ -99,6 +99,8 @@ async function nightsFixture() {
   // Night of 12 Oct: C 23:00–05:00 IST, gap 40 min (>= 30), D 05:40–07:00 IST -> D is a nap
   await addSession(d.id, '2026-10-12T17:30Z', '2026-10-12T23:30Z', { sleep_min: 330 });
   await addSession(d.id, '2026-10-13T00:10Z', '2026-10-13T01:30Z', { sleep_min: 70 });
+  // 14 Oct: only a 15:00–15:40 IST nap (40 min) -> no main sleep that date
+  await addSession(d.id, '2026-10-14T09:30Z', '2026-10-14T10:10Z', { score: 99, sleep_min: 35 });
   return { owner, d };
 }
 
@@ -170,4 +172,26 @@ test('history needs history.view; the device card shows last night', async () =>
   const r = await owner.c.get(`/devices/${d.id}/nights?days=3`);
   assert.equal(r.body.nights.length, 1);
   assert.equal((await owner.c.get(`/devices/${d.id}/nights?from=2026-02-30`)).status, 400);
+});
+
+test('a date with only naps has no main sleep (owner decision 4 Nov)', async () => {
+  const { owner, d } = await nightsFixture();
+  const r = await owner.c.get(`/devices/${d.id}/nights?from=2026-10-10&to=2026-10-14`);
+  const n14 = r.body.nights.find((n) => n.sleepDate === '2026-10-14');
+  assert.deepEqual([n14.hasMainSleep, n14.score, n14.totalSleepMin, n14.sessionCount, n14.naps.length], [false, null, null, 0, 1]);
+  assert.deepEqual(r.body.nights.filter((n) => n.hasMainSleep).map((n) => n.sleepDate), ['2026-10-12', '2026-10-10']);
+  assert.equal(r.body.averages.nights, 2, 'the nap-only date is not averaged');
+  assert.notEqual(r.body.averages.score, 99);
+  const det = (await owner.c.get(`/devices/${d.id}/nights/2026-10-14`)).body;
+  assert.deepEqual([det.hasMainSleep, det.hyp, det.naps[0].totalSleepMin], [false, null, 35]);
+});
+
+test('last night on the card skips a nap-only day', async () => {
+  const owner = await registered();
+  const d = await insertDevice({ ownerId: owner.user.id });
+  await db.query(
+    `INSERT INTO sleep_sessions (device_id, sid, started_at, ended_at, timezone, score, sleep_min, raw)
+     VALUES ($1, 1, now() - interval '2 hours', now() - interval '1 hour', 'Asia/Kolkata', 90, 50, '{}')`, [d.id]);
+  const card = (await owner.c.get('/devices')).body.items.find((x) => x.id === d.id);
+  assert.equal(card.lastNight, null, 'a 1-hour nap is not "last night"');
 });

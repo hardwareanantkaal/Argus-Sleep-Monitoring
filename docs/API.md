@@ -104,7 +104,7 @@ Screens: **My devices**, **Live view**, **Add device**, **Device settings**.
 | 3.5 | PATCH | `/devices/:id` | `settings.edit` | `{name?, room?, tz?, place?, sleepCutoff?, autoUpdate?}` → `deviceDetail`. Backend-only settings, so the sensor isn't contacted. A new `tz` applies to **new** sessions only; old nights keep their time zone. `place: null` clears it. |
 | 3.6 | GET | `/devices/:id/sensor-settings` | `settings.edit` | → `sensorSettings` |
 | 3.7 | PATCH | `/devices/:id/sensor-settings` | `settings.edit` | `{exitS?, liveS?, idleS?, struggle?, unattended?, unattMin?}` → `{settings: sensorSettings}`. Sent to the sensor at once if it's online, otherwise when it reconnects (retained message). Ranges follow the DB checks, e.g. `exitS` 30–3600 (`400 VALIDATION`). |
-| 3.8 | POST | `/devices/:id/wifi-setup` | `settings.edit` | → `202 {commandId, status}`. Sends the `config_mode` command ("Change Wi-Fi network"). **Expires after 30 s** if the sensor is offline (D4): `status` comes back as `"sent"` or `"expired"`. |
+| 3.8 | POST | `/devices/:id/wifi-setup` | `settings.edit` | → `202 {commandId, status: "sent" \| "queued"}`. Sends the `config_mode` command ("Change Wi-Fi network"). An offline sensor's command waits and **expires after 30 s** (D4); the final result (`acked`, `failed` or `expired`) arrives on Socket.IO `command:status`. |
 | 3.9 | DELETE | `/devices/:id` | owner only | `{confirmName}` → `204`. "Remove device": owner removed, shares, invites, **sleep sessions, alerts and rules deleted**, `unclaimed` event. The old QR stops working, and support issues a new code (8.6) so a resold sensor can't be re-claimed by the old owner. 422 `CONFIRM_MISMATCH` if `confirmName` isn't the device name. |
 | 3.10 | DELETE | `/devices/:id/me` | a share (not the owner) | → `204`. "Leave shared device" (also clears your mute for it). The owner gets `422 OWNER_CANNOT_LEAVE` (they remove the device instead, 3.9). |
 
@@ -144,6 +144,7 @@ Screens: **Sleep history** and **Night detail**. All of this is computed from `s
 - merge sessions less than `merge_gap_min` apart
 - date each group by the device's `sleep_cutoff`, in the **session's own `timezone`**
 - the longest group on a date is the main sleep; the rest are naps
+- **a date with only naps has no main sleep** (owner, 4 Nov): a group counts as a main sleep only if it is **at least 3 h in bed**. Such a date still appears in 4.1 with `hasMainSleep: false`, every main-sleep field `null`, `sessionCount: 0` and its `naps`; it is left out of `averages`, trends and `deviceCard.lastNight`. 4.2 returns the same shape for it.
 
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
@@ -152,7 +153,7 @@ Screens: **Sleep history** and **Night detail**. All of this is computed from `s
 
 **`nightCard`:**
 ```json
-{ "sleepDate": "2026-11-02", "start": "2026-11-02T17:12:00Z", "end": "2026-11-03T01:30:00Z",
+{ "sleepDate": "2026-11-02", "hasMainSleep": true, "start": "2026-11-02T17:12:00Z", "end": "2026-11-03T01:30:00Z",
   "score": 82, "totalSleepMin": 432, "inBedMin": 498,
   "stageMin": { "deep": 147, "light": 250, "awake": 35, "outOfBed": 66 },
   "sessionCount": 2, "naps": [ { "start": "2026-11-03T09:40:00Z", "end": "2026-11-03T10:25:00Z" } ] }

@@ -9,6 +9,8 @@
 //    hide short sessions -> merge sessions < merge gap apart -> date each
 //    group by the device's cut-off in the session's own time zone -> the
 //    longest group on a date is the main sleep, the others are naps.
+//    Owner decision (4 Nov): a date with ONLY naps has NO main sleep. A group
+//    counts as a main sleep only if it is at least MAIN_SLEEP_MIN in bed.
 const { DateTime } = require('luxon');
 const db = require('../db');
 const log = require('../logger');
@@ -94,6 +96,8 @@ function start() {
 
 // ---- 2. nights ---------------------------------------------------------
 const minutes = (a, b) => (new Date(b) - new Date(a)) / 60000;
+// Shortest group that can be a main sleep (in bed, minutes). Shorter = nap.
+const MAIN_SLEEP_MIN = 180;
 
 async function rules(deviceId) {
   return db.one(
@@ -212,23 +216,33 @@ async function nights(deviceId, fromDate, toDate) {
   const out = [];
   for (const [sleepDate, groups] of byDate) {
     groups.sort((a, b) => minutes(b.start, b.end) - minutes(a.start, a.end));
-    const [main, ...naps] = groups;
-    naps.sort((a, b) => new Date(a.start) - new Date(b.start));
+    const main = groups[0].inBedMin >= MAIN_SLEEP_MIN ? groups[0] : null;
+    const naps = (main ? groups.slice(1) : groups).sort((a, b) => new Date(a.start) - new Date(b.start));
     out.push({ sleepDate, main, naps });
   }
   return out.sort((a, b) => (a.sleepDate < b.sleepDate ? 1 : -1));
 }
 
-const nightCard = (n) => ({
-  sleepDate: n.sleepDate, start: n.main.start, end: n.main.end, score: n.main.score,
-  totalSleepMin: n.main.totalSleepMin, inBedMin: n.main.inBedMin, stageMin: n.main.stageMin,
-  sessionCount: n.main.sessionCount, naps: n.naps.map((x) => ({ start: x.start, end: x.end })),
-});
+// A nap-only date: hasMainSleep false, every main-sleep field null, naps listed.
+const EMPTY_MAIN = {
+  start: null, end: null, score: null, totalSleepMin: null, inBedMin: null, stageMin: null, sessionCount: 0,
+  efficiencyPct: null, wakeUps: null, exits: null, oobMin: null, sessions: [], epochS: null, hyp: null,
+  hr: null, br: null, turns: null, bigMvPct: null, smallMvPct: null, apnea: null, struggles: null,
+};
+
+const nightCard = (n) => {
+  const m = n.main || EMPTY_MAIN;
+  return {
+    sleepDate: n.sleepDate, hasMainSleep: !!n.main, start: m.start, end: m.end, score: m.score,
+    totalSleepMin: m.totalSleepMin, inBedMin: m.inBedMin, stageMin: m.stageMin,
+    sessionCount: m.sessionCount, naps: n.naps.map((x) => ({ start: x.start, end: x.end })),
+  };
+};
 
 function nightDetail(n) {
-  const { start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount, ...rest } = n.main;
+  const { start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount, ...rest } = n.main || EMPTY_MAIN;
   return {
-    sleepDate: n.sleepDate, start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount,
+    sleepDate: n.sleepDate, hasMainSleep: !!n.main, start, end, score, totalSleepMin, inBedMin, stageMin, sessionCount,
     naps: n.naps.map((x) => ({ start: x.start, end: x.end, totalSleepMin: x.totalSleepMin, hyp: x.hyp })),
     efficiencyPct: rest.efficiencyPct, wakeUps: rest.wakeUps, exits: rest.exits, oobMin: rest.oobMin,
     sessions: rest.sessions, epochS: rest.epochS, hyp: rest.hyp, hr: rest.hr, br: rest.br, turns: rest.turns,
@@ -236,8 +250,10 @@ function nightDetail(n) {
   };
 }
 
-// Averages over main sleeps (the four tiles on Sleep history).
-function averages(list) {
+// Averages over main sleeps (the four tiles on Sleep history); nap-only
+// dates don't count.
+function averages(all) {
+  const list = all.filter((n) => n.main);
   const avg = (f) => {
     const v = list.map(f).filter((x) => x != null);
     return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null;
@@ -262,11 +278,11 @@ async function localToday(deviceId) {
 async function lastNight(deviceId) {
   const today = await localToday(deviceId);
   const from = DateTime.fromISO(today).minus({ days: 3 }).toISODate();
-  const [n] = await nights(deviceId, from, today);
+  const n = (await nights(deviceId, from, today)).find((x) => x.main);
   return n ? { sleepDate: n.sleepDate, score: n.main.score, totalSleepMin: n.main.totalSleepMin } : null;
 }
 
 module.exports = {
-  start, onSession, validate, nights, nightCard, nightDetail, averages, localToday, lastNight, rules,
+  MAIN_SLEEP_MIN, start, onSession, validate, nights, nightCard, nightDetail, averages, localToday, lastNight, rules,
   _internal: { sleepDateOf, mergeGroups, summarize },
 };
