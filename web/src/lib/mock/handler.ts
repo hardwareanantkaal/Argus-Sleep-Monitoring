@@ -194,6 +194,14 @@ on('PATCH', '/devices/([^/]+)/sensor-settings', (m, b) => {
   return { settings: d.sensor };
 });
 on('POST', '/devices/([^/]+)/wifi-setup', (m) => { const u = me(); const d = device(u, m[1], 'settings.edit'); return { commandId: rid('c'), status: d.online ? 'sent' : 'expired' }; });
+// PROPOSED customer route (not in API.md yet): like wifi-setup, needs settings.edit; offline → expired.
+on('POST', '/devices/([^/]+)/recalibrate', (m) => {
+  const u = me(); const d = device(u, m[1], 'settings.edit');
+  const commandId = rid('c');
+  if (d.online) setTimeout(() => mockEmit('command:status', { commandId, deviceId: d.id, serial: d.serial, type: 'recalibrate', status: 'done', error: null }), 11000); // radar reset ~11 s
+  audit(u, 'device.command.recalibrate', 'device', d.serial);
+  return { commandId, status: d.online ? 'sent' : 'expired' };
+});
 on('DELETE', '/devices/([^/]+)', (m, b) => {
   const u = me(); const d = device(u, m[1], 'owner');
   if ((b?.confirmName || '').trim() !== d.name) fail(422, 'CONFIRM_MISMATCH', 'Type the device name exactly to confirm', 'confirmName');
@@ -403,7 +411,7 @@ on('POST', '/admin/devices/([^/]+)/unclaim', (m, b) => {
 on('POST', '/admin/devices/([^/]+)/commands', (m, b) => {
   const u = me(); needStaff(u, 'devices.command');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
-  const row: CommandRow = { id: rid('c'), type: b.type, requestedBy: u.fullName, status: d!.online ? 'sent' : (b.type === 'config_mode' ? 'expired' : 'queued'), error: null, createdAt: nowIso(), sentAt: d!.online ? nowIso() : null, ackedAt: null };
+  const row: CommandRow = { id: rid('c'), type: b.type, requestedBy: u.fullName, status: d!.online ? 'sent' : (b.type === 'config_mode' || b.type === 'recalibrate' ? 'expired' : 'queued'), error: null, createdAt: nowIso(), sentAt: d!.online ? nowIso() : null, ackedAt: null };
   (db.commands[d!.id] ||= []).unshift(row);
   audit(u, `device.command.${b.type}`, 'device', d!.serial);
   if (d!.online) setTimeout(() => {

@@ -14,11 +14,14 @@ const realtime = require('./realtime');
 const live = require('./live');
 const { syncState } = require('./deviceViews');
 
-// The settings/set message (DEVICE-DATA.md §5).
-const payload = (s) => ({
+// The settings/set message (DEVICE-DATA.md §5). min_sess is not a device
+// setting: it is the platform's Sleep rules min_session_min, so the firmware
+// discards short sessions with the same limit the server hides them with.
+const payload = (s, minSess) => ({
   v: s.version, exit_s: s.exit_s, live_s: s.live_s, idle_s: s.idle_s,
-  struggle: s.struggle ? 1 : 0, unattended: s.unattended ? 1 : 0, unatt_min: s.unatt_min,
+  struggle: s.struggle ? 1 : 0, unattended: s.unattended ? 1 : 0, unatt_min: s.unatt_min, min_sess: minSess,
 });
+const minSessionMin = async () => (await db.one('SELECT min_session_min FROM app_settings WHERE id = 1')).min_session_min;
 
 // The sensorSettings object of API.md §3.
 function view(s, online) {
@@ -46,7 +49,7 @@ async function publish(deviceId) {
     [deviceId]);
   if (!s) return null;
   try {
-    await mqtt.publish(s.mqtt_username, 'settings/set', payload(s), { qos: 1, retain: true });
+    await mqtt.publish(s.mqtt_username, 'settings/set', payload(s, await minSessionMin()), { qos: 1, retain: true });
     await db.query('UPDATE device_settings SET sent_at = now() WHERE device_id = $1', [deviceId]);
   } catch (err) {
     log.warn({ err: err.message, deviceId }, 'settings publish failed (will retry on reconnect)');
@@ -100,6 +103,15 @@ async function onOnline(mac, d) {
   if (s && s.applied_version < s.version) await publish(d.deviceId);
 }
 
+// Sleep rules min_session_min changed: bump every device's version (so each
+// one must ack the new min_sess) and republish the retained settings.
+// Only the version changes, so the trigger logs no settings_changes row.
+async function bumpAll() {
+  const { rows } = await db.query('UPDATE device_settings SET version = version + 1 RETURNING device_id');
+  for (const r of rows) await publish(r.device_id);
+  return rows.length;
+}
+
 // A deleted device: clear its retained settings on the broker.
 const clear = (mac) => mqtt.publish(mac, 'settings/set', '', { qos: 1, retain: true }).catch(() => {});
 
@@ -108,4 +120,4 @@ function start() {
   live.onOnline(onOnline);
 }
 
-module.exports = { start, publish, update, get, view, clear, payload };
+module.exports = { start, publish, update, get, view, clear, payload, bumpAll };

@@ -146,7 +146,7 @@ export interface AdminDeviceDetail {
   claimCodeActive: boolean;
   sensorSettings: SensorSettings | null;
 }
-export type CommandType = 'reboot' | 'config_mode' | 'ota_check' | 'logs';
+export type CommandType = 'reboot' | 'config_mode' | 'ota_check' | 'logs' | 'recalibrate';
 export interface CommandRow {
   id: string; type: CommandType; requestedBy: string; status: 'queued' | 'sent' | 'acked' | 'done' | 'failed' | 'expired';
   error: string | null; createdAt: string; sentAt: string | null; ackedAt: string | null;

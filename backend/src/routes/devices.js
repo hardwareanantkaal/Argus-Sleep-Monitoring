@@ -182,8 +182,16 @@ router.patch('/:id/sensor-settings', device('settings.edit'), async (req, res) =
 
 // 3.8 "Change Wi-Fi network" = config_mode command (expires after 30 s).
 router.post('/:id/wifi-setup', device('settings.edit'), async (req, res) => {
-  const c = await commands.create(req.device.id, 'config_mode', req.user.id);
+  const c = await commands.createNow(req.device.id, 'config_mode', req.user.id);
   await audit(req, { action: 'device.command.config_mode', targetType: 'device', targetId: req.device.id,
+    targetLabel: req.device.serial_no, detail: commands.apiStatus(c.status) });
+  res.status(202).json({ commandId: c.id, status: commands.apiStatus(c.status) });
+});
+
+// 3.8b "Recalibrate" = recalibrate command (radar reset ~11 s; expires after 30 s offline).
+router.post('/:id/recalibrate', device('settings.edit'), async (req, res) => {
+  const c = await commands.createNow(req.device.id, 'recalibrate', req.user.id);
+  await audit(req, { action: 'device.command.recalibrate', targetType: 'device', targetId: req.device.id,
     targetLabel: req.device.serial_no, detail: commands.apiStatus(c.status) });
   res.status(202).json({ commandId: c.id, status: commands.apiStatus(c.status) });
 });

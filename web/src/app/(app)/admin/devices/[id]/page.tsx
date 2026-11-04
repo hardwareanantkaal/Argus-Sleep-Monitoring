@@ -20,6 +20,7 @@ const CMDS: [CommandType, string][] = [
   ['config_mode', 'Open Wi-Fi setup mode'],
   ['ota_check', 'Check for a firmware update now'],
   ['logs', 'Upload the last log lines'],
+  ['recalibrate', 'Recalibrate radar (about 11 s)'],
 ];
 const STATUS_PILL: Record<CommandRow['status'], [string, string]> = {
   queued: ['Queued', ''], sent: ['Sent', 'warn'], acked: ['Acked', 'ok'], done: ['Done', 'ok'], failed: ['Failed', 'bad'], expired: ['Expired', 'bad'],
@@ -119,7 +120,7 @@ function Inner() {
           <div className="g2">
             <div className="card">
               <div className="ch"><div className="t"><h2>Send a command</h2><span className="xs muted">Goes to the device over MQTT</span></div></div>
-              {!c.online && <div className="note" style={{ marginBottom: 12 }}><Icon name="off" /><span>Device is offline. Commands wait up to 24 h until it reconnects; <span className="mono">config_mode</span> expires after 30 s.</span></div>}
+              {!c.online && <div className="note" style={{ marginBottom: 12 }}><Icon name="off" /><span>Device is offline. Commands wait up to 24 h until it reconnects; <span className="mono">config_mode</span> and <span className="mono">recalibrate</span> expire after 30 s.</span></div>}
               {pending && <div className="confirm" style={{ marginBottom: 12 }}><span>Send <b className="mono">{pending}</b> to {d.serial}?</span><span className="sp" />
                 <button className="btn sm" onClick={() => send(pending)}>Send</button><button className="btn ghost sm" onClick={() => setPending(null)}>Cancel</button></div>}
               <div className="cmds">{CMDS.map(([k, t]) => <button key={k} className="cmd" disabled={!cmdOk || d.isDisabled} onClick={() => setPending(k)}><b>{k}</b><span>{t}</span></button>)}</div>

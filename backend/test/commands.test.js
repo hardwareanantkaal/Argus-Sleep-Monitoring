@@ -56,7 +56,7 @@ test('sensor settings: change -> retained settings/set -> ack -> applied', async
   assert.equal(r.status, 200);
   assert.deepEqual([r.body.settings.version, r.body.settings.sync, r.body.settings.exitS], [2, 'sending', 600]);
   const msg = await until(() => s.got['settings/set'].find((m) => m.v === 2));
-  assert.deepEqual(msg, { v: 2, exit_s: 600, live_s: 2, idle_s: 60, struggle: 1, unattended: 1, unatt_min: 30 });
+  assert.deepEqual(msg, { v: 2, exit_s: 600, live_s: 2, idle_s: 60, struggle: 1, unattended: 1, unatt_min: 30, min_sess: 25 });
 
   const synced = nextEvent(sock, 'settings:sync', (p) => p.deviceId === d.id && p.sync === 'applied');
   await s.pub('settings/ack', { v: 2 });

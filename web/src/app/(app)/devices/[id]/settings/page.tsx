@@ -144,7 +144,28 @@ function Sensor({ id, online }: { id: string; online: boolean }) {
 function WifiFirmware({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail): void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [recal, setRecal] = useState<'' | 'running' | 'done' | 'failed'>('');
   const c = d.connection;
+  // result of the recalibrate command arrives as command:status
+  useEffect(() => {
+    const s = getSocket();
+    const fn = (m: { deviceId: string; type: string; status: string }) => {
+      if (m.deviceId !== d.id || m.type !== 'recalibrate') return;
+      if (m.status === 'done' || m.status === 'acked') { setRecal('done'); toast('Recalibration done'); }
+      else if (m.status === 'failed' || m.status === 'expired') { setRecal('failed'); toast('Recalibration failed'); }
+    };
+    s.on('command:status', fn);
+    return () => s.off('command:status', fn);
+  }, [d.id, toast]);
+  const recalibrate = async () => {
+    if (!confirm('Recalibrate the radar? It restarts the radar for about 11 seconds. Do it with nobody in bed.')) return;
+    try {
+      // PROPOSED route, not yet in API.md (same pattern as wifi-setup)
+      const r = await post<{ commandId: string; status: 'sent' | 'expired' }>(`/devices/${d.id}/recalibrate`);
+      if (r.status === 'sent') setRecal('running');
+      else { setRecal('failed'); toast('The sensor is offline, so it can’t recalibrate now.'); }
+    } catch (e) { setRecal(''); toast(errText(e)); }
+  };
   const setAuto = async (v: boolean) => {
     try { onSaved(await patch<DeviceDetail>(`/devices/${d.id}`, { autoUpdate: v })); toast(v ? 'Updates will install automatically' : 'Automatic updates off'); }
     catch (e) { toast(errText(e)); }
@@ -169,7 +190,12 @@ function WifiFirmware({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail
       <div className="divider" style={{ marginBlock: 12 }} />
       <label className="tog"><span className="t"><span>Install updates automatically</span><span className="xs muted">Updates install during the day, never at night</span></span>
         <input type="checkbox" className="sw" checked={d.autoUpdate} onChange={(e) => setAuto(e.target.checked)} /></label>
-      <button className="btn ghost" style={{ marginTop: 8 }} onClick={wifi} disabled={busy}><Icon name="wifi" /> Change Wi-Fi network</button>
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn ghost" onClick={wifi} disabled={busy}><Icon name="wifi" /> Change Wi-Fi network</button>
+        <button className="btn ghost" onClick={recalibrate} disabled={recal === 'running'}><Icon name="activity" /> {recal === 'running' ? 'Recalibrating…' : 'Recalibrate sensor'}</button>
+        {recal === 'done' && <span className="pill ok">Recalibrated ✓</span>}
+        {recal === 'failed' && <span className="pill bad">Didn’t recalibrate</span>}
+      </div>
     </div>
   );
 }

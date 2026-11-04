@@ -170,7 +170,7 @@ This is the **only sleep data we store**. One message per session (bed entry →
 ## 5. Device settings: `<p>/<d>/settings/set` (retained, versioned, same as the water project)
 
 ```json
-{"v":3,"exit_s":300,"live_s":5,"idle_s":60,"struggle":1,"unattended":0,"unatt_min":30}
+{"v":3,"exit_s":300,"live_s":2,"idle_s":60,"struggle":1,"unattended":0,"unatt_min":30,"min_sess":25}
 ```
 
 | Key | Meaning | Default |
@@ -181,6 +181,7 @@ This is the **only sleep data we store**. One message per session (bed entry →
 | `struggle` | C1001 abnormal struggle detection on/off | 1 |
 | `unattended` | C1001 unattended detection on/off | 0 |
 | `unatt_min` | Unattended time | 30 ⚠ check the C1001 range |
+| `min_sess` | Discard a session shorter than this many minutes (don't publish it). From the server's Sleep rules (`min_session_min`); changing it there re-sends settings to every device. | 25 |
 
 The device acks with `{"v":3}` after saving to flash.
 

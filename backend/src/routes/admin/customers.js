@@ -10,6 +10,8 @@ const tokens = require('../../services/tokens');
 const live = require('../../services/live');
 const realtime = require('../../services/realtime');
 const { E } = require('../../errors');
+const settingsSync = require('../../services/settingsSync');
+const log = require('../../logger');
 
 const router = express.Router();
 const isUuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
@@ -186,6 +188,11 @@ router.patch('/platform-settings', requireStaff('platform.settings'), async (req
       detail: Object.entries(body).map(([k, v]) => `${k}=${v}`).join(', ') }, c);
     return r;
   });
+  // The firmware's short-session limit follows min_session_min (settings/set min_sess).
+  if (body.minSessionMin !== undefined) {
+    settingsSync.bumpAll().then((n) => log.info({ n }, 'min_sess republished to devices'))
+      .catch((err) => log.error({ err }, 'min_sess republish failed'));
+  }
   res.json(settingsView(s));
 });
 

@@ -52,6 +52,18 @@ async function create(deviceId, type, requestedBy) {
   return c;
 }
 
+// Customer buttons (3.8 Wi-Fi setup, 3.8b recalibrate): no queue. If the
+// sensor didn't get it right now, it is expired at once, so the web can say
+// "the sensor is offline" instead of waiting 30 s. Returns the row.
+async function createNow(deviceId, type, requestedBy) {
+  const c = await create(deviceId, type, requestedBy);
+  if (c.status !== 'pending') return c;
+  const { rows: [x] } = await db.query(
+    `UPDATE device_commands SET status = 'expired', error = 'device offline' WHERE id = $1 AND status = 'pending' RETURNING *`, [c.id]);
+  if (x) emitStatus(x, await serialOf(x.device_id));
+  return x || c;
+}
+
 // API wording: pending = "queued".
 const apiStatus = (s) => (s === 'pending' ? 'queued' : s);
 
@@ -121,4 +133,4 @@ function start() {
   setInterval(() => expire().catch((err) => log.error({ err }, 'command expiry failed')), 10_000).unref();
 }
 
-module.exports = { start, create, apiStatus, expire, TTL_S };
+module.exports = { start, create, createNow, apiStatus, expire, TTL_S };
