@@ -132,6 +132,7 @@ This is the **only sleep data we store**. One message per session (bed entry →
   "br_avg": 14, "br_min": 11, "br_max": 19,
   "struggles": 0,
   "hyp": "AALLLDDDLLDDDLLALL...",
+  "epoch_s": 300,
   "fw": "1.0.0"
 }
 ```
@@ -152,7 +153,8 @@ This is the **only sleep data we store**. One message per session (bed entry →
 | `hr_avg` / `br_avg` | Average heart / breath rate | C1001 stats |
 | `hr_min` / `hr_max` / `br_min` / `br_max` | Min / max over the session | **firmware tracks** |
 | `struggles` | Abnormal struggle count | firmware counts events |
-| `hyp` | **Hypnogram**: one character per 5 min (`D` deep, `L` light, `A` awake, `O` out of bed) | firmware samples `ss` |
+| `epoch_s` | Length of one hypnogram character in seconds: 300 (default if missing) or 60 | firmware |
+| `hyp` | **Hypnogram**: one character per `epoch_s` (5 min by default) (`D` deep, `L` light, `A` awake, `O` out of bed) | firmware samples `ss` |
 | `fw` | Firmware version that produced it | firmware |
 
 **Why the hypnogram (`hyp`):** it draws the sleep-stage timeline on the night detail screen. An 8 h night is only 96 characters, so it's still a summary and not raw data. The whole message is under 1 KB, well inside the broker's 4 KB limit.

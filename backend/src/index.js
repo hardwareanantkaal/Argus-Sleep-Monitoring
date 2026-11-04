@@ -6,6 +6,8 @@ const { createApp } = require('./app');
 const mqtt = require('./services/mqtt');
 const realtime = require('./services/realtime');
 const live = require('./services/live');
+const sleep = require('./services/sleep');
+const deviceViews = require('./services/deviceViews');
 
 async function main() {
   if (!(await db.ping())) {
@@ -21,6 +23,8 @@ async function main() {
   const server = http.createServer(app);
   realtime.attach(server);
   live.start();
+  sleep.start();
+  deviceViews.setLastNight(sleep.lastNight);
   server.listen(config.port, () => {
     log.info({ port: config.port }, 'argus backend listening');
     mqtt.start();

@@ -12,6 +12,8 @@ const { requireUser } = require('../middleware/auth');
 const views = require('../services/deviceViews');
 const { releaseDevice } = require('../services/devices');
 const realtime = require('../services/realtime');
+const sleep = require('../services/sleep');
+const { DateTime } = require('luxon');
 const { E, ApiError } = require('../errors');
 
 const router = express.Router();
@@ -152,6 +154,37 @@ router.patch('/:id', device('settings.edit'), async (req, res) => {
       targetLabel: req.device.serial_no, data: body });
   }
   res.json(await views.detail(await views.rowFor(req.user.id, req.device.id), req.user.id));
+});
+
+// 4.1 Nights (main sleeps) for the last `days` sleep dates, or from..to.
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+  .refine((v) => DateTime.fromISO(v).isValid, 'Not a real date');
+router.get('/:id/nights', device('history.view'), async (req, res) => {
+  const q = parse(z.object({
+    days: z.coerce.number().int().min(1).max(90).optional(),
+    from: isoDate.optional(),
+    to: isoDate.optional(),
+  }), req.query);
+  let to = q.to || await sleep.localToday(req.device.id);
+  let from = q.from || DateTime.fromISO(to).minus({ days: (q.days || 14) - 1 }).toISODate();
+  if (from > to) [from, to] = [to, from];
+  if (DateTime.fromISO(to).diff(DateTime.fromISO(from), 'days').days > 92) {
+    throw E.bad('VALIDATION', 'At most 92 days per request', 'from');
+  }
+  const list = await sleep.nights(req.device.id, from, to);
+  res.json({
+    device: { tz: req.device.timezone, place: req.device.place },
+    nights: list.map(sleep.nightCard),
+    averages: sleep.averages(list),
+  });
+});
+
+// 4.2 One night in detail.
+router.get('/:id/nights/:sleepDate', device('history.view'), async (req, res) => {
+  const date = parse(z.object({ sleepDate: isoDate }), req.params).sleepDate;
+  const [n] = await sleep.nights(req.device.id, date, date);
+  if (!n) throw E.notFound('No sleep recorded for that night');
+  res.json(sleep.nightDetail(n));
 });
 
 // Everyone who can access a device (to update their sockets after a change).
