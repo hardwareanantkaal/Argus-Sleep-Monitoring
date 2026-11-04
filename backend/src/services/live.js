@@ -14,7 +14,7 @@ const mqtt = require('./mqtt');
 const realtime = require('./realtime');
 
 const HEARTBEAT_MS = 5 * 60_000;
-const SWEEP_MS = 15_000;
+const SWEEP_MS = 5_000;
 
 // mac -> { deviceId, serial, online, lastSeenAt, live, rssi, uptimeS, fw, dbWrittenAt }
 const devices = new Map();

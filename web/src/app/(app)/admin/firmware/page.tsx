@@ -33,22 +33,23 @@ function Inner() {
   });
 
   const act = async (r: Rollout, a: 'pause' | 'resume' | 'cancel' | 'retry') => {
-    if (a === 'cancel' && !confirm(`Cancel the ${r.version} rollout? Devices still waiting are skipped; updated ones keep the new version.`)) return;
-    try { await post(`/admin/ota/rollouts/${r.id}/${a}`); toast({ pause: 'Rollout paused', resume: 'Rollout resumed', cancel: 'Rollout cancelled', retry: 'Retrying failed devices' }[a]); ro.reload(); }
+    if (a === 'cancel' && !confirm(`Cancel the ${r.version} OTA update? Devices still waiting are skipped; updated ones keep the new version.`)) return;
+    try { await post(`/admin/ota/rollouts/${r.id}/${a}`); toast({ pause: 'OTA update paused', resume: 'OTA update resumed', cancel: 'OTA update cancelled', retry: 'Retrying failed devices' }[a]); ro.reload(); }
     catch (e) { toast(errText(e)); }
   };
 
   return (
     <div className="wrap">
-      <Head title="Firmware and OTA" sub="Upload builds, then roll them out to devices over the air"
-        actions={canRoll && <button className="btn" onClick={() => setNewRollout(!newRollout)}><Icon name="upload" /> New rollout</button>} />
+      <Head title="Firmware and OTA" sub="Upload builds, then send them to devices over the air"
+        actions={canRoll && <button className="btn" onClick={() => setNewRollout(!newRollout)}><Icon name="upload" /> New OTA update</button>} />
       {newRollout && rel.data && <NewRollout releases={rel.data.items} onDone={() => { setNewRollout(false); ro.reload(); }} onCancel={() => setNewRollout(false)} />}
 
-      <div className="card"><div className="ch"><h2>Rollouts</h2></div>
+      <div className="card"><div className="ch"><h2>OTA updates</h2></div>
         <Async q={ro}>{(d) => d.items.length ? (
           <div className="stack" style={{ gap: 18 }}>
             {d.items.map((r, i) => {
-              const c = r.counts, tot = c.done + c.downloading + c.waiting + c.failed || 1;
+              // "deferred" = waiting because a sleep session is running; shown amber, counted as waiting
+              const c = r.counts, def = c.deferred ?? 0, tot = c.done + c.downloading + c.waiting + def + c.failed || 1;
               return (
                 <div key={r.id} className="stack" style={{ gap: 8 }}>
                   {i > 0 && <div className="divider" style={{ marginBottom: 10 }} />}
@@ -62,11 +63,13 @@ function Inner() {
                     <i style={{ width: `${(c.done / tot) * 100}%`, background: 'var(--ok)' }} />
                     <i style={{ width: `${(c.downloading / tot) * 100}%`, background: 'var(--accent)' }} />
                     <i style={{ width: `${(c.failed / tot) * 100}%`, background: 'var(--bad)' }} />
+                    <i style={{ width: `${(def / tot) * 100}%`, background: 'var(--warn)' }} />
                   </div>
                   <div className="legend">
                     <span><i style={{ background: 'var(--ok)' }} />Updated {c.done}</span>
                     <span><i style={{ background: 'var(--accent)' }} />Downloading {c.downloading}</span>
-                    <span><i style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }} />Waiting {c.waiting}</span>
+                    <span><i style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }} />Waiting {c.waiting + def}</span>
+                    {def > 0 && <span><i style={{ background: 'var(--warn)' }} />Deferred {def} (sleep session active)</span>}
                     <span><i style={{ background: 'var(--bad)' }} />Failed {c.failed}</span>
                     {canRoll && <><span className="sp" style={{ flex: 1 }} />
                       {r.status === 'running' && <button className="btn ghost sm" onClick={() => act(r, 'pause')}>Pause</button>}
@@ -79,7 +82,7 @@ function Inner() {
               );
             })}
           </div>
-        ) : <p className="small muted">No rollouts yet.</p>}</Async>
+        ) : <p className="small muted">No OTA updates yet.</p>}</Async>
       </div>
 
       <div className="g21">
@@ -157,8 +160,7 @@ function Upload({ onDone }: { onDone(): void }) {
 function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[]; onDone(): void; onCancel(): void }) {
   const toast = useToast();
   const [releaseId, setReleaseId] = useState(releases[0]?.id || '');
-  const [target, setTarget] = useState<'percent' | 'all' | 'serials' | 'from_version'>('percent');
-  const [percent, setPercent] = useState(10);
+  const [target, setTarget] = useState<'all' | 'serials' | 'from_version'>('all');
   const [serials, setSerials] = useState('');
   const [fromVersion, setFromVersion] = useState(releases[1]?.version || '');
   const [windowOn, setWindowOn] = useState(true);
@@ -170,28 +172,26 @@ function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr('');
     const list = serials.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
-    if (target === 'percent' && !(percent >= 1 && percent <= 100)) return setErr('Use 1–100 %');
     if (target === 'serials' && !list.length) return setErr('List at least one serial');
     const rel = releases.find((r) => r.id === releaseId);
-    if (!confirm(`Start rolling out ${rel?.version}?`)) return;
+    if (!confirm(`Start the OTA update to ${rel?.version}?`)) return;
     setBusy(true);
     try {
       const r = await post<{ rolloutId: string; devices: number }>('/admin/ota/rollouts', {
-        releaseId, target, percent: target === 'percent' ? percent : undefined, serials: target === 'serials' ? list : undefined,
+        releaseId, target, serials: target === 'serials' ? list : undefined,
         fromVersion: target === 'from_version' ? fromVersion : undefined, installWindow: windowOn ? { from, to } : null,
       });
-      toast(`Rollout started for ${r.devices} device${r.devices === 1 ? '' : 's'}`); onDone();
+      toast(`OTA update started for ${r.devices} device${r.devices === 1 ? '' : 's'}`); onDone();
     } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
   };
 
   return (
-    <div className="card"><h2 style={{ marginBottom: 14 }}>New rollout</h2>
+    <div className="card"><h2 style={{ marginBottom: 14 }}>New OTA update</h2>
       <form className="form" onSubmit={submit}>
         <div className="fields2">
           <div className="field"><label htmlFor="ro-v">Version</label><select className="inp mono" id="ro-v" value={releaseId} onChange={(e) => setReleaseId(e.target.value)}>{releases.map((f) => <option key={f.id} value={f.id}>{f.version} ({f.channel})</option>)}</select></div>
           <div className="field"><label htmlFor="ro-t">Send to</label><select className="inp" id="ro-t" value={target} onChange={(e) => setTarget(e.target.value as typeof target)}>
-            <option value="percent">A percentage of devices</option><option value="all">All devices</option><option value="serials">Chosen serial numbers</option><option value="from_version">Devices on a firmware version</option></select></div>
-          {target === 'percent' && <div className="field"><label htmlFor="ro-p">Percentage</label><input className="inp num" id="ro-p" type="number" min={1} max={100} value={percent} onChange={(e) => setPercent(Number(e.target.value))} /><span className="hint">Start small, check for failures, then increase.</span></div>}
+            <option value="all">All devices</option><option value="serials">Chosen serial numbers</option><option value="from_version">Devices on a firmware version</option></select></div>
           {target === 'serials' && <div className="field"><label htmlFor="ro-s">Serials</label><textarea className="inp mono" id="ro-s" rows={2} value={serials} onChange={(e) => setSerials(e.target.value)} placeholder="ARG-24A0012, ARG-24A0013" /><span className="hint">Listed devices update even if they turned automatic updates off.</span></div>}
           {target === 'from_version' && <div className="field"><label htmlFor="ro-f">Devices now on</label><select className="inp mono" id="ro-f" value={fromVersion} onChange={(e) => setFromVersion(e.target.value)}>{releases.map((f) => <option key={f.id}>{f.version}</option>)}</select></div>}
           <div className="field"><label htmlFor="ro-w">Install window (device local time)</label>
@@ -200,7 +200,7 @@ function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[
             <span className="hint">Never during sleep. Devices with automatic updates off are skipped unless listed by serial.</span></div>
         </div>
         {err && <p className="err" role="alert">{err}</p>}
-        <div className="row"><button className="btn" type="submit" disabled={busy || !releaseId}>{busy ? 'Starting…' : 'Start rollout'}</button><button className="btn ghost" type="button" onClick={onCancel}>Cancel</button></div>
+        <div className="row"><button className="btn" type="submit" disabled={busy || !releaseId}>{busy ? 'Starting…' : 'Start OTA update'}</button><button className="btn ghost" type="button" onClick={onCancel}>Cancel</button></div>
       </form>
     </div>
   );

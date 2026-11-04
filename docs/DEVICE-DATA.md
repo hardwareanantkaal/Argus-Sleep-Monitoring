@@ -204,3 +204,11 @@ The device acks with `{"v":3}` after saving to flash.
 3. **Live rate:** is 5 s OK, or faster (1–2 s) for a smoother live heart-rate graph?
 4. **Hypnogram:** is one character per 5 min OK, or 1 min (480 characters for 8 h, still small)?
 5. **Struggle / unattended:** should these events trigger alerts? The owner kept the Alerts screen for v1 (3 Nov), so they could become alert types along with device offline.
+
+
+## OTA status `deferred` (added 5 Nov 2026)
+
+While a sleep session is active the firmware does not install an update. It answers the `ota` message with
+`argus/<d>/ota/status {"rid":7,"s":"deferred","err":"sleep session active"}` and does nothing else. The server
+keeps the update as `deferred` (not failed) and offers it again every 60 s while the device is online, so it
+installs after the person gets up (still only inside the rollout's install window).

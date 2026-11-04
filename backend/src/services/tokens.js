@@ -8,13 +8,11 @@ const config = require('../config');
 const db = require('../db');
 const { sha256, randomToken } = require('../lib/crypto');
 const { E } = require('../errors');
+const log = require('../logger');
 
 const AT = 'argus_at';
 const RT = 'argus_rt';
 const RT_PATH = '/api/v1/auth';
-// Two tabs refreshing at the same moment both send the same token. A reuse
-// this soon after rotation is treated as that race, not as theft.
-const REUSE_GRACE_MS = 10_000;
 
 function signAccess(userId, tokenVersion, sid) {
   return jwt.sign({ sub: userId, tv: tokenVersion, sid }, config.jwtSecret,
@@ -50,30 +48,51 @@ async function revokeAll(q, userId) {
 }
 
 // Swap a refresh token for a new pair. Returns {userId, tokenVersion, refresh}.
+// Re-use of an already rotated token:
+//   - its replacement was NEVER used -> the client just didn't get our reply
+//     (two tabs at once, or a lost response on a phone): give a fresh pair.
+//   - its replacement WAS used -> two parties hold the chain: theft, so every
+//     session of the user ends.
+// Every failure is logged with its reason.
 async function rotateRefresh(token, req) {
-  if (!token) throw E.unauth('REFRESH_INVALID', 'Please log in again');
+  const fail = (reason, userId = null) => {
+    // A visitor without cookies (the web probes once on load) is normal: debug only.
+    log[userId || reason !== 'no refresh cookie sent' ? 'info' : 'debug']({ reason, userId, ip: req.ip }, 'refresh refused');
+    return E.unauth('REFRESH_INVALID', 'Please log in again');
+  };
+  if (!token) throw fail('no refresh cookie sent');
   const hash = sha256(token);
   const result = await db.tx(async (c) => {
     const { rows } = await c.query(
-      `SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked_at, u.token_version, u.is_disabled, u.deleted_at
+      `SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked_at, rt.replaced_by, u.token_version, u.is_disabled, u.deleted_at
          FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
         WHERE rt.token_hash = $1 FOR UPDATE OF rt`, [hash]);
     const rt = rows[0];
-    if (!rt) throw E.unauth('REFRESH_INVALID', 'Please log in again');
+    if (!rt) return { error: 'unknown token (logged out, or all sessions ended)' };
+    if (new Date(rt.expires_at) <= new Date() || rt.deleted_at) return { error: 'expired', userId: rt.user_id };
+    if (rt.is_disabled) return { disabled: true };
     if (rt.revoked_at) {
+      const next = rt.replaced_by
+        ? (await c.query('SELECT id, revoked_at FROM refresh_tokens WHERE id = $1 FOR UPDATE', [rt.replaced_by])).rows[0]
+        : null;
+      if (next && !next.revoked_at) {
+        // Lost reply / concurrent refresh: retire the unused replacement, issue a new one.
+        await c.query('DELETE FROM refresh_tokens WHERE id = $1', [next.id]);
+        const refresh = await createRefresh(c, rt.user_id, req);
+        await c.query('UPDATE refresh_tokens SET replaced_by = $2 WHERE id = $1', [rt.id, refresh.id]);
+        log.info({ userId: rt.user_id }, 'refresh retried with an already rotated token: new pair issued');
+        return { userId: rt.user_id, tokenVersion: rt.token_version, refresh };
+      }
       // Return instead of throwing: a throw here would roll back revokeAll.
-      if (Date.now() - new Date(rt.revoked_at).getTime() > REUSE_GRACE_MS) await revokeAll(c, rt.user_id);
-      return null;
+      await revokeAll(c, rt.user_id);
+      return { error: 'rotated token re-used after its replacement was used: all sessions ended', userId: rt.user_id };
     }
-    if (new Date(rt.expires_at) <= new Date() || rt.deleted_at) {
-      throw E.unauth('REFRESH_INVALID', 'Please log in again');
-    }
-    if (rt.is_disabled) throw E.forbidden('USER_DISABLED', 'This account is disabled');
-    await c.query('UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1', [rt.id]);
     const refresh = await createRefresh(c, rt.user_id, req);
+    await c.query('UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2 WHERE id = $1', [rt.id, refresh.id]);
     return { userId: rt.user_id, tokenVersion: rt.token_version, refresh };
   });
-  if (!result) throw E.unauth('REFRESH_INVALID', 'Please log in again');
+  if (result.disabled) throw E.forbidden('USER_DISABLED', 'This account is disabled');
+  if (result.error) throw fail(result.error, result.userId);
   return result;
 }
 

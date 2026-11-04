@@ -33,7 +33,7 @@ function Inner() {
             <div className="card tile"><span className="label">Registered devices</span><div className="v">{c.registered}</div><span className="xs muted">+{c.registeredThisWeek} this week</span></div>
             <div className="card tile"><span className="label">Online now</span><div className="v" style={{ color: 'var(--ok)' }}>{c.online}</div><span className="xs muted">{Math.round((c.online / claimed) * 100)}% · {c.offline} offline, {c.unclaimed} not claimed{c.disabled ? `, ${c.disabled} disabled` : ''}</span></div>
             <div className="card tile"><span className="label">Customers</span><div className="v">{c.customers}</div><span className="xs muted">+{c.customersThisWeek} this week</span></div>
-            <div className="card tile"><span className="label">OTA rollouts</span><div className="v">{c.rolloutsRunning}<small>running</small></div>{can('firmware.view') && <Link className="xs" href="/admin/firmware">See rollouts</Link>}</div>
+            <div className="card tile"><span className="label">OTA updates</span><div className="v">{c.rolloutsRunning}<small>running</small></div>{can('firmware.view') && <Link className="xs" href="/admin/firmware">See OTA updates</Link>}</div>
           </div>
           <div className="g21">
             <div className="card">
@@ -58,7 +58,7 @@ function Inner() {
                 <div className="divider" style={{ marginBlock: 16 }} />
                 <div className="stack" style={{ gap: 8 }}>
                   {can('devices.register') && <Link className="btn ghost" href="/admin/register"><Icon name="usb" /> Register a device</Link>}
-                  {can('firmware.rollout') && <Link className="btn ghost" href="/admin/firmware"><Icon name="upload" /> Start a rollout</Link>}
+                  {can('firmware.rollout') && <Link className="btn ghost" href="/admin/firmware"><Icon name="upload" /> Start an OTA update</Link>}
                 </div>
               </>}
             </div>

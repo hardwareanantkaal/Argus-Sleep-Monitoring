@@ -79,7 +79,7 @@ export const db = {
     { id: 'fw-1', version: '1.3.9', channel: 'stable', chipModel: 'ESP32-S3', fileSize: 1237354, sha256: 'e1a0f7…9bd4', notes: 'First production build', uploadedBy: 'Devam Gandhi', createdAt: daysAgo(36), deviceCount: 18 },
   ] as FirmwareRelease[],
   rollouts: [
-    { id: 'r-7', version: '1.4.3-beta', target: '5% (20 devices)', createdBy: 'Aarav Desai', createdAt: daysAgo(2), status: 'running', counts: { done: 12, downloading: 5, waiting: 2, failed: 1 } },
+    { id: 'r-7', version: '1.4.3-beta', target: '5% (20 devices)', createdBy: 'Aarav Desai', createdAt: daysAgo(2), status: 'running', counts: { done: 12, downloading: 5, waiting: 1, failed: 1, deferred: 1 } },
     { id: 'r-6', version: '1.4.2', target: 'All devices (418)', createdBy: 'Devam Gandhi', createdAt: daysAgo(13), status: 'finished', counts: { done: 402, downloading: 0, waiting: 14, failed: 2 } },
   ] as Rollout[],
   commands: {} as Record<string, CommandRow[]>,

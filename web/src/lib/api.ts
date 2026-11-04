@@ -73,10 +73,12 @@ export async function api<T = unknown>(method: Method, path: string, body?: unkn
     return await run();
   } catch (e) {
     const isAuthCall = path.startsWith('/auth/');
-    if (e instanceof ApiError && e.status === 401 && e.code === 'TOKEN_EXPIRED' && !isAuthCall) {
+    // Access cookie expired or missing (e.g. app reopened after 15 min): refresh ONCE (shared promise
+    // across simultaneous requests), retry, and only then give up and show the login page.
+    if (e instanceof ApiError && e.status === 401 && (e.code === 'TOKEN_EXPIRED' || e.code === 'NOT_LOGGED_IN') && !isAuthCall) {
       if (await refreshSession()) return run();
       onLoggedOut?.();
-    } else if (e instanceof ApiError && (e.code === 'REFRESH_INVALID' || e.code === 'USER_DISABLED' || (e.status === 401 && !isAuthCall && e.code === 'NOT_LOGGED_IN'))) {
+    } else if (e instanceof ApiError && (e.code === 'REFRESH_INVALID' || e.code === 'USER_DISABLED')) {
       onLoggedOut?.();
     }
     throw e;

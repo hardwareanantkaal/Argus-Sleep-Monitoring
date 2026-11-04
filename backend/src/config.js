@@ -48,7 +48,7 @@ module.exports = {
     topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'argus',
   },
 
-  deviceStaleS: int('DEVICE_STALE_S', 90),
+  deviceStaleS: int('DEVICE_STALE_S', 30),   // firmware keepalive 15 s
 
   // OTA: where uploaded .bin files live, how long a download link works, and
   // the address sensors use to fetch firmware (the gateway serves /fw/).

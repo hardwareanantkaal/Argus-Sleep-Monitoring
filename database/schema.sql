@@ -44,7 +44,7 @@ CREATE TYPE command_status   AS ENUM ('pending', 'sent', 'acked', 'failed', 'exp
 CREATE TYPE fw_channel       AS ENUM ('beta', 'stable');
 CREATE TYPE rollout_target   AS ENUM ('all', 'percent', 'serials', 'from_version');
 CREATE TYPE rollout_status   AS ENUM ('running', 'paused', 'finished', 'cancelled');
-CREATE TYPE ota_status       AS ENUM ('pending', 'sent', 'downloading', 'success', 'failed', 'skipped');
+CREATE TYPE ota_status       AS ENUM ('pending', 'sent', 'downloading', 'success', 'failed', 'skipped', 'deferred');  -- deferred: 005
 CREATE TYPE alert_type       AS ENUM ('breath_low', 'hr_out_of_range', 'out_of_bed',
                                       'no_movement', 'device_offline');
 CREATE TYPE delivery_channel AS ENUM ('push', 'sms');
@@ -145,7 +145,8 @@ CREATE TABLE refresh_tokens (
   ip           INET,
   expires_at   TIMESTAMPTZ NOT NULL,
   revoked_at   TIMESTAMPTZ,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  replaced_by  UUID REFERENCES refresh_tokens(id) ON DELETE SET NULL  -- set on rotation (005)
 );
 CREATE INDEX refresh_tokens_user_idx ON refresh_tokens (user_id) WHERE revoked_at IS NULL;
 

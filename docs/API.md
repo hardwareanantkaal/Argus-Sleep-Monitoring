@@ -46,7 +46,7 @@
 | `argus_rt` | refresh token (random; stored only as a sha256 hash in `refresh_tokens`) | 30 days | `/api/v1/auth` | httpOnly, Secure, SameSite=Lax |
 
 - When `argus_at` expires, any call returns `401 TOKEN_EXPIRED`. The web app then calls `POST /auth/refresh` once and retries the request.
-- **The refresh token rotates on every refresh.** Re-using an old one logs that user out everywhere (theft detection), the same as Water Tank.
+- **The refresh token rotates on every refresh.** If an already-rotated token comes back while its replacement has **never been used** (two tabs at once, or the reply with the new cookie was lost), the backend simply issues a fresh pair. If the replacement **was** used, two parties hold the chain: that's theft, and the user is logged out everywhere. Every refused refresh is logged with its reason (migration 005).
 - **Every request reloads the user.** Disabled, deleted and `token_version` are re-checked each time, so a block takes effect immediately.
 
 ---
@@ -273,7 +273,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | 9.3 | PATCH | `/admin/firmware/:id` | `firmware.upload` | `{channel?, notes?}` → release |
 | 9.4 | DELETE | `/admin/firmware/:id` | `firmware.upload` | → `204` (the file is removed too). Refused while any rollout uses it: `409 RELEASE_IN_USE`. |
 | 9.5 | POST | `/admin/ota/rollouts` | `firmware.rollout` | `{releaseId, target: "all" \| "percent" \| "serials" \| "from_version", percent?, serials?[], fromVersion?, installWindow: {from: "10:00", to: "18:00"} \| null, notes?}` → `201 {rolloutId, devices: n}`. The device list is fixed now: disabled devices and devices already on that version are left out; devices with `autoUpdate = false` are left out unless listed by serial; a device still open in an older rollout moves to the new one (old row `skipped`). A rollout with 0 devices is `finished` at once. `422 UNKNOWN_SERIAL` lists serials that don't exist. |
-| 9.6 | GET | `/admin/ota/rollouts` | `firmware.view` | → `{items: [{id, releaseId, version, target, percent, fromVersion, installWindow, createdBy, createdAt, finishedAt, status, notes, counts: {done, downloading, waiting, failed, skipped}}]}` (newest 100). `downloading` counts devices that were sent the message or report downloading. `status` is `running`, `paused`, `finished` or `cancelled`. |
+| 9.6 | GET | `/admin/ota/rollouts` | `firmware.view` | → `{items: [{id, releaseId, version, target, percent, fromVersion, installWindow, createdBy, createdAt, finishedAt, status, notes, counts: {done, downloading, waiting, deferred, failed, skipped}}]}` (newest 100). `waiting` includes `deferred`. `downloading` counts devices that were sent the message or report downloading. `status` is `running`, `paused`, `finished` or `cancelled`. |
 | 9.7 | GET | `/admin/ota/rollouts/:id` | `firmware.view` | → rollout + `devices[{deviceId, serial, status, fromVersion, error, updatedAt}]` |
 | 9.8 | POST | `/admin/ota/rollouts/:id/pause` · `/resume` · `/cancel` · `/retry` | `firmware.rollout` | → `204`, or `409 ROLLOUT_STATE` when not allowed (e.g. pausing a paused one). Pause stops new sends; devices already updated keep the new version. Cancel marks `pending` devices `skipped`. Retry sets `failed` devices back to `pending` and the rollout back to `running` (also after `finished`). |
 | 9.9 | GET | `/fw/:releaseId.bin?t=<token>` | device | Firmware download for OTA, outside `/api/v1` (the gateway proxies `/fw/`). The token is in the MQTT `ota` message, is valid for one release only and lasts 10 min (`OTA_TOKEN_TTL_S`); otherwise `403`. Headers: `Content-Length`, `x-MD5` (hex), `Cache-Control: no-store`, `Content-Type: application/octet-stream`. |
@@ -347,7 +347,7 @@ The full payloads are in [DEVICE-DATA.md](DEVICE-DATA.md); this table is the con
 | `<p>/<d>/settings/set` | → device | 1, **retained** | `{"v":4,"exit_s":300,"live_s":2,"idle_s":60,"struggle":1,"unattended":0,"unatt_min":30,"min_sess":25}` `min_sess` = Sleep rules `minSessionMin` (9.21): the firmware discards sessions shorter than this. Changing it in 9.21 bumps **every** device's version and republishes, so each device acks the new value. |
 | `<p>/<d>/settings/ack` | device → | 1 | `{"v":4}` after saving to flash. Applied only if `applied_version < v ≤ version`. The device must re-ack a duplicate `v`. |
 | `<p>/<d>/ota` | → device | 1 | `{"rid":7,"ver":"1.4.3","url":"https://<domain>/fw/12.bin?t=…","sha256":"…","size":1240000}` |
-| `<p>/<d>/ota/status` | device → | 1 | `{"rid":7,"s":"downloading" \| "success" \| "failed","err":"…"}`. A later `info` / `state` with `fw == ver` also counts as success. |
+| `<p>/<d>/ota/status` | device → | 1 | `{"rid":7,"s":"downloading" \| "deferred" \| "success" \| "failed","err":"…"}`. **`deferred`** = the firmware postponed it (e.g. `"err":"sleep session active"`): stored as device status `deferred` (not failed), counted in `counts.waiting` and `counts.deferred`, and re-offered every 60 s while the device is online. A later `info` / `state` with `fw == ver` also counts as success. |
 
 **What a device may publish and subscribe to (ACL):** only topics under `<p>/<its own username>/`.
 - Publish: `status`, `info`, `state`, `event`, `session`, `cmd/ack`, `logs`, `settings/ack`, `ota/status`.

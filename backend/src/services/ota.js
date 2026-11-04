@@ -20,7 +20,8 @@ const mqtt = require('./mqtt');
 const live = require('./live');
 const realtime = require('./realtime');
 
-const OPEN = ['pending', 'sent', 'downloading'];
+// deferred = the firmware postponed it (sleep session active); re-offered every 60 s.
+const OPEN = ['pending', 'deferred', 'sent', 'downloading'];
 
 // ---- download tokens (/fw/<id>.bin?t=...) --------------------------------
 function signDownload(releaseId, mac) {
@@ -44,7 +45,8 @@ async function counts(rolloutId, q = db) {
   return {
     done: by.success || 0,
     downloading: (by.sent || 0) + (by.downloading || 0),
-    waiting: by.pending || 0,
+    waiting: (by.pending || 0) + (by.deferred || 0),
+    deferred: by.deferred || 0,
     failed: by.failed || 0,
     skipped: by.skipped || 0,
   };
@@ -83,13 +85,13 @@ function inWindow(from, to, tz, now = DateTime.now()) {
 // online and inside its window. `onlyMac` limits it to one device.
 async function dispatch(onlyMac = null) {
   const { rows } = await db.query(
-    `SELECT rd.rollout_id, rd.device_id, d.mqtt_username AS mac, d.timezone, r.window_from, r.window_to,
+    `SELECT rd.rollout_id, rd.device_id, rd.status AS prev_status, d.mqtt_username AS mac, d.timezone, r.window_from, r.window_to,
             f.id AS release_id, f.version, f.sha256, f.file_size
        FROM ota_rollout_devices rd
        JOIN ota_rollouts r ON r.id = rd.rollout_id AND r.status = 'running'
        JOIN firmware_releases f ON f.id = r.release_id
        JOIN devices d ON d.id = rd.device_id AND NOT d.is_disabled
-      WHERE rd.status = 'pending' AND ($1::text IS NULL OR d.mqtt_username = $1)
+      WHERE rd.status IN ('pending', 'deferred') AND ($1::text IS NULL OR d.mqtt_username = $1)
       ORDER BY rd.rollout_id, d.serial_no`, [onlyMac]);
   for (const x of rows) {
     if (!live.getStatus(x.device_id)?.online) continue;
@@ -103,8 +105,9 @@ async function dispatch(onlyMac = null) {
     }
     const u = await db.query(
       `UPDATE ota_rollout_devices SET status = 'sent', updated_at = now()
-        WHERE rollout_id = $1 AND device_id = $2 AND status = 'pending'`, [x.rollout_id, x.device_id]);
-    if (u.rowCount) {
+        WHERE rollout_id = $1 AND device_id = $2 AND status IN ('pending', 'deferred') `,
+      [x.rollout_id, x.device_id]);
+    if (u.rowCount && x.prev_status !== 'deferred') {
       await db.query(`INSERT INTO device_events (device_id, type, message, data) VALUES ($1, 'ota_started', $2, $3)`,
         [x.device_id, `update to ${x.version} sent`, JSON.stringify({ rid: x.rollout_id })]);
       await emitProgress(x.rollout_id, x.device_id, 'sent');
@@ -114,7 +117,7 @@ async function dispatch(onlyMac = null) {
 
 // Mark one device's result. Only moves forward from an open status.
 async function setDeviceStatus(rolloutId, deviceId, status, error = null) {
-  const allowedFrom = status === 'downloading' ? ['pending', 'sent'] : OPEN;
+  const allowedFrom = status === 'downloading' || status === 'deferred' ? ['pending', 'deferred', 'sent'] : OPEN;
   const u = await db.query(
     `UPDATE ota_rollout_devices SET status = $3, error = $4, updated_at = now()
       WHERE rollout_id = $1 AND device_id = $2 AND status = ANY($5) RETURNING rollout_id`,
@@ -136,10 +139,11 @@ async function setDeviceStatus(rolloutId, deviceId, status, error = null) {
 async function onStatus(mac, buf) {
   let m;
   try { m = JSON.parse(buf.toString()); } catch { return; }
-  if (!Number.isInteger(m?.rid) || !['downloading', 'success', 'failed'].includes(m.s)) return;
+  if (!Number.isInteger(m?.rid) || !['downloading', 'deferred', 'success', 'failed'].includes(m.s)) return;
   const d = await db.one('SELECT id FROM devices WHERE mqtt_username = $1', [mac]);
   if (!d) return;
-  await setDeviceStatus(m.rid, d.id, m.s, m.s === 'failed' ? String(m.err || 'failed').slice(0, 200) : null);
+  const err = m.s === 'failed' || m.s === 'deferred' ? String(m.err || m.s).slice(0, 200) : null;
+  await setDeviceStatus(m.rid, d.id, m.s, err);
 }
 
 // info/state reported a firmware version: an open OTA to that version = success.
@@ -205,7 +209,7 @@ async function control(rolloutId, action) {
     if (!['running', 'paused'].includes(r.status)) return { error: `cannot cancel a ${r.status} rollout` };
     await db.query(`UPDATE ota_rollouts SET status = 'cancelled', finished_at = now() WHERE id = $1`, [rolloutId]);
     await db.query(`UPDATE ota_rollout_devices SET status = 'skipped', error = 'rollout cancelled', updated_at = now()
-                     WHERE rollout_id = $1 AND status = 'pending'`, [rolloutId]);
+                     WHERE rollout_id = $1 AND status IN ('pending', 'deferred')`, [rolloutId]);
   } else if (action === 'retry') {
     if (r.status === 'cancelled') return { error: 'cannot retry a cancelled rollout' };
     const u = await db.query(`UPDATE ota_rollout_devices SET status = 'pending', error = NULL, updated_at = now()

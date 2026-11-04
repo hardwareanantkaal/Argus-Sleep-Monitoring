@@ -179,7 +179,7 @@ export interface FirmwareRelease {
 export interface Rollout {
   id: string; version: string; target: string; createdBy: string; createdAt: string;
   status: 'running' | 'paused' | 'finished' | 'cancelled';
-  counts: { done: number; downloading: number; waiting: number; failed: number };
+  counts: { done: number; downloading: number; waiting: number; failed: number; /** waiting: sleep session active */ deferred?: number };
 }
 export interface TeamResponse {
   members: { userId: string; fullName: string; phone: string; role: { id: number; name: string }; lastActiveAt: string | null }[];

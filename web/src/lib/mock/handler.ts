@@ -571,7 +571,8 @@ export function startMockRollouts() {
       const c = r.counts;
       if (c.downloading > 0) { const n = Math.min(c.downloading, 1 + Math.floor(Math.random() * 2)); c.downloading -= n; if (Math.random() < 0.1) c.failed += 1; else c.done += n; }
       if (c.waiting > 0) { const n = Math.min(c.waiting, 1 + Math.floor(Math.random() * 2)); c.waiting -= n; c.downloading += n; }
-      if (!c.waiting && !c.downloading) r.status = 'finished';
+      if (!c.waiting && c.deferred && Math.random() < 0.3) { c.deferred -= 1; c.downloading += 1; } // session ended
+      if (!c.waiting && !c.downloading && !c.deferred) r.status = 'finished';
       mockEmit('rollout:progress', { rolloutId: r.id, counts: { ...c }, status: r.status });
     }
   }, 2500);
