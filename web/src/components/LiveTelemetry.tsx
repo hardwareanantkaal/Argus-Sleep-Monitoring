@@ -1,7 +1,7 @@
 'use client';
 
-// Live view extras from API.md §11a (firmware 2.0.0+): C1001 composite + diagnostics, and the
-// current session + C1001 night stats with a live hypnogram. Live only, never stored.
+// Live view extras from API.md §11a (firmware 2.0.0+): Sensor composite + diagnostics, and the
+// current session + Sensor night stats with a live hypnogram. Live only, never stored.
 
 import { Hypnogram } from './charts';
 import { Icon } from './Icon';
@@ -22,7 +22,7 @@ export function CompositeCard({ lv, fw, rssi }: { lv: LiveValues | null; fw?: st
   const c = lv?.cmp;
   return (
     <div className="card">
-      <div className="ch"><div className="t"><h2>Composite Telemetry &amp; Firmware Diagnostics</h2><span className="xs muted">From the C1001 radar, live only</span></div></div>
+      <div className="ch"><div className="t"><h2>Composite Telemetry &amp; Firmware Diagnostics</h2><span className="xs muted">From the Sensor, live only</span></div></div>
       {c ? <div className="g2" style={{ gap: '9px 32px', marginBottom: 14 }}>
         <dl className="kv">
           <dt>Disturbance</dt><dd>{LEVEL[c.dis] ?? c.dis} <span className="muted xs">({c.dis}/3)</span></dd>
@@ -74,7 +74,7 @@ export function SessionCard({ lv, tz, stages, firstMin }: { lv: LiveValues | nul
         </div>
         {n && <>
           <div className="divider" style={{ marginBlock: 12 }} />
-          <span className="label">C1001 night statistics</span>
+          <span className="label">Sensor night statistics</span>
           <div className="g2" style={{ gap: '9px 32px', marginTop: 8 }}>
             <dl className="kv">
               <dt>Score</dt><dd className="num">{n.sc}</dd>

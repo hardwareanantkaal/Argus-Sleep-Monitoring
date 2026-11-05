@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { getSocket } from './socket';
-import type { LiveValues } from './types';
+import type { DevicePerm, LiveValues } from './types';
 
 export interface LiveMsg extends LiveValues { deviceId: string; serial: string }
 export interface StatusMsg { deviceId: string; online: boolean; lastSeenAt: string | null }
@@ -39,4 +39,16 @@ export function useLive(statusIds: string[], liveIds: string[], onLive?: (m: Liv
   }, [sKey, lKey]);
 
   return { live, status };
+}
+
+/** API.md §10 `access:changed`: a share or temporary access changed. `null` permissions = the device is gone for me. */
+export function useAccessChanged(fn: (m: { deviceId: string; myPermissions: DevicePerm[] | null }) => void) {
+  useEffect(() => {
+    const s = getSocket();
+    const h = (m: { deviceId: string; myPermissions: DevicePerm[] | null }) => fn(m);
+    s.on('access:changed', h);
+    return () => s.off('access:changed', h);
+    // fn is intentionally not a dependency (callers pass inline functions)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }

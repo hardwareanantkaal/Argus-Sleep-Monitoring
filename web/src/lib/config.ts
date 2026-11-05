@@ -3,7 +3,7 @@
 
 export type Area =
   | 'auth' | 'devices' | 'live' | 'claim' | 'sleep' | 'settings' | 'sharing' | 'alerts'
-  | 'admin-devices' | 'customers' | 'ota' | 'team' | 'audit' | 'platform';
+  | 'admin-devices' | 'customers' | 'ota' | 'team' | 'audit' | 'platform' | 'vendors';
 
 const MODE = (process.env.NEXT_PUBLIC_API_MODE || 'mock') as 'mock' | 'live' | 'mixed';
 const LIVE_AREAS = new Set((process.env.NEXT_PUBLIC_LIVE_AREAS || '').split(',').map((s) => s.trim()).filter(Boolean));
@@ -31,6 +31,7 @@ const AREAS: [Area, RegExp][] = [
   ['team', /^\/admin\/(team|roles)/],
   ['audit', /^\/admin\/audit/],
   ['platform', /^\/admin\/platform-settings/],
+  ['vendors', /^\/(vendor|admin\/vendors)(\/|$)/],
 ];
 
 export function areaOf(path: string): Area {

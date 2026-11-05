@@ -3,7 +3,7 @@
 
 import type {
   AlertItem, AlertRule, DevicePerm, NightCard, NightDetail, SensorSettings, StaffPerm, AuditItem,
-  FirmwareRelease, Rollout, CommandRow, PlatformSettings,
+  FirmwareRelease, Rollout, CommandRow, PlatformSettings, GrantPerm,
 } from '../types';
 
 export const ALL_DEVICE_PERMS: DevicePerm[] = ['live.view', 'history.view', 'alerts.receive', 'settings.edit', 'sharing.manage'];
@@ -19,6 +19,7 @@ export const STAFF_PERMS: { code: StaffPerm; label: string }[] = [
   { code: 'team.manage', label: 'Manage team and roles' },
   { code: 'audit.view', label: 'View audit log' },
   { code: 'platform.settings', label: 'Change sleep rules' },
+  { code: 'vendors.manage', label: 'Manage vendors' },
 ];
 const ALL_STAFF = STAFF_PERMS.map((p) => p.code);
 
@@ -34,11 +35,21 @@ export interface MDevice {
   ip: string | null; wifiSsid: string | null; rssi: number | null; uptimeS: number | null;
   sleepCutoff: string; autoUpdate: boolean; isDisabled: boolean; disabledReason: string | null;
   claimCode: string | null; sensor: SensorSettings;
+  /** §15: a vendor device has vendorId set and no person owner */
+  vendorId?: string | null; groupId?: string | null;
   base: { hr: number; br: number; bed: number; ss: number };
+}
+export interface MVendor { id: string; name: string; contactName: string | null; phone: string | null; email: string | null; status: 'active' | 'disabled'; createdAt: string }
+export interface MVendorMember { vendorId: string; userId: string; role: 'owner' | 'staff'; joinedAt: string }
+export interface MGroup { id: string; vendorId: string; name: string }
+export interface MGrant {
+  id: string; vendorId: string; deviceId: string; label: string; userId: string | null; permissions: GrantPerm[];
+  startsAt: string; endsAt: string; inviteExpiresAt: string | null; endedAt: string | null; createdAt: string; createdBy: string;
 }
 export interface MShare { deviceId: string; userId: string; permissions: DevicePerm[] }
 export interface MInvite {
-  id: string; token: string; kind: 'device' | 'staff'; deviceId?: string; roleId?: number; label: string;
+  id: string; token: string; kind: 'device' | 'staff' | 'vendor' | 'grant'; deviceId?: string; roleId?: number; label: string;
+  vendorId?: string; vendorRole?: 'owner' | 'staff'; grantId?: string;
   permissions?: DevicePerm[]; invitedBy: string; expiresAt: string; status: 'invite_sent' | 'accepted' | 'cancelled';
 }
 
@@ -61,7 +72,9 @@ export const db = {
     { id: 'u-arjun', fullName: 'Arjun Mehta', phone: '+919924577810', country: 'IN', roleId: null, status: 'active', createdAt: daysAgo(26), lastActiveAt: ago(60) },
     { id: 'u-fatima', fullName: 'Fatima Shaikh', phone: '+971504127781', country: 'AE', roleId: null, status: 'active', createdAt: daysAgo(25), lastActiveAt: ago(1500) },
     { id: 'u-neha', fullName: 'Neha Iyer', phone: '+919004031122', country: 'IN', roleId: null, status: 'active', createdAt: daysAgo(22), lastActiveAt: ago(4300) },
-    { id: 'u-sunrise', fullName: 'Sunrise Care Home', phone: '+917948902200', country: 'IN', roleId: null, status: 'active', createdAt: daysAgo(14), lastActiveAt: ago(20) },
+    { id: 'u-sunrise', fullName: 'Kavita Nair', phone: '+917948902200', country: 'IN', roleId: null, status: 'active', createdAt: daysAgo(14), lastActiveAt: ago(20) },
+    { id: 'u-meera', fullName: 'Meera Joshi', phone: '+919825077301', country: 'IN', roleId: null, status: 'active', createdAt: daysAgo(12), lastActiveAt: ago(40) },
+    { id: 'u-ramesh', fullName: 'Ramesh Kumar', phone: '+919811044520', country: 'IN', roleId: null, status: 'active', createdAt: daysAgo(3), lastActiveAt: ago(90) },
     { id: 'u-vikram', fullName: 'Vikram Rao', phone: '+447700900461', country: 'GB', roleId: null, status: 'disabled', createdAt: daysAgo(6), lastActiveAt: ago(8640) },
     { id: 'u-devam', fullName: 'Devam Gandhi', phone: '+919898011223', country: 'IN', roleId: 1, status: 'active', createdAt: daysAgo(40), lastActiveAt: ago(1) },
     { id: 'u-aarav', fullName: 'Aarav Desai', phone: '+919979022014', country: 'IN', roleId: 2, status: 'active', createdAt: daysAgo(38), lastActiveAt: ago(60) },
@@ -87,6 +100,10 @@ export const db = {
   audit: [] as AuditItem[],
   platform: { mergeGapMin: 30, minSessionMin: 25, defaultSleepCutoff: '12:00' } as PlatformSettings,
   // API.md 2.5/2.6 per user. Alerts are in-app only in v1; mutedDeviceIds = "Show me alerts from" switched off.
+  vendors: [] as MVendor[],
+  vendorMembers: [] as MVendorMember[],
+  groups: [] as MGroup[],
+  grants: [] as MGrant[],
   prefs: {} as Record<string, { quietEnabled: boolean; quietFrom: string; quietTo: string; mutedDeviceIds: string[] }>,
 };
 
@@ -107,7 +124,9 @@ db.devices = [
   dev('0022', { name: 'Nani', room: 'Ground floor', tz: 'Asia/Dubai', place: null, ownerId: 'u-fatima', online: true, lastSeenAt: ago(0), fw: '1.4.3-beta', mac: '34:85:18:A1:13:A4', ip: '192.168.0.77', rssi: -70, uptimeS: 39700, base: { hr: 72, br: 17, bed: 0, ss: 2 } }),
   dev('0026', { name: 'Main bedroom', room: 'Bedroom', tz: 'Asia/Kolkata', place: 'Chennai', ownerId: 'u-neha', online: false, lastSeenAt: ago(300), mac: '34:85:18:A1:15:30' }),
   dev('0027', { name: 'Kids room', room: 'Bedroom 2', tz: 'Asia/Kolkata', place: 'Chennai', ownerId: 'u-neha', online: true, lastSeenAt: ago(0), mac: '34:85:18:A1:15:3B', rssi: -55, uptimeS: 371000, base: { hr: 79, br: 19, bed: 1, ss: 1 } }),
-  dev('0030', { name: 'Room 4', room: 'Ward B', tz: 'Asia/Kolkata', place: 'Ahmedabad', ownerId: 'u-sunrise', online: true, lastSeenAt: ago(0), fw: '1.4.3-beta', mac: '34:85:18:A1:17:F1', rssi: -66, uptimeS: 781000, base: { hr: 64, br: 13, bed: 1, ss: 0 } }),
+  dev('0030', { name: 'Room 4', room: 'Ward B', tz: 'Asia/Kolkata', place: 'Ahmedabad', ownerId: null, vendorId: 'v-sunrise', groupId: 'g-wardb', online: true, lastSeenAt: ago(0), fw: '1.4.3-beta', mac: '34:85:18:A1:17:F1', rssi: -66, uptimeS: 781000, base: { hr: 64, br: 13, bed: 1, ss: 0 } }),
+  dev('0033', { name: 'Room 7', room: 'Ward C', tz: 'Asia/Kolkata', place: 'Ahmedabad', vendorId: 'v-sunrise', groupId: 'g-wardc', online: true, lastSeenAt: ago(0), mac: '34:85:18:A1:17:F9', rssi: -59, uptimeS: 402000, base: { hr: 70, br: 15, bed: 1, ss: 1 } }),
+  dev('0034', { name: 'Room 9', room: null, tz: 'Asia/Kolkata', place: 'Ahmedabad', vendorId: 'v-sunrise', online: false, lastSeenAt: ago(180), mac: '34:85:18:A1:17:FE' }),
   dev('0031', { mac: '34:85:18:A1:18:02', registeredAt: ago(30 * 60), claimCode: 'K7P29XQM4HTR' }),
   dev('0032', { mac: '34:85:18:A1:18:0D', registeredAt: ago(29 * 60), claimCode: 'W3RT8MNB6KQZ' }),
 ];
@@ -120,6 +139,28 @@ db.invites = [
   { id: 'inv-1', token: 'demo-family', kind: 'device', deviceId: 'd-0012', label: 'Dr. Mehul Joshi', permissions: ['history.view'], invitedBy: 'u-priya', expiresAt: new Date(now + 5 * 86400000).toISOString(), status: 'invite_sent' },
   { id: 'inv-2', token: 'demo-staff', kind: 'staff', roleId: 4, label: 'Meet Shah', invitedBy: 'u-devam', expiresAt: new Date(now + 6 * 86400000).toISOString(), status: 'invite_sent' },
 ];
+db.vendors = [
+  { id: 'v-sunrise', name: 'Sunrise Care Home', contactName: 'Dr. Kavita Nair', phone: '+917948902200', email: 'admin@sunrisecare.example', status: 'active', createdAt: daysAgo(14) },
+  { id: 'v-city', name: 'City Hospital', contactName: 'Mr. Sanjay Rao', phone: '+912266001100', email: null, status: 'active', createdAt: daysAgo(2) },
+];
+db.vendorMembers = [
+  { vendorId: 'v-sunrise', userId: 'u-sunrise', role: 'owner', joinedAt: daysAgo(14) },
+  { vendorId: 'v-sunrise', userId: 'u-meera', role: 'staff', joinedAt: daysAgo(12) },
+];
+db.groups = [
+  { id: 'g-wardb', vendorId: 'v-sunrise', name: 'Ward B' },
+  { id: 'g-wardc', vendorId: 'v-sunrise', name: 'Ward C' },
+];
+db.grants = [
+  { id: 'gr-1', vendorId: 'v-sunrise', deviceId: 'd-0030', label: 'Ramesh (son)', userId: 'u-ramesh', permissions: ['live.view', 'history.view', 'alerts.receive'],
+    startsAt: daysAgo(2), endsAt: new Date(now + 3 * 86400000).toISOString(), inviteExpiresAt: null, endedAt: null, createdAt: daysAgo(2.1), createdBy: 'u-sunrise' },
+  { id: 'gr-2', vendorId: 'v-sunrise', deviceId: 'd-0033', label: 'Mrs. Gupta (daughter)', userId: null, permissions: ['live.view', 'history.view', 'alerts.receive'],
+    startsAt: ago(60), endsAt: new Date(now + 5 * 86400000).toISOString(), inviteExpiresAt: new Date(now + 5 * 86400000).toISOString(), endedAt: null, createdAt: ago(70), createdBy: 'u-meera' },
+];
+db.invites.push(
+  { id: 'inv-3', token: 'demo-vendor', kind: 'vendor', vendorId: 'v-sunrise', vendorRole: 'staff', label: 'Nurse Pooja', invitedBy: 'u-sunrise', expiresAt: new Date(now + 6 * 86400000).toISOString(), status: 'invite_sent' },
+  { id: 'inv-4', token: 'demo-grant', kind: 'grant', vendorId: 'v-sunrise', grantId: 'gr-2', deviceId: 'd-0033', label: 'Mrs. Gupta (daughter)', invitedBy: 'u-meera', expiresAt: new Date(now + 5 * 86400000).toISOString(), status: 'invite_sent' },
+);
 db.alerts = [
   { id: 'al-4', deviceId: 'd-0013', deviceName: "Dad's room", type: 'out_of_bed', severity: 'warning', title: 'Out of bed for 14 min', detail: 'Rule: out of bed more than 10 min between 23:00 and 06:00', value: 14, startedAt: ago(330), endedAt: ago(316) },
   { id: 'al-3', deviceId: 'd-0012', deviceName: "Mom's bedroom", type: 'breath_low', severity: 'critical', title: 'Breathing rate low: 7 /min', detail: 'Rule: breath rate below 8 /min for 30 s', value: 7, startedAt: ago(415), endedAt: ago(413) },
@@ -137,7 +178,7 @@ db.commands['d-0012'] = [
   { id: 'c-2', type: 'ota_check', requestedBy: 'Aarav Desai', status: 'done', error: null, createdAt: daysAgo(13), sentAt: daysAgo(13), ackedAt: daysAgo(13) },
   { id: 'c-1', type: 'logs', requestedBy: 'Sneha Trivedi', status: 'done', error: null, createdAt: daysAgo(16), sentAt: daysAgo(16), ackedAt: daysAgo(16) },
 ];
-db.logs['d-0012'] = [{ id: 'lg-1', createdAt: daysAgo(16), content: '[06:41:02] I wifi: connected, rssi=-57\n[06:41:02] I mqtt: connected to broker\n[06:41:03] I radar: C1001 init ok, mode=sleep\n[06:42:10] I radar: presence=1 hr=61 br=14\n[06:50:00] I session: sid=128 queued, sent, acked\n[07:05:13] W wifi: rssi dropped to -78\n[07:05:19] I wifi: rssi back to -58' }];
+db.logs['d-0012'] = [{ id: 'lg-1', createdAt: daysAgo(16), content: '[06:41:02] I wifi: connected, rssi=-57\n[06:41:02] I mqtt: connected to broker\n[06:41:03] I radar: Sensor init ok, mode=sleep\n[06:42:10] I radar: presence=1 hr=61 br=14\n[06:50:00] I session: sid=128 queued, sent, acked\n[07:05:13] W wifi: rssi dropped to -78\n[07:05:19] I wifi: rssi back to -58' }];
 db.audit = [
   { id: 'a-10', at: ago(60), actorName: 'Devam Gandhi', action: 'team.role.update', targetType: 'role', targetLabel: 'Manufacturing', detail: 'Turned on firmware.view' },
   { id: 'a-9', at: ago(29 * 60), actorName: 'Kiran Patel', action: 'device.register', targetType: 'device', targetLabel: 'ARG-24A0032', detail: 'MAC 34:85:18:A1:18:0D · ESP32-S3' },

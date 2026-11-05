@@ -5,7 +5,7 @@ export type StaffPerm =
   | 'devices.view' | 'devices.command' | 'devices.register'
   | 'customers.view' | 'customers.edit'
   | 'firmware.view' | 'firmware.upload' | 'firmware.rollout'
-  | 'team.manage' | 'audit.view' | 'platform.settings';
+  | 'team.manage' | 'audit.view' | 'platform.settings' | 'vendors.manage';
 
 export interface User {
   id: string;
@@ -16,7 +16,12 @@ export interface User {
   role: { id: number; name: string } | null;
   permissions: StaffPerm[];
   createdAt: string;
+  /** §15.6: the vendor team this user is on (one at most) */
+  vendor?: VendorRef | null;
 }
+
+export type VendorRole = 'owner' | 'staff';
+export interface VendorRef { id: string; name: string; role: VendorRole }
 
 export interface LiveValues {
   pr: number; bed: number; ss: number; hr: number; br: number;
@@ -27,9 +32,9 @@ export interface LiveValues {
 }
 /** current session: st 0 deep / 1 light / 2 awake / 3 none; start = Unix UTC seconds; durations in minutes */
 export interface LiveSess { st: number; start: number; bed: number; slp: number; dp: number; lt: number; aw: number; on: number; wk: number; tn: number; sc: number }
-/** C1001 composite: dis 0–3, abn 0 none / 1 normal / 2 abnormal, rat 0–3, lg/mn = % */
+/** Sensor composite: dis 0–3, abn 0 none / 1 normal / 2 abnormal, rat 0–3, lg/mn = % */
 export interface LiveCmp { dis: number; abn: number; rat: number; resp: number; hr: number; apn: number; turn: number; lg: number; mn: number }
-/** C1001 night statistics: sh/dp = light/deep %, slp/oob minutes */
+/** Sensor night statistics: sh/dp = light/deep %, slp/oob minutes */
 export interface LiveNgt { sc: number; slp: number; wk: number; sh: number; dp: number; oob: number; ex: number; tn: number; resp: number; hr: number; apn: number }
 
 export interface DeviceCard {
@@ -44,6 +49,11 @@ export interface DeviceCard {
   myPermissions: DevicePerm[];
   status: { online: boolean; lastSeenAt: string | null };
   live?: LiveValues | null;
+  /** §15: how I can see this device; vendor/group set on vendor devices, accessEndsAt for grant holders */
+  access?: DeviceAccess;
+  vendor?: { id: string; name: string } | null;
+  group?: { id: string; name: string } | null;
+  accessEndsAt?: string | null;
   /** never a nap-only day (API.md §4); fields typed nullable only so the UI stays defensive */
   lastNight?: { sleepDate: string; score: number | null; totalSleepMin: number | null } | null;
 }
@@ -109,7 +119,12 @@ export interface InviteCreated { invite?: Invite; inviteUrl: string; expiresAt: 
 export interface SharesResponse { owner: { fullName: string; phone: string }; shares: Share[]; invites: Invite[] }
 
 export interface InvitePreview {
-  kind: 'device' | 'staff';
+  kind: 'device' | 'staff' | 'vendor' | 'grant';
+  label?: string;
+  vendorName?: string;
+  vendorRole?: VendorRole;
+  startsAt?: string;
+  endsAt?: string;
   inviterName: string;
   deviceName?: string;
   place?: string | null;
@@ -141,6 +156,7 @@ export interface Dashboard {
 }
 export interface AdminDeviceRow {
   id: string; serial: string; name: string | null; owner: { id: string; fullName: string } | null;
+  vendor?: { id: string; name: string } | null;
   online: boolean; tz: string | null; fw: string | null; chip: string; lastSeenAt: string | null; createdAt: string;
 }
 export interface AdminDeviceDetail {
@@ -192,3 +208,31 @@ export interface RolesResponse { roles: Role[]; permissions: { code: StaffPerm; 
 export interface AuditItem { id: string; at: string; actorName: string; action: string; targetType: string; targetLabel: string; detail: string }
 export interface NotificationPrefs { quietEnabled: boolean; quietFrom: string; quietTo: string; mutedDeviceIds: string[] }
 export interface PlatformSettings { mergeGapMin: number; minSessionMin: number; defaultSleepCutoff: string }
+
+/* ---- vendors (API.md §15) ---- */
+export type DeviceAccess = 'owner' | 'share' | 'vendor' | 'grant';
+export interface Vendor {
+  id: string; name: string; contactName: string | null; phone: string | null; email: string | null;
+  status: 'active' | 'disabled'; deviceCount: number; memberCount: number; groupCount: number; createdAt: string;
+}
+export interface VendorInvite { id: string; label: string; role: VendorRole; expiresAt: string }
+export interface VendorDetail extends Vendor {
+  members: { userId: string; fullName: string; phone: string; role: VendorRole }[];
+  invites: VendorInvite[];
+  groups: { id: string; name: string }[];
+  devices: { id: string; serial: string; name: string; groupId: string | null; online: boolean; fw: string | null; lastSeenAt: string | null; activeGrants: number }[];
+}
+export interface VendorGroup { id: string; name: string; deviceCount: number }
+export interface VendorTeam {
+  members: { userId: string; fullName: string; phone: string; role: VendorRole; joinedAt: string }[];
+  invites: VendorInvite[];
+}
+export type GrantPerm = 'live.view' | 'history.view' | 'alerts.receive' | 'settings.edit';
+export type GrantStatus = 'invite_sent' | 'invite_expired' | 'scheduled' | 'active' | 'expired' | 'ended';
+export interface Grant {
+  id: string; device: { id: string; serial: string; name: string }; label: string;
+  user: { id: string; fullName: string; phone: string } | null;
+  permissions: GrantPerm[]; startsAt: string; endsAt: string; status: GrantStatus;
+  inviteExpiresAt: string | null; endedAt: string | null; createdAt: string;
+}
+export interface GrantCreated { grant: Grant; inviteUrl: string; expiresAt: string }

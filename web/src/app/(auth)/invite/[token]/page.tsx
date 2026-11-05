@@ -13,6 +13,7 @@ import { useAuth } from '@/components/Providers';
 import { ErrorBox, Loading, permLabel, useApi } from '@/components/ui';
 import { ApiError, errText, post } from '@/lib/api';
 import { STAFF_PERMS } from '@/lib/mock/data';
+import { whenLocal } from '@/components/vendor';
 import { day, prettyPhone } from '@/lib/format';
 import type { DeviceCard, InvitePreview } from '@/lib/types';
 
@@ -30,8 +31,10 @@ export default function InvitePage() {
   const accept = async () => {
     setErr(''); setBusy(true);
     try {
-      const r = await post<{ device?: DeviceCard; role?: unknown }>(`/invites/${encodeURIComponent(token)}/accept`);
+      const r = await post<{ device?: DeviceCard | null; role?: unknown; vendor?: unknown; grant?: unknown }>(`/invites/${encodeURIComponent(token)}/accept`);
       if (r.device) router.replace(`/devices/${r.device.id}`);
+      else if (r.grant) router.replace('/devices'); // access starts later: the device shows up at startsAt
+      else if (r.vendor) { await reload(); router.replace('/vendor'); } // joined a vendor team: reload /me.vendor
       else { await reload(); router.replace('/admin'); } // new staff role: reload permissions
     } catch (e) { setErr(errText(e)); setBusy(false); }
   };
@@ -53,6 +56,15 @@ export default function InvitePage() {
         {inv.kind === 'device' ? <>
           <h1>{inv.inviterName} invited you to “{inv.deviceName}”</h1>
           <p className="muted">A sleep sensor{inv.place ? ` in ${inv.place}` : ''}. You&apos;ll be able to:</p>
+          <div className="stack" style={{ gap: 6 }}>
+            {(inv.permissions || []).map((p) => <div key={p} className="row small" style={{ flexWrap: 'nowrap' }}><Icon name="check" size={16} /> {permLabel(p)}</div>)}
+          </div>
+        </> : inv.kind === 'vendor' ? <>
+          <h1>Join {inv.vendorName} as {inv.vendorRole === 'owner' ? 'owner' : 'staff'}</h1>
+          <p className="muted">{inv.inviterName} invited you. You&apos;ll see all of {inv.vendorName}&apos;s sensors: live values, sleep history and alerts{inv.vendorRole === 'owner' ? ', and you can invite your own staff' : ''}.</p>
+        </> : inv.kind === 'grant' ? <>
+          <h1>{inv.vendorName} gives you access to “{inv.deviceName}”</h1>
+          <p className="muted">From <b>{whenLocal(inv.startsAt)}</b> to <b>{whenLocal(inv.endsAt)}</b>{inv.place ? ` · ${inv.place}` : ''}. Access ends by itself after that. You&apos;ll be able to:</p>
           <div className="stack" style={{ gap: 6 }}>
             {(inv.permissions || []).map((p) => <div key={p} className="row small" style={{ flexWrap: 'nowrap' }}><Icon name="check" size={16} /> {permLabel(p)}</div>)}
           </div>

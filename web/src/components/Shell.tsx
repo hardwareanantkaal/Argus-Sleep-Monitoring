@@ -30,10 +30,18 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/team', label: 'Team', icon: 'shield', perm: 'team.manage' },
   { href: '/admin/audit', label: 'Audit log', icon: 'list', perm: 'audit.view' },
   { href: '/admin/sleep-rules', label: 'Sleep rules', icon: 'gear', perm: 'platform.settings' },
+  { href: '/admin/vendors', label: 'Vendors', icon: 'tag', perm: 'vendors.manage' },
+];
+// Vendor team side (API.md §15). Every member sees all four; owner-only actions are hidden inside the screens.
+export const VENDOR_NAV: NavItem[] = [
+  { href: '/vendor', label: 'Devices', icon: 'chip' },
+  { href: '/vendor/groups', label: 'Groups', icon: 'list' },
+  { href: '/vendor/team', label: 'Team', icon: 'users' },
+  { href: '/vendor/access', label: 'Access', icon: 'clock' },
 ];
 
 export const isStaff = (u: User) => u.kind === 'admin';
-export const homeFor = (u: User) => (isStaff(u) ? '/admin' : '/devices');
+export const homeFor = (u: User) => (isStaff(u) ? '/admin' : u.vendor ? '/vendor' : '/devices');
 
 function adminItems(u: User) {
   return isStaff(u) ? ADMIN_NAV.filter((n) => !n.perm || u.permissions.includes(n.perm)) : [];
@@ -62,7 +70,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const admin = adminItems(user);
   // Staff see the admin menu first; everyone has the customer side ("My devices" etc.).
-  const all = [...admin, ...CUSTOMER_NAV];
+  const vendor = user.vendor ? VENDOR_NAV : [];
+  const all = [...admin, ...vendor, ...CUSTOMER_NAV];
   const active = activeHref(path, all);
   const max = 4;
   const tabs = all.length > 5 ? all.slice(0, max) : all;
@@ -94,6 +103,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {admin.length > 0 && <>
             <span className="label sec">Admin · {user.role?.name}</span>
             {admin.map((n) => navLink(n))}
+            <div className="divider" style={{ margin: '10px 4px' }} />
+          </>}
+          {user.vendor && <>
+            <span className="label sec">Vendor · {user.vendor.name}</span>
+            {vendor.map((n) => navLink(n))}
             <div className="divider" style={{ margin: '10px 4px' }} />
           </>}
           <span className="label sec">My home</span>
@@ -140,6 +154,14 @@ export function RequireStaff({ perm, children }: { perm?: StaffPerm; children: R
   if (!user) return null;
   if (!isStaff(user)) return <div className="wrap"><LockedInline msg="This screen belongs to the Argus team side." home={homeFor(user)} /></div>;
   if (perm && !user.permissions.includes(perm)) return <div className="wrap"><LockedInline home={homeFor(user)} /></div>;
+  return <>{children}</>;
+}
+
+/** Wrap a vendor screen: shows "No access" when the user is not on a vendor team. */
+export function RequireVendor({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return null;
+  if (!user.vendor) return <div className="wrap"><LockedInline msg="This screen is for vendor teams. Ask your vendor owner for an invite link." home={homeFor(user)} /></div>;
   return <>{children}</>;
 }
 

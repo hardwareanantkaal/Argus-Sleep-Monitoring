@@ -134,7 +134,7 @@ function Sensor({ id, online }: { id: string; online: boolean }) {
         </div>
         <div className="field"><label htmlFor="ss-unatt">Unattended after <PH /></label>
           <div className="row" style={{ flexWrap: 'nowrap' }}><input className="inp num" id="ss-unatt" type="number" min={1} value={f.unattMin} disabled={!f.unattended} onChange={num('unattMin')} style={{ maxWidth: 100 }} /><span className="muted small">minutes</span></div>
-          <span className="hint">Default 30 min. The range is still to be checked on the C1001.</span></div>
+          <span className="hint">Default 30 min. The range is still to be checked on the Sensor.</span></div>
         {err && <p className="err" role="alert">{err}</p>}
         <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save sensor settings'}</button>
       </div>
@@ -210,6 +210,17 @@ function Danger({ d }: { d: DeviceDetail }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [err, setErr] = useState('');
+  // Vendor devices (API.md §15.6): no "Remove device"; the team can't leave; a grant holder may leave (ends the access).
+  if (d.access === 'vendor') return null;
+  if (d.access === 'grant') return (
+    <div className="card"><h2 style={{ marginBottom: 6 }}>Leave this device</h2>
+      <p className="small muted" style={{ marginBottom: 12 }}>{d.vendor?.name || 'The vendor'} gave you access{d.accessEndsAt ? ` until ${new Date(d.accessEndsAt).toLocaleString()}` : ''}. If you leave, your access ends now.</p>
+      <button className="btn danger" onClick={async () => {
+        if (!confirm(`Leave ${d.name}? Your access ends now.`)) return;
+        try { await del(`/devices/${d.id}/me`); toast('You left the device'); router.replace('/devices'); } catch (e) { toast(errText(e)); }
+      }}>Leave {d.name}</button>
+    </div>
+  );
   if (!d.isOwner) return (
     <div className="card"><h2 style={{ marginBottom: 6 }}>Leave this device</h2>
       <p className="small muted" style={{ marginBottom: 12 }}>{d.sharedBy?.fullName || 'The owner'} shared it with you. If you leave, you need a new invite to see it again.</p>

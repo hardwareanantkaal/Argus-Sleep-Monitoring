@@ -3,14 +3,16 @@
 // Live view (API.md 3.4 + Socket.IO live:subscribe / device:live). Values are shown, never stored.
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { Spark } from '@/components/charts';
 import { Icon } from '@/components/Icon';
 import { CompositeCard, firstLocalMin, pushStage, SessionCard } from '@/components/LiveTelemetry';
 import { Async, Head, PH, TzTag, useApi } from '@/components/ui';
 import { ago, BREATH_STATE, moveText, presenceText, STAGE_NAME } from '@/lib/format';
-import { useLive, type LiveMsg } from '@/lib/useLive';
+import { whenLocal } from '@/components/vendor';
+import { useToast } from '@/components/Providers';
+import { useAccessChanged, useLive, type LiveMsg } from '@/lib/useLive';
 import type { DeviceDetail } from '@/lib/types';
 
 const KEEP = 40; // points in each sparkline
@@ -23,6 +25,13 @@ export default function LivePage() {
   const hist = useRef<{ hr: number[]; br: number[] }>({ hr: [], br: [] });
   const stages = useRef<{ first: number | null; mins: string[] }>({ first: null, mins: [] }); // live hypnogram from sess.st
   const [, bump] = useState(0);
+  const router = useRouter();
+  const toast = useToast();
+  // API.md §10: access ended (temporary access over, share removed) → leave the device; otherwise reload permissions
+  useAccessChanged((m) => {
+    if (m.deviceId !== id) return;
+    if (m.myPermissions === null) { toast('Your access to this sensor has ended'); router.replace('/devices'); } else q.reload();
+  });
   const { live, status } = useLive(d ? [d.id] : [], d && canLive ? [d.id] : [], (m: LiveMsg) => {
     if (m.hr) hist.current.hr = [...hist.current.hr, m.hr].slice(-KEEP);
     if (m.br) hist.current.br = [...hist.current.br, m.br].slice(-KEEP);
@@ -35,23 +44,28 @@ export default function LivePage() {
       const online = status[d.id]?.online ?? d.status.online;
       const lv = live[d.id] || d.live || null;
       const perms = d.myPermissions;
+      const vendorDev = d.access === 'vendor' || d.access === 'grant';
       const acts = <>
-        {perms.includes('sharing.manage') && <Link className="btn ghost sm" href={`/devices/${d.id}/share`}><Icon name="share" size={16} /> Share</Link>}
+        {!vendorDev && perms.includes('sharing.manage') && <Link className="btn ghost sm" href={`/devices/${d.id}/share`}><Icon name="share" size={16} /> Share</Link>}
         {perms.includes('settings.edit') && <Link className="btn ghost sm" href={`/devices/${d.id}/settings`}><Icon name="gear" size={16} /> Settings</Link>}
       </>;
       const histBtn = perms.includes('history.view') && <Link className="btn ghost" style={{ alignSelf: 'flex-start' }} href={`/history/${d.id}`}><Icon name="moon" /> See sleep history</Link>;
-      const back: [string, string] = ['/devices', 'My devices'];
+      const back: [string, string] = d.access === 'vendor' ? ['/vendor', 'Devices'] : ['/devices', 'My devices'];
+      const sub0 = [d.room || d.serial, d.vendor?.name, d.group?.name].filter(Boolean).join(' · ');
+      const until = d.access === 'grant' && d.accessEndsAt ? <div className="note"><Icon name="clock" /><span>Access from {d.vendor?.name || 'the vendor'} until <b>{whenLocal(d.accessEndsAt)}</b>. It ends by itself after that.</span></div> : null;
 
       if (!canLive) return (
         <div className="wrap">
-          <Head title={d.name} sub={d.room || d.serial} actions={acts} back={back} />
+          <Head title={d.name} sub={sub0} actions={acts} back={back} />
+          {until}
           <div className="card empty"><Icon name="shield" size={30} /><h2>Live values aren&apos;t shared with you</h2><p>Ask the owner to turn on “See live values” for you.</p></div>
           {histBtn}
         </div>
       );
       if (!online) return (
         <div className="wrap">
-          <Head title={d.name} sub={d.room || d.serial} actions={acts} back={back} />
+          <Head title={d.name} sub={sub0} actions={acts} back={back} />
+          {until}
           <div className="card empty"><Icon name="off" size={32} /><h2>Sensor is offline</h2><p>Last seen {ago(status[d.id]?.lastSeenAt ?? d.status.lastSeenAt).toLowerCase()}. Live values show again as soon as it reconnects.</p></div>
           {histBtn}
         </div>
@@ -64,8 +78,9 @@ export default function LivePage() {
         <div className="wrap">
           <Head
             title={<>{d.name} <span className="pill live" style={{ verticalAlign: 'middle', marginLeft: 6 }}><span className="dot pulse" />LIVE</span></>}
-            sub={<>{d.room ? `${d.room} · ` : ''}updates every few seconds while someone is in bed<TzTag tz={d.tz} place={d.place} /></>}
+            sub={<>{d.room ? `${d.room} · ` : ''}{d.vendor ? `${d.vendor.name} · ` : ''}{d.group ? `${d.group.name} · ` : ''}updates every few seconds while someone is in bed<TzTag tz={d.tz} place={d.place} /></>}
             actions={acts} back={back} />
+          {until}
           <div className="g2">
             <div className="card metric"><div className="top"><Icon name="person" /> Presence</div><div className="big" style={{ fontSize: 36 }}>{presenceText(lv?.pr, lv?.bed)}</div>
               <span className="small muted">{lv?.dist ? <>Person about {lv.dist} cm away <PH /></> : 'Waiting for a reading…'}</span></div>

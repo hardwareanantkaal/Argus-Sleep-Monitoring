@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { Icon } from '@/components/Icon';
 import { Async, Head, ScoreRing, StatusPill, useApi } from '@/components/ui';
 import { ago, dur, presenceText } from '@/lib/format';
-import { useLive } from '@/lib/useLive';
+import { whenLocal } from '@/components/vendor';
+import { useAccessChanged, useLive } from '@/lib/useLive';
 import type { DeviceCard } from '@/lib/types';
 
 export default function DevicesPage() {
@@ -14,6 +15,11 @@ export default function DevicesPage() {
   const items = q.data?.items || [];
   const { live, status } = useLive(items.map((d) => d.id), items.filter((d) => d.myPermissions.includes('live.view')).map((d) => d.id));
   const online = (d: DeviceCard) => status[d.id]?.online ?? d.status.online;
+  // API.md §10: temporary access ended or a share was removed → drop the card
+  useAccessChanged((m) => {
+    if (m.myPermissions === null) q.setData((x) => x && { items: x.items.filter((d) => d.id !== m.deviceId) });
+    else q.reload();
+  });
 
   const addBtn = <Link className="btn" href="/devices/add"><Icon name="plus" /> Add device</Link>;
   return (
@@ -31,7 +37,8 @@ export default function DevicesPage() {
                 <div className="between" style={{ alignItems: 'flex-start' }}>
                   <div className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <h2>{d.name}</h2>
-                    <span className="xs muted">{[d.room, d.sharedBy && `shared by ${d.sharedBy.fullName}`].filter(Boolean).join(' · ') || d.serial}</span>
+                    <span className="xs muted">{[d.room, d.sharedBy && `shared by ${d.sharedBy.fullName}`, d.vendor && d.vendor.name, d.group && d.group.name].filter(Boolean).join(' · ') || d.serial}</span>
+                    {d.access === 'grant' && d.accessEndsAt && <span className="pill warn" style={{ alignSelf: 'flex-start', marginTop: 4 }}><Icon name="clock" size={13} /> Access until {whenLocal(d.accessEndsAt)}</span>}
                   </div>
                   <StatusPill online={on} />
                 </div>

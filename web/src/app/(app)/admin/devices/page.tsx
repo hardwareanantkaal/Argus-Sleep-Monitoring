@@ -50,7 +50,7 @@ function Inner() {
                 <tr key={x.id} className="click" onClick={() => router.push(`/admin/devices/${x.id}`)}>
                   <td className="mono"><Link href={`/admin/devices/${x.id}`} style={{ color: 'inherit' }}>{x.serial}</Link></td>
                   <td>{x.name || <span className="muted">—</span>}</td>
-                  <td>{x.owner?.fullName || <span className="muted">—</span>}</td>
+                  <td>{x.owner?.fullName || (x.vendor ? <>{x.vendor.name} <span className="pill acc">Vendor</span></> : <span className="muted">—</span>)}</td>
                   <td><AdminStatusPill d={x} /></td>
                   <td className="mono">{x.tz || '—'}</td>
                   <td className="mono">{x.fw || '—'}</td>

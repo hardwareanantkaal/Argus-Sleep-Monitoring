@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
+import { useAuth } from './Providers';
 import { TzSelect } from './ui';
 import { errText, post } from '@/lib/api';
 import { isLive } from '@/lib/config';
@@ -74,6 +75,9 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
   const [place, setPlace] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // API.md 15.6: a vendor team member claims for the vendor unless they choose "for myself" (asVendor: false)
+  const vendor = useAuth().user?.vendor;
+  const [forVendor, setForVendor] = useState(true);
   useEffect(() => setTz(browserTz()), []); // pre-filled from this phone / browser
 
   const submit = async (e: React.FormEvent) => {
@@ -81,7 +85,7 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
     if (!name.trim()) return setErr('Give the sensor a name');
     setErr(''); setBusy(true);
     try {
-      onDone(await post<DeviceDetail>('/devices/claim', { ...k, name: name.trim(), room: room.trim() || undefined, tz, place: place.trim() || undefined }));
+      onDone(await post<DeviceDetail>('/devices/claim', { ...k, name: name.trim(), room: room.trim() || undefined, tz, place: place.trim() || undefined, ...(vendor ? { asVendor: forVendor } : {}) }));
     } catch (e2) { setErr(errText(e2)); setBusy(false); }
   };
 
@@ -95,6 +99,14 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
           <div className="field"><label htmlFor="cl-tz">Time zone where the sensor is</label><TzSelect id="cl-tz" value={tz} onChange={setTz} options={TIMEZONES} /><span className="hint">Filled in from this device. Change it if the sensor is in another place.</span></div>
           <div className="field"><label htmlFor="cl-place">Town or city (optional)</label><input className="inp" id="cl-place" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Surat" /><span className="hint">Shown as “{place.trim() || 'Surat'} time” to family in other time zones. Leave empty to show “{placeName(tz, null)} time”.</span></div>
         </div>
+        {vendor && (
+          <div className="stack" style={{ gap: 6 }}>
+            {forVendor && <div className="note"><Icon name="info" /><span>This sensor will belong to <b>{vendor.name}</b>. Everyone on its team will see it.</span></div>}
+            <label className="row small" style={{ gap: 8, flexWrap: 'nowrap' }}>
+              <input type="checkbox" checked={!forVendor} onChange={(e) => setForVendor(!e.target.checked)} /> Claim it for myself instead (not for {vendor.name})
+            </label>
+          </div>
+        )}
         {err && <p className="err" role="alert">{err}</p>}
         <div className="row"><button className="btn" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add device'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
       </form>

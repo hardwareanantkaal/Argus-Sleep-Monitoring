@@ -4,9 +4,9 @@
 import { ApiError } from '../api';
 import type {
   AdminDeviceDetail, AdminDeviceRow, CommandRow, CustomerDetail, CustomerRow, DeviceCard, DeviceDetail, DevicePerm,
-  InvitePreview, StaffPerm, User,
+  DeviceAccess, Grant, GrantPerm, GrantStatus, InvitePreview, StaffPerm, User, Vendor, VendorRef,
 } from '../types';
-import { ALL_DEVICE_PERMS, STAFF_PERMS, db, defaultRules, nightCard, nightsFor, type MDevice, type MUser } from './data';
+import { ALL_DEVICE_PERMS, STAFF_PERMS, db, defaultRules, nightCard, nightsFor, type MDevice, type MGrant, type MUser, type MVendor } from './data';
 
 const SESSION_KEY = 'argus-mock-user';
 const nowIso = () => new Date().toISOString();
@@ -40,15 +40,58 @@ function needStaff(u: MUser, p?: StaffPerm) {
 function userObj(u: MUser): User {
   const role = u.roleId ? db.roles.find((r) => r.id === u.roleId)! : null;
   return { id: u.id, fullName: u.fullName, phone: u.phone, country: u.country, kind: role ? 'admin' : 'customer',
-    role: role ? { id: role.id, name: role.name } : null, permissions: staffPerms(u), createdAt: u.createdAt };
+    role: role ? { id: role.id, name: role.name } : null, permissions: staffPerms(u), createdAt: u.createdAt, vendor: vendorRef(u) };
 }
 function audit(u: MUser, action: string, targetType: string, targetLabel: string, detail = '') {
   db.audit.unshift({ id: rid('a'), at: nowIso(), actorName: u.fullName, action, targetType, targetLabel, detail });
 }
 
+/* ---- vendors (API.md §15) ---- */
+const VENDOR_PERMS: DevicePerm[] = ['live.view', 'history.view', 'alerts.receive', 'settings.edit'];
+const GRANT_PERMS: GrantPerm[] = ['live.view', 'history.view', 'alerts.receive', 'settings.edit'];
+function membership(u: MUser) {
+  const m = db.vendorMembers.find((x) => x.userId === u.id);
+  const v = m && db.vendors.find((x) => x.id === m.vendorId && x.status === 'active');
+  return m && v ? { m, v } : null;
+}
+function vendorRef(u: MUser): VendorRef | null { const x = membership(u); return x ? { id: x.v.id, name: x.v.name, role: x.m.role } : null; }
+function myVendor(u: MUser, ownerOnly = false) {
+  const x = membership(u);
+  if (!x) fail(403, 'NOT_VENDOR_MEMBER', 'You are not on a vendor team');
+  if (ownerOnly && x!.m.role !== 'owner') fail(403, 'FORBIDDEN', 'Only the vendor owner can do this');
+  return x!;
+}
+function grantStatus(g: MGrant): GrantStatus {
+  const t = Date.now();
+  if (g.endedAt) return 'ended';
+  if (new Date(g.endsAt).getTime() <= t) return g.userId ? 'expired' : 'invite_expired';
+  if (!g.userId) return g.inviteExpiresAt && new Date(g.inviteExpiresAt).getTime() < t ? 'invite_expired' : 'invite_sent';
+  return new Date(g.startsAt).getTime() > t ? 'scheduled' : 'active';
+}
+function grantObj(g: MGrant): Grant {
+  const d = db.devices.find((x) => x.id === g.deviceId)!;
+  const x = g.userId ? db.users.find((y) => y.id === g.userId) : null;
+  return { id: g.id, device: { id: d.id, serial: d.serial, name: d.name || d.serial }, label: g.label, user: x ? { id: x.id, fullName: x.fullName, phone: x.phone } : null,
+    permissions: g.permissions, startsAt: g.startsAt, endsAt: g.endsAt, status: grantStatus(g), inviteExpiresAt: g.userId ? null : g.inviteExpiresAt, endedAt: g.endedAt, createdAt: g.createdAt };
+}
+const vendorActive = (d: MDevice) => !!d.vendorId && db.vendors.some((v) => v.id === d.vendorId && v.status === 'active');
+function activeGrant(u: MUser, d: MDevice) {
+  return vendorActive(d) ? db.grants.find((g) => g.deviceId === d.id && g.userId === u.id && grantStatus(g) === 'active') : undefined;
+}
+function accessOf(u: MUser, d: MDevice): DeviceAccess | null {
+  if (d.ownerId === u.id) return 'owner';
+  if (d.vendorId && vendorActive(d) && membership(u)?.v.id === d.vendorId) return 'vendor';
+  if (activeGrant(u, d)) return 'grant';
+  if (db.shares.some((s) => s.deviceId === d.id && s.userId === u.id)) return 'share';
+  return null;
+}
+
 /* ---- device access ---- */
 function permsOn(u: MUser, d: MDevice): DevicePerm[] {
-  if (d.ownerId === u.id) return [...ALL_DEVICE_PERMS];
+  const a = accessOf(u, d);
+  if (a === 'owner') return [...ALL_DEVICE_PERMS];
+  if (a === 'vendor') return [...VENDOR_PERMS];
+  if (a === 'grant') return [...activeGrant(u, d)!.permissions];
   return db.shares.find((s) => s.deviceId === d.id && s.userId === u.id)?.permissions || [];
 }
 function device(u: MUser, id: string, need?: DevicePerm | 'any' | 'owner'): MDevice {
@@ -69,9 +112,15 @@ function card(u: MUser, d: MDevice): DeviceCard {
   const owner = db.users.find((x) => x.id === d.ownerId);
   // lastNight is never a nap-only day (API.md §4)
   const n = p.includes('history.view') ? nightsFor(d.id, d.tz!).find((x) => x.hasMainSleep) : null;
+  const access = accessOf(u, d) || 'share';
+  const v = d.vendorId ? db.vendors.find((x) => x.id === d.vendorId) : null;
+  const g = d.groupId ? db.groups.find((x) => x.id === d.groupId) : null;
   return {
+    access, vendor: v ? { id: v.id, name: v.name } : null,
+    group: access === 'vendor' && g ? { id: g.id, name: g.name } : null,
+    accessEndsAt: access === 'grant' ? activeGrant(u, d)!.endsAt : undefined,
     id: d.id, serial: d.serial, name: d.name || d.serial, room: d.room, tz: d.tz!, place: d.place,
-    isOwner: d.ownerId === u.id, sharedBy: d.ownerId === u.id ? null : { fullName: owner?.fullName || '' },
+    isOwner: d.ownerId === u.id, sharedBy: d.ownerId === u.id || !owner ? null : { fullName: owner.fullName },
     myPermissions: p, status: { online: d.online, lastSeenAt: d.lastSeenAt },
     live: p.includes('live.view') ? liveSnapshot(d) : undefined,
     lastNight: n ? { sleepDate: n.sleepDate, score: n.score!, totalSleepMin: n.totalSleepMin! } : undefined,
@@ -80,8 +129,9 @@ function card(u: MUser, d: MDevice): DeviceCard {
 function detail(u: MUser, d: MDevice): DeviceDetail {
   const c = card(u, d);
   const edit = c.myPermissions.includes('settings.edit');
+  // connection.fw comes with live.view; the rest of connection only with settings.edit (API.md 3.x)
   return { ...c, sleepCutoff: d.sleepCutoff, autoUpdate: d.autoUpdate, hwModel: d.hwModel,
-    connection: edit ? { fw: d.fw, rssi: d.rssi, wifiSsid: d.wifiSsid, uptimeS: d.uptimeS } : undefined,
+    connection: edit ? { fw: d.fw, rssi: d.rssi, wifiSsid: d.wifiSsid, uptimeS: d.uptimeS } : c.myPermissions.includes('live.view') ? { fw: d.fw, rssi: null, wifiSsid: null, uptimeS: null } : undefined,
     sensorSync: edit ? { version: d.sensor.version, appliedVersion: d.sensor.appliedVersion, sync: d.sensor.sync } : undefined };
 }
 function validTz(tz: string) { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } }
@@ -89,7 +139,8 @@ function validTz(tz: string) { try { new Intl.DateTimeFormat('en', { timeZone: t
 /* ---- admin helpers ---- */
 function adminRow(d: MDevice): AdminDeviceRow {
   const o = db.users.find((x) => x.id === d.ownerId);
-  return { id: d.id, serial: d.serial, name: d.name, owner: o ? { id: o.id, fullName: o.fullName } : null, online: d.online,
+  const v = d.vendorId ? db.vendors.find((x) => x.id === d.vendorId) : null;
+  return { id: d.id, serial: d.serial, name: d.name, owner: o ? { id: o.id, fullName: o.fullName } : null, vendor: v ? { id: v.id, name: v.name } : null, online: d.online,
     tz: d.tz, fw: d.fw, chip: d.chip, lastSeenAt: d.lastSeenAt, createdAt: d.registeredAt };
 }
 function custRow(u: MUser): CustomerRow {
@@ -155,7 +206,7 @@ function findByCode(b: { qr?: string; claimCode?: string; serial?: string }) {
   const code = cleanCode(b.qr || b.claimCode || '');
   const d = db.devices.find((x) => x.claimCode && x.claimCode === code);
   if (!d) {
-    if (db.devices.some((x) => x.ownerId && b.serial && x.serial === b.serial.toUpperCase())) fail(409, 'ALREADY_CLAIMED', 'This sensor already has an owner. Ask them to share it with you.');
+    if (db.devices.some((x) => (x.ownerId || x.vendorId) && b.serial && x.serial === b.serial.toUpperCase())) fail(409, 'ALREADY_CLAIMED', 'This sensor already has an owner. Ask them to share it with you.');
     fail(404, 'INVALID_CODE', 'That claim code is not valid. Check the sticker and try again.', 'claimCode');
   }
   if (b.serial && d!.serial !== b.serial.trim().toUpperCase()) fail(404, 'INVALID_CODE', 'The serial and code don’t match the same sensor.', 'serial');
@@ -167,7 +218,12 @@ on('POST', '/devices/claim', (_m, b) => {
   const u = me(); const d = findByCode(b);
   if (!b.name?.trim()) fail(400, 'VALIDATION', 'Give the sensor a name', 'name');
   if (!validTz(b.tz)) fail(422, 'INVALID_TIMEZONE', 'Pick a valid time zone', 'tz');
-  Object.assign(d, { ownerId: u.id, claimCode: null, name: b.name.trim(), room: b.room || null, tz: b.tz, place: b.place || null, sleepCutoff: db.platform.defaultSleepCutoff });
+  // §15.6: a vendor team member claims for the vendor unless asVendor: false
+  const vm = membership(u);
+  if (b.asVendor === true && !vm) fail(403, 'NOT_VENDOR_MEMBER', 'You are not on a vendor team');
+  const forVendor = !!vm && b.asVendor !== false;
+  Object.assign(d, forVendor ? { ownerId: null, vendorId: vm!.v.id, groupId: null } : { ownerId: u.id, vendorId: null, groupId: null });
+  Object.assign(d, { claimCode: null, name: b.name.trim(), room: b.room || null, tz: b.tz, place: b.place || null, sleepCutoff: db.platform.defaultSleepCutoff });
   db.rules[d.id] = defaultRules();
   audit(u, 'device.claim', 'device', d.serial);
   return detail(u, d);
@@ -210,7 +266,13 @@ on('DELETE', '/devices/([^/]+)', (m, b) => {
   audit(u, 'device.unclaim', 'device', d.serial);
   return undefined;
 });
-on('DELETE', '/devices/([^/]+)/me', (m) => { const u = me(); const d = device(u, m[1], 'any'); db.shares = db.shares.filter((s) => !(s.deviceId === d.id && s.userId === u.id)); return undefined; });
+on('DELETE', '/devices/([^/]+)/me', (m) => {
+  const u = me(); const d = device(u, m[1], 'any'); const a = accessOf(u, d);
+  if (a === 'owner') fail(422, 'OWNER_CANNOT_LEAVE', 'You own this sensor. Remove it instead.');
+  if (a === 'vendor') fail(422, 'VENDOR_DEVICE', 'This sensor belongs to your vendor team');
+  if (a === 'grant') { activeGrant(u, d)!.endedAt = nowIso(); return undefined; }
+  db.shares = db.shares.filter((s) => !(s.deviceId === d.id && s.userId === u.id)); return undefined;
+});
 
 /* ---------- 4. nights ---------- */
 on('GET', '/devices/([^/]+)/nights', (m, _b, q) => {
@@ -272,6 +334,15 @@ function inviteByToken(t: string) {
 }
 on('GET', '/invites/([^/]+)', (m): InvitePreview => {
   const i = inviteByToken(m[1]);
+  if (i.kind === 'vendor' || i.kind === 'grant') {
+    const by = db.users.find((u) => u.id === i.invitedBy);
+    const v = db.vendors.find((x) => x.id === i.vendorId)!;
+    if (i.kind === 'vendor') return { kind: 'vendor', inviterName: by?.fullName || 'Argus', label: i.label, vendorName: v.name, vendorRole: i.vendorRole, permissions: [], expiresAt: i.expiresAt };
+    const g = db.grants.find((x) => x.id === i.grantId)!;
+    if (grantStatus(g) !== 'invite_sent') fail(404, 'INVITE_INVALID', 'This invite link has expired, was cancelled, or was already used. Ask for a new one.');
+    const d = db.devices.find((x) => x.id === g.deviceId)!;
+    return { kind: 'grant', inviterName: by?.fullName || v.name, label: g.label, vendorName: v.name, deviceName: d.name || d.serial, place: d.place, permissions: g.permissions, startsAt: g.startsAt, endsAt: g.endsAt, expiresAt: i.expiresAt };
+  }
   const by = db.users.find((u) => u.id === i.invitedBy)!;
   const d = i.deviceId ? db.devices.find((x) => x.id === i.deviceId) : null;
   return { kind: i.kind, inviterName: by.fullName, deviceName: d?.name || undefined, place: d?.place ?? null, roleName: i.roleId ? db.roles.find((r) => r.id === i.roleId)!.name : undefined,
@@ -281,6 +352,22 @@ on('POST', '/invites/([^/]+)/accept', (m) => {
   const u = me(); const i = inviteByToken(m[1]);
   // Link-only: any logged-in account may accept; the phone is never compared (owner decision 3 Nov).
   if (i.kind === 'device') { const dv0 = db.devices.find((d) => d.id === i.deviceId)!; if (dv0.ownerId === u.id || db.shares.some((s) => s.deviceId === dv0.id && s.userId === u.id)) fail(409, 'ALREADY_SHARED', 'You already have access to this sensor'); }
+  if (i.kind === 'vendor') {
+    if (db.vendorMembers.some((x) => x.userId === u.id)) fail(409, 'ALREADY_VENDOR_MEMBER', 'You are already on a vendor team');
+    const v = db.vendors.find((x) => x.id === i.vendorId)!;
+    if (v.status !== 'active') fail(409, 'VENDOR_DISABLED', 'This vendor is disabled');
+    i.status = 'accepted';
+    db.vendorMembers.push({ vendorId: v.id, userId: u.id, role: i.vendorRole!, joinedAt: nowIso() });
+    return { vendor: { id: v.id, name: v.name, role: i.vendorRole } };
+  }
+  if (i.kind === 'grant') {
+    const g = db.grants.find((x) => x.id === i.grantId)!;
+    if (grantStatus(g) !== 'invite_sent') fail(404, 'INVITE_INVALID', 'This invite link has expired, was cancelled, or was already used. Ask for a new one.');
+    const d = db.devices.find((x) => x.id === g.deviceId)!;
+    if (accessOf(u, d)) fail(409, 'ALREADY_SHARED', 'You already have access to this sensor');
+    i.status = 'accepted'; g.userId = u.id; g.inviteExpiresAt = null;
+    return { grant: { id: g.id, startsAt: g.startsAt, endsAt: g.endsAt }, device: grantStatus(g) === 'active' ? card(u, d) : null };
+  }
   if (i.kind === 'staff' && u.roleId) fail(409, 'ALREADY_STAFF', 'You are already on the team. Ask an Owner to change your role instead.');
   i.status = 'accepted';
   if (i.kind === 'staff') { u.roleId = i.roleId!; return { role: db.roles.find((r) => r.id === i.roleId) }; }
@@ -354,8 +441,9 @@ on('GET', '/admin/devices', (_m, _b, q) => {
   const st = q.get('status'); const from = q.get('registeredFrom');
   const rows = db.devices.filter((d) => {
     const owner = db.users.find((x) => x.id === d.ownerId);
-    const hay = (d.serial + d.mac + (d.name || '') + (owner ? owner.fullName + owner.phone : '')).toLowerCase().replace(/[:\s-]/g, '');
-    const sOk = !st || (st === 'online' && d.online) || (st === 'offline' && !d.online && !!d.ownerId) || (st === 'unclaimed' && !d.ownerId) || (st === 'disabled' && d.isDisabled);
+    const vn = db.vendors.find((v) => v.id === d.vendorId)?.name || '';
+    const hay = (d.serial + d.mac + (d.name || '') + vn + (owner ? owner.fullName + owner.phone : '')).toLowerCase().replace(/[:\s-]/g, '');
+    const sOk = !st || (st === 'online' && d.online) || (st === 'offline' && !d.online && !!(d.ownerId || d.vendorId)) || (st === 'unclaimed' && !d.ownerId && !d.vendorId) || (st === 'disabled' && d.isDisabled);
     return (!term || hay.includes(term)) && sOk && (!q.get('tz') || d.tz === q.get('tz')) && (!from || d.registeredAt >= from);
   }).map(adminRow);
   return { items: rows, total: rows.length, nextCursor: null };
@@ -365,12 +453,12 @@ on('GET', '/admin/devices/([^/]+)', (m): AdminDeviceDetail => {
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
   const o = db.users.find((x) => x.id === d!.ownerId);
   return { id: d!.id, serial: d!.serial, name: d!.name,
-    hardware: { mac: d!.mac, chip: d!.chip, radar: 'DFRobot C1001', hwModel: d!.hwModel, batch: d!.batch, manufacturedAt: d!.manufacturedAt, fwAtRegister: '1.4.2', registeredAt: d!.registeredAt, registeredBy: d!.registeredBy },
+    hardware: { mac: d!.mac, chip: d!.chip, radar: 'Sensor', hwModel: d!.hwModel, batch: d!.batch, manufacturedAt: d!.manufacturedAt, fwAtRegister: '1.4.2', registeredAt: d!.registeredAt, registeredBy: d!.registeredBy },
     connection: { online: d!.online, lastSeenAt: d!.lastSeenAt, ip: d!.ip, wifiSsid: d!.wifiSsid, rssi: d!.rssi, uptimeS: d!.uptimeS, fw: d!.fw, radarOk: d!.online ? true : null },
     tz: d!.tz, place: d!.place, sleepCutoff: d!.sleepCutoff, isDisabled: d!.isDisabled, disabledReason: d!.disabledReason,
     owner: o ? { id: o.id, fullName: o.fullName, phone: o.phone } : null,
     shares: db.shares.filter((s) => s.deviceId === d!.id).map((s) => { const x = db.users.find((y) => y.id === s.userId)!; return { fullName: x.fullName, phone: x.phone }; }),
-    claimCodeActive: !!d!.claimCode, stickerAvailable: !!d!.claimCode && !d!.ownerId, sensorSettings: d!.ownerId ? d!.sensor : null };
+    claimCodeActive: !!d!.claimCode, stickerAvailable: !!d!.claimCode && !d!.ownerId && !d!.vendorId, sensorSettings: d!.ownerId || d!.vendorId ? d!.sensor : null };
 });
 on('POST', '/admin/devices', (_m, b) => {
   const u = me(); needStaff(u, 'devices.register');
@@ -403,7 +491,7 @@ on('POST', '/admin/devices/([^/]+)/claim-code', (m) => {
 on('GET', '/admin/devices/([^/]+)/sticker', (m) => {
   needStaff(me(), 'devices.register');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
-  if (!d!.claimCode || d!.ownerId) fail(409, 'NO_ACTIVE_CODE', 'Device already claimed. Create a new code to print a sticker.');
+  if (!d!.claimCode || d!.ownerId || d!.vendorId) fail(409, 'NO_ACTIVE_CODE', 'Device already claimed. Create a new code to print a sticker.');
   const s = fakeSticker(d!.serial, d!.claimCode!);
   return { serial: s.serial, claimCode: s.claimCode, qrPayload: s.qrPayload, qrPngBase64: s.qrPngBase64 };
 });
@@ -411,7 +499,8 @@ on('POST', '/admin/devices/([^/]+)/unclaim', (m, b) => {
   const u = me(); needStaff(u, 'customers.edit');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
   if (!b.reason?.trim()) fail(400, 'VALIDATION', 'Give a reason', 'reason');
-  Object.assign(d!, { ownerId: null, name: null, room: null }); db.shares = db.shares.filter((s) => s.deviceId !== d!.id);
+  Object.assign(d!, { ownerId: null, vendorId: null, groupId: null, name: null, room: null }); db.shares = db.shares.filter((s) => s.deviceId !== d!.id);
+  db.grants = db.grants.filter((g) => g.deviceId !== d!.id);
   audit(u, 'device.unclaim', 'device', d!.serial, b.reason);
   return undefined;
 });
@@ -423,7 +512,7 @@ on('POST', '/admin/devices/([^/]+)/commands', (m, b) => {
   audit(u, `device.command.${b.type}`, 'device', d!.serial);
   if (d!.online) setTimeout(() => {
     row.status = 'done'; row.ackedAt = nowIso();
-    if (b.type === 'logs') (db.logs[d!.id] ||= []).unshift({ id: rid('lg'), createdAt: nowIso(), content: `[${new Date().toTimeString().slice(0, 8)}] I logs: upload requested\n[..] I wifi: rssi=${d!.rssi}\n[..] I radar: C1001 ok, mode=sleep\n[..] I mqtt: connected, queue=0` });
+    if (b.type === 'logs') (db.logs[d!.id] ||= []).unshift({ id: rid('lg'), createdAt: nowIso(), content: `[${new Date().toTimeString().slice(0, 8)}] I logs: upload requested\n[..] I wifi: rssi=${d!.rssi}\n[..] I radar: Sensor ok, mode=sleep\n[..] I mqtt: connected, queue=0` });
     mockEmit('command:status', { commandId: row.id, deviceId: d!.id, serial: d!.serial, type: row.type, status: 'done', error: null });
   }, 2000);
   return { commandId: row.id, status: row.status };
@@ -434,11 +523,11 @@ on('GET', '/admin/devices/([^/]+)/events', (m) => {
   needStaff(me(), 'devices.view');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
   const t = (min: number) => new Date(Date.now() - min * 60000).toISOString();
-  const items = d!.ownerId ? [
+  const items = d!.ownerId || d!.vendorId ? [
     { id: 'e5', type: 'bed_in', detail: null, createdAt: t(500) },
     { id: 'e4', type: 'bed_out', detail: 'session sid=128', createdAt: t(900) },
     { id: 'e3', type: d!.online ? 'online' : 'offline', detail: null, createdAt: t(d!.online ? 1400 : 2880) },
-    { id: 'e2', type: 'claimed', detail: `by ${db.users.find((u) => u.id === d!.ownerId)?.fullName}`, createdAt: t(40000) },
+    { id: 'e2', type: 'claimed', detail: `by ${db.users.find((u) => u.id === d!.ownerId)?.fullName || db.vendors.find((v) => v.id === d!.vendorId)?.name}`, createdAt: t(40000) },
     { id: 'e1', type: 'registered', detail: `by ${d!.registeredBy}`, createdAt: d!.registeredAt },
   ] : [{ id: 'e1', type: 'registered', detail: `by ${d!.registeredBy}`, createdAt: d!.registeredAt }];
   return { items, nextCursor: null };
@@ -446,7 +535,7 @@ on('GET', '/admin/devices/([^/]+)/events', (m) => {
 on('DELETE', '/admin/devices/([^/]+)', (m) => {
   const u = me(); needStaff(u, 'devices.register');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
-  if (d!.ownerId) fail(409, 'DEVICE_IN_USE', 'Only a device that was never claimed can be deleted');
+  if (d!.ownerId || d!.vendorId) fail(409, 'DEVICE_IN_USE', 'Only a device that was never claimed can be deleted');
   db.devices = db.devices.filter((x) => x !== d);
   audit(u, 'device.delete', 'device', d!.serial);
   return undefined;
@@ -551,6 +640,174 @@ on('PATCH', '/admin/platform-settings', (_m, b) => {
   if (b.minSessionMin !== undefined && (b.minSessionMin < 0 || b.minSessionMin > 120)) fail(400, 'VALIDATION', 'Use 0–120 minutes', 'minSessionMin');
   Object.assign(db.platform, b); audit(u, 'platform.settings.update', 'settings', 'Sleep rules');
   return db.platform;
+});
+
+
+/* ---------- 15. vendors ---------- */
+const inDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString();
+const newToken = () => Math.random().toString(36).slice(2, 14);
+function vendorObj(v: MVendor): Vendor {
+  return { ...v, deviceCount: db.devices.filter((d) => d.vendorId === v.id).length, memberCount: db.vendorMembers.filter((m) => m.vendorId === v.id).length,
+    groupCount: db.groups.filter((g) => g.vendorId === v.id).length };
+}
+const liveGrants = (deviceId: string) => db.grants.filter((g) => g.deviceId === deviceId && ['active', 'scheduled', 'invite_sent'].includes(grantStatus(g))).length;
+function adminVendor(id: string) { const v = db.vendors.find((x) => x.id === id); if (!v) fail(404, 'NOT_FOUND', 'Vendor not found'); return v!; }
+const vInvite = (i: { id: string; label: string; vendorRole?: 'owner' | 'staff'; expiresAt: string }) => ({ id: i.id, label: i.label, role: i.vendorRole!, expiresAt: i.expiresAt });
+const openVendorInvites = (vendorId: string) => db.invites.filter((i) => i.kind === 'vendor' && i.vendorId === vendorId && i.status === 'invite_sent' && new Date(i.expiresAt).getTime() > Date.now());
+
+// 15.1 admin
+on('GET', '/admin/vendors', (_m, _b, q) => {
+  needStaff(me(), 'vendors.manage');
+  const term = (q.get('q') || '').toLowerCase(); const st = q.get('status');
+  return { items: db.vendors.filter((v) => (!term || `${v.name} ${v.contactName || ''} ${v.phone || ''} ${v.email || ''}`.toLowerCase().includes(term)) && (!st || v.status === st)).map(vendorObj) };
+});
+on('POST', '/admin/vendors', (_m, b) => {
+  const u = me(); needStaff(u, 'vendors.manage');
+  if (!b.name?.trim()) fail(400, 'VALIDATION', 'Enter the vendor name', 'name');
+  if (b.phone && !/^\+[1-9]\d{6,14}$/.test(b.phone)) fail(400, 'VALIDATION', 'Enter a valid phone number', 'phone');
+  if (b.email && !/^\S+@\S+\.\S+$/.test(b.email)) fail(400, 'VALIDATION', 'Enter a valid email', 'email');
+  const v: MVendor = { id: rid('v'), name: b.name.trim(), contactName: b.contactName?.trim() || null, phone: b.phone || null, email: b.email?.trim() || null, status: 'active', createdAt: nowIso() };
+  db.vendors.push(v); audit(u, 'vendor.create', 'vendor', v.name);
+  return vendorObj(v);
+});
+on('GET', '/admin/vendors/([^/]+)', (m) => {
+  needStaff(me(), 'vendors.manage');
+  const v = adminVendor(m[1]);
+  return { ...vendorObj(v),
+    members: db.vendorMembers.filter((x) => x.vendorId === v.id).map((x) => { const p = db.users.find((y) => y.id === x.userId)!; return { userId: p.id, fullName: p.fullName, phone: p.phone, role: x.role }; }),
+    invites: openVendorInvites(v.id).map(vInvite),
+    groups: db.groups.filter((g) => g.vendorId === v.id).map((g) => ({ id: g.id, name: g.name })),
+    devices: db.devices.filter((d) => d.vendorId === v.id).map((d) => ({ id: d.id, serial: d.serial, name: d.name || d.serial, groupId: d.groupId || null, online: d.online, fw: d.fw, lastSeenAt: d.lastSeenAt, activeGrants: db.grants.filter((g) => g.deviceId === d.id && grantStatus(g) === 'active').length })) };
+});
+on('POST', '/admin/vendors/([^/]+)/invites', (m, b) => {
+  const u = me(); needStaff(u, 'vendors.manage');
+  const v = adminVendor(m[1]);
+  if (v.status !== 'active') fail(409, 'VENDOR_DISABLED', 'Enable the vendor first');
+  if (!b.label?.trim()) fail(400, 'VALIDATION', 'Who is it for? Add a label for your list', 'label');
+  const inv = { id: rid('inv'), token: newToken(), kind: 'vendor' as const, vendorId: v.id, vendorRole: 'owner' as const, label: b.label.trim(), invitedBy: u.id, expiresAt: inDays(7), status: 'invite_sent' as const };
+  db.invites.push(inv); audit(u, 'vendor.invite', 'vendor', v.name, `Owner link for ${inv.label}`);
+  return { invite: vInvite(inv), inviteUrl: `${origin()}/invite/${inv.token}`, expiresAt: inv.expiresAt };
+});
+on('DELETE', '/admin/vendors/([^/]+)/invites/([^/]+)', (m) => { needStaff(me(), 'vendors.manage'); const i = db.invites.find((x) => x.id === m[2] && x.vendorId === m[1]); if (i) i.status = 'cancelled'; return undefined; });
+on('POST', '/admin/vendors/([^/]+)/(disable|enable)', (m) => {
+  const u = me(); needStaff(u, 'vendors.manage');
+  const v = adminVendor(m[1]); v.status = m[2] === 'disable' ? 'disabled' : 'active';
+  audit(u, `vendor.${m[2]}`, 'vendor', v.name);
+  return vendorObj(v);
+});
+
+// 15.2 vendor side
+on('GET', '/vendor', () => { const { v, m } = myVendor(me()); return { vendor: { id: v.id, name: v.name, role: m.role } }; });
+on('GET', '/vendor/devices', () => { const u = me(); const { v } = myVendor(u); return { items: db.devices.filter((d) => d.vendorId === v.id).map((d) => card(u, d)) }; });
+function vendorDevice(vendorId: string, id: string) { const d = db.devices.find((x) => x.id === id && x.vendorId === vendorId); if (!d) fail(404, 'NOT_FOUND', 'Device not found'); return d!; }
+function vendorGroup(vendorId: string, id: string) { const g = db.groups.find((x) => x.id === id && x.vendorId === vendorId); if (!g) fail(404, 'NOT_FOUND', 'Group not found'); return g!; }
+on('PUT', '/vendor/devices/([^/]+)/group', (m, b) => {
+  const u = me(); const { v } = myVendor(u); const d = vendorDevice(v.id, m[1]);
+  const g = b.groupId ? vendorGroup(v.id, b.groupId) : null;
+  d.groupId = g?.id || null; audit(u, 'vendor.device.group', 'device', d.serial, g ? `Group: ${g.name}` : 'No group');
+  return { deviceId: d.id, group: g ? { id: g.id, name: g.name } : null };
+});
+
+// 15.3 groups
+const groupRow = (g: { id: string; name: string }) => ({ id: g.id, name: g.name, deviceCount: db.devices.filter((d) => d.groupId === g.id).length });
+function groupName(vendorId: string, name: string, except?: string) {
+  const n = (name || '').trim();
+  if (!n || n.length > 60) fail(400, 'VALIDATION', 'Use 1–60 characters', 'name');
+  if (db.groups.some((g) => g.vendorId === vendorId && g.id !== except && g.name.toLowerCase() === n.toLowerCase())) fail(409, 'GROUP_EXISTS', 'A group with this name exists', 'name');
+  return n;
+}
+on('GET', '/vendor/groups', () => { const { v } = myVendor(me()); return { items: db.groups.filter((g) => g.vendorId === v.id).map(groupRow) }; });
+on('POST', '/vendor/groups', (_m, b) => {
+  const u = me(); const { v } = myVendor(u);
+  const g = { id: rid('g'), vendorId: v.id, name: groupName(v.id, b.name) };
+  db.groups.push(g); audit(u, 'vendor.group.create', 'group', g.name);
+  return groupRow(g);
+});
+on('PATCH', '/vendor/groups/([^/]+)', (m, b) => { const u = me(); const { v } = myVendor(u); const g = vendorGroup(v.id, m[1]); g.name = groupName(v.id, b.name, g.id); audit(u, 'vendor.group.rename', 'group', g.name); return { id: g.id, name: g.name }; });
+on('DELETE', '/vendor/groups/([^/]+)', (m) => {
+  const u = me(); const { v } = myVendor(u); const g = vendorGroup(v.id, m[1]);
+  db.devices.forEach((d) => { if (d.groupId === g.id) d.groupId = null; });
+  db.groups = db.groups.filter((x) => x !== g); audit(u, 'vendor.group.delete', 'group', g.name);
+  return undefined;
+});
+
+// 15.4 team
+on('GET', '/vendor/team', () => {
+  const u = me(); const { v, m } = myVendor(u);
+  return { members: db.vendorMembers.filter((x) => x.vendorId === v.id).map((x) => { const p = db.users.find((y) => y.id === x.userId)!; return { userId: p.id, fullName: p.fullName, phone: p.phone, role: x.role, joinedAt: x.joinedAt }; }),
+    invites: m.role === 'owner' ? openVendorInvites(v.id).map(vInvite) : [] };
+});
+on('POST', '/vendor/team/invites', (_m, b) => {
+  const u = me(); const { v } = myVendor(u, true);
+  if (!b.label?.trim()) fail(400, 'VALIDATION', 'Who is it for? Add a label for your list', 'label');
+  const inv = { id: rid('inv'), token: newToken(), kind: 'vendor' as const, vendorId: v.id, vendorRole: 'staff' as const, label: b.label.trim(), invitedBy: u.id, expiresAt: inDays(7), status: 'invite_sent' as const };
+  db.invites.push(inv); audit(u, 'vendor.team.invite', 'vendor', v.name, `Staff link for ${inv.label}`);
+  return { invite: vInvite(inv), inviteUrl: `${origin()}/invite/${inv.token}`, expiresAt: inv.expiresAt };
+});
+on('DELETE', '/vendor/team/invites/([^/]+)', (m) => { const { v } = myVendor(me(), true); const i = db.invites.find((x) => x.id === m[1] && x.vendorId === v.id); if (i) i.status = 'cancelled'; return undefined; });
+on('DELETE', '/vendor/team/([^/]+)', (m) => {
+  const u = me(); const { v } = myVendor(u, true);
+  if (m[1] === u.id) fail(422, 'OWN_MEMBERSHIP', 'You can’t remove yourself');
+  db.vendorMembers = db.vendorMembers.filter((x) => !(x.vendorId === v.id && x.userId === m[1]));
+  audit(u, 'vendor.team.remove', 'vendor', v.name);
+  return undefined;
+});
+
+// 15.5 grants
+function vendorGrant(vendorId: string, id: string) { const g = db.grants.find((x) => x.id === id && x.vendorId === vendorId); if (!g) fail(404, 'NOT_FOUND', 'Access not found'); return g!; }
+function isoOk(s: unknown) { return typeof s === 'string' && /T.*(Z|[+-]\d{2}:\d{2})$/.test(s) && !isNaN(new Date(s).getTime()); }
+/** Tell the person (if it's whoever is logged in here) that their access changed. */
+function grantChanged(g: MGrant) {
+  const cur = sessionUser();
+  if (!cur || g.userId !== cur.id) return;
+  const d = db.devices.find((x) => x.id === g.deviceId)!;
+  const p = permsOn(cur, d);
+  mockEmit('access:changed', { deviceId: d.id, myPermissions: p.length ? p : null });
+}
+on('GET', '/vendor/grants', (_m, _b, q) => {
+  const { v } = myVendor(me());
+  const dev = q.get('deviceId'); const all = q.get('status') === 'all';
+  return { items: db.grants.filter((g) => g.vendorId === v.id && (!dev || g.deviceId === dev) && (all || !['ended', 'expired', 'invite_expired'].includes(grantStatus(g))))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(grantObj) };
+});
+on('POST', '/vendor/grants', (_m, b) => {
+  const u = me(); const { v } = myVendor(u);
+  const d = vendorDevice(v.id, b.deviceId);
+  if (!b.label?.trim()) fail(400, 'VALIDATION', 'Who is it for? Add a label for your list', 'label');
+  const perms: GrantPerm[] = b.permissions || ['live.view', 'history.view', 'alerts.receive'];
+  if (!perms.length || perms.some((p) => !GRANT_PERMS.includes(p))) fail(422, 'BAD_PERMISSION', 'Pick at least one thing they can do');
+  const startsAt = b.startsAt ?? nowIso();
+  if (!isoOk(startsAt) || !isoOk(b.endsAt)) fail(400, 'VALIDATION', 'Times need a date, a time and an offset', 'endsAt');
+  if (new Date(b.endsAt).getTime() <= Math.max(Date.now(), new Date(startsAt).getTime())) fail(422, 'BAD_PERIOD', 'The end must be after the start and in the future');
+  const expiresAt = new Date(Math.min(Date.now() + 7 * 86400000, new Date(b.endsAt).getTime())).toISOString();
+  const g: MGrant = { id: rid('gr'), vendorId: v.id, deviceId: d.id, label: b.label.trim(), userId: null, permissions: perms,
+    startsAt: new Date(startsAt).toISOString(), endsAt: new Date(b.endsAt).toISOString(), inviteExpiresAt: expiresAt, endedAt: null, createdAt: nowIso(), createdBy: u.id };
+  db.grants.push(g);
+  const token = newToken();
+  db.invites.push({ id: rid('inv'), token, kind: 'grant', vendorId: v.id, grantId: g.id, deviceId: d.id, label: g.label, invitedBy: u.id, expiresAt, status: 'invite_sent' });
+  audit(u, 'vendor.grant.create', 'device', d.serial, `Temporary access for ${g.label}`);
+  return { grant: grantObj(g), inviteUrl: `${origin()}/invite/${token}`, expiresAt };
+});
+on('PATCH', '/vendor/grants/([^/]+)', (m, b) => {
+  const u = me(); const { v } = myVendor(u); const g = vendorGrant(v.id, m[1]);
+  if (g.endedAt) fail(409, 'GRANT_ENDED', 'This access was ended. Create a new one instead.');
+  const startsAt = b.startsAt ?? g.startsAt;
+  if (!isoOk(b.endsAt) || (b.startsAt !== undefined && !isoOk(b.startsAt))) fail(400, 'VALIDATION', 'Times need a date, a time and an offset', 'endsAt');
+  if (new Date(b.endsAt).getTime() <= new Date(startsAt).getTime()) fail(422, 'BAD_PERIOD', 'The end must be after the start');
+  g.startsAt = new Date(startsAt).toISOString(); g.endsAt = new Date(b.endsAt).toISOString();
+  audit(u, 'vendor.grant.update', 'device', grantObj(g).device.serial, `Until ${g.endsAt}`);
+  grantChanged(g);
+  return { grant: grantObj(g) };
+});
+on('POST', '/vendor/grants/([^/]+)/end', (m) => {
+  const u = me(); const { v } = myVendor(u); const g = vendorGrant(v.id, m[1]);
+  if (!g.endedAt) {
+    g.endedAt = nowIso();
+    db.invites.forEach((i) => { if (i.grantId === g.id && i.status === 'invite_sent') i.status = 'cancelled'; });
+    audit(u, 'vendor.grant.end', 'device', grantObj(g).device.serial, `Ended access for ${g.label}`);
+    grantChanged(g);
+  }
+  return { grant: grantObj(g) };
 });
 
 /* ---------- dispatcher ---------- */
