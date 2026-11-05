@@ -51,7 +51,9 @@ export default function LivePage() {
       </>;
       const histBtn = perms.includes('history.view') && <Link className="btn ghost" style={{ alignSelf: 'flex-start' }} href={`/history/${d.id}`}><Icon name="moon" /> See sleep history</Link>;
       const back: [string, string] = d.access === 'vendor' ? ['/vendor', 'Devices'] : ['/devices', 'My devices'];
-      const sub0 = [d.room || d.serial, d.vendor?.name, d.group?.name].filter(Boolean).join(' · ');
+      // v2: a customer's device bought from a vendor shows "Sold by <vendor>"
+      const vendorTag = d.vendor ? (d.access === 'owner' || d.access === 'share' ? `Sold by ${d.vendor.name}` : d.vendor.name) : null;
+      const sub0 = [d.room || d.serial, vendorTag, d.group?.name].filter(Boolean).join(' · ');
       const until = d.access === 'grant' && d.accessEndsAt ? <div className="note"><Icon name="clock" /><span>Access from {d.vendor?.name || 'the vendor'} until <b>{whenLocal(d.accessEndsAt)}</b>. It ends by itself after that.</span></div> : null;
 
       if (!canLive) return (
@@ -78,7 +80,7 @@ export default function LivePage() {
         <div className="wrap">
           <Head
             title={<>{d.name} <span className="pill live" style={{ verticalAlign: 'middle', marginLeft: 6 }}><span className="dot pulse" />LIVE</span></>}
-            sub={<>{d.room ? `${d.room} · ` : ''}{d.vendor ? `${d.vendor.name} · ` : ''}{d.group ? `${d.group.name} · ` : ''}updates every few seconds while someone is in bed<TzTag tz={d.tz} place={d.place} /></>}
+            sub={<>{d.room ? `${d.room} · ` : ''}{vendorTag ? `${vendorTag} · ` : ''}{d.group ? `${d.group.name} · ` : ''}updates every few seconds while someone is in bed<TzTag tz={d.tz} place={d.place} /></>}
             actions={acts} back={back} />
           {until}
           <div className="g2">

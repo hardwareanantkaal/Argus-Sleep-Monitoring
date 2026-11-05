@@ -32,9 +32,11 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/sleep-rules', label: 'Sleep rules', icon: 'gear', perm: 'platform.settings' },
   { href: '/admin/vendors', label: 'Vendors', icon: 'tag', perm: 'vendors.manage' },
 ];
-// Vendor team side (API.md §15). Every member sees all four; owner-only actions are hidden inside the screens.
+// Vendor team side (API.md §15). Every member sees all of them; owner-only actions are hidden inside the screens.
+// v2: Devices also shows the stock counts (in stock / sold); Customers lists who bought our sensors.
 export const VENDOR_NAV: NavItem[] = [
-  { href: '/vendor', label: 'Devices', icon: 'chip' },
+  { href: '/vendor', label: 'Stock & devices', icon: 'chip' },
+  { href: '/vendor/customers', label: 'Customers', icon: 'person' },
   { href: '/vendor/groups', label: 'Groups', icon: 'list' },
   { href: '/vendor/team', label: 'Team', icon: 'users' },
   { href: '/vendor/access', label: 'Access', icon: 'clock' },

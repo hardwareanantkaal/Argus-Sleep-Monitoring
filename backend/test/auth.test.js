@@ -206,8 +206,8 @@ test('delete account releases owned devices and their sleep history', async () =
   const { c, user, phone: p, password } = await registered();
   const mac = Array.from({ length: 6 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0'));
   const { rows: [d] } = await db.query(
-    `INSERT INTO devices (serial_no, mac, mqtt_username, chip_model, hw_model, owner_id, claimed_at, name)
-     VALUES ($1, $2, $3, 'ESP32-S3', 'ARG-S1', $4, now(), 'Bedroom') RETURNING id`,
+    `INSERT INTO devices (serial_no, mac, mqtt_username, chip_model, hw_model, owner_id, claimed_at, claim_stage, name)
+     VALUES ($1, $2, $3, 'ESP32-S3', 'ARG-S1', $4, now(), 'owned', 'Bedroom') RETURNING id`,
     [`ARG-T${mac.slice(3).join('').toUpperCase().slice(0, 6)}`, mac.join(':'), mac.join(''), user.id]);
   await db.query('INSERT INTO device_settings (device_id) VALUES ($1)', [d.id]);
   await db.query(`INSERT INTO sleep_sessions (device_id, sid, started_at, ended_at, timezone, raw)

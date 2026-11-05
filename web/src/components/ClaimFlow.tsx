@@ -10,9 +10,10 @@ import { TzSelect } from './ui';
 import { errText, post } from '@/lib/api';
 import { isLive } from '@/lib/config';
 import { browserTz, day, placeName, TIMEZONES } from '@/lib/format';
-import type { DeviceDetail } from '@/lib/types';
+import type { ClaimCheck, DeviceDetail } from '@/lib/types';
 
-type Found = { serial: string; hwModel: string; registeredAt: string };
+/** v2: the same sticker works twice. result 'stock' = into my vendor's stock; 'owner' = I become the owner (soldBy set when from a vendor's stock). */
+type Found = ClaimCheck;
 type Key = { qr: string } | { claimCode: string; serial?: string };
 
 /** Format a typed claim code as XXXX-XXXX-XXXX (dashes and lower case are fine for the server too). */
@@ -76,7 +77,10 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   // API.md 15.6: a vendor team member claims for the vendor unless they choose "for myself" (asVendor: false)
-  const vendor = useAuth().user?.vendor;
+  // v2: only a factory sticker can go into stock; from a vendor's stock the scanner always becomes the owner.
+  const myVendor = useAuth().user?.vendor;
+  const vendor = found.result === 'owner' ? null : myVendor;
+  const soldBy = found.soldBy;
   const [forVendor, setForVendor] = useState(true);
   useEffect(() => setTz(browserTz()), []); // pre-filled from this phone / browser
 
@@ -92,6 +96,7 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
   return (
     <div className="card">
       <p className="small" style={{ marginBottom: 14 }}>Found <span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}. It will appear under this name.</p>
+      {soldBy && <div className="note" style={{ marginBottom: 14 }}><Icon name="tag" /><span>Sold by <b>{soldBy.name}</b>. You will be the owner and can share it with family. The {soldBy.name} team can also see this sensor, to support you.</span></div>}
       <form className="form" onSubmit={submit}>
         <div className="field"><label htmlFor="cl-name">Name</label><input className="inp" id="cl-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Nani's room" /><span className="hint">Tip: use the person&apos;s name or the room.</span></div>
         <div className="field"><label htmlFor="cl-room">Room (optional)</label><input className="inp" id="cl-room" value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Ground floor bedroom" /></div>
@@ -101,14 +106,14 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
         </div>
         {vendor && (
           <div className="stack" style={{ gap: 6 }}>
-            {forVendor && <div className="note"><Icon name="info" /><span>This sensor will belong to <b>{vendor.name}</b>. Everyone on its team will see it.</span></div>}
+            {forVendor && <div className="note"><Icon name="info" /><span>This sensor goes into the <b>stock of {vendor.name}</b>. Everyone on its team will see it. Keep the sticker on it: when you sell it, the customer scans the same sticker and becomes the owner.</span></div>}
             <label className="row small" style={{ gap: 8, flexWrap: 'nowrap' }}>
               <input type="checkbox" checked={!forVendor} onChange={(e) => setForVendor(!e.target.checked)} /> Claim it for myself instead (not for {vendor.name})
             </label>
           </div>
         )}
         {err && <p className="err" role="alert">{err}</p>}
-        <div className="row"><button className="btn" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add device'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
+        <div className="row"><button className="btn" type="submit" disabled={busy}>{busy ? 'Adding…' : vendor && forVendor ? 'Add to stock' : 'Add device'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
       </form>
     </div>
   );

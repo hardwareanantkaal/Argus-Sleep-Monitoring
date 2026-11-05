@@ -75,8 +75,9 @@ router.get('/customers/:id', requireStaff('customers.view'), async (req, res) =>
   const u = await customer(req.params.id);
   const row = await db.one(`SELECT ${CUSTOMER_COLS} FROM users u WHERE u.id = $1`, [u.id]);
   const devices = await db.many(
-    `SELECT d.id, d.serial_no, d.name, d.timezone, s.is_online, s.fw_version, s.last_seen_at
-       FROM devices d LEFT JOIN device_state s ON s.device_id = d.id WHERE d.owner_id = $1 ORDER BY d.claimed_at`, [u.id]);
+    `SELECT d.id, d.serial_no, d.name, d.timezone, s.is_online, s.fw_version, s.last_seen_at, d.vendor_id, v.name AS vendor_name
+       FROM devices d LEFT JOIN device_state s ON s.device_id = d.id LEFT JOIN vendors v ON v.id = d.vendor_id
+      WHERE d.owner_id = $1 ORDER BY d.claimed_at`, [u.id]);
   const family = await db.many(
     `SELECT f.full_name, f.phone, d.name AS device_name FROM device_shares s
        JOIN devices d ON d.id = s.device_id JOIN users f ON f.id = s.user_id
@@ -84,7 +85,8 @@ router.get('/customers/:id', requireStaff('customers.view'), async (req, res) =>
   res.json({
     ...customerView(row),
     devices: devices.map((d) => ({ id: d.id, serial: d.serial_no, name: d.name, tz: d.timezone,
-      online: live.getStatus(d.id)?.online ?? !!d.is_online, fw: d.fw_version, lastSeenAt: d.last_seen_at })),
+      online: live.getStatus(d.id)?.online ?? !!d.is_online, fw: d.fw_version, lastSeenAt: d.last_seen_at,
+      soldBy: d.vendor_id ? { id: d.vendor_id, name: d.vendor_name } : null })),
     family: family.map((f) => ({ fullName: f.full_name, phone: f.phone, deviceName: f.device_name })),
   });
 });

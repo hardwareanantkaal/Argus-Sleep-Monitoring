@@ -241,8 +241,8 @@ CREATE TABLE devices (
   mqtt_username    TEXT        NOT NULL UNIQUE,     -- MAC as 12 lowercase hex chars
   secret_hash      TEXT,                            -- RESERVED, unused: devices log in with the MAC only (owner
                                                     -- decision C1, as Water Tank migration 003). Kept for a later secret.
-  claim_code_hash  TEXT,                            -- HMAC of the 12-char sticker claim code (D2). NULL once claimed
-  claim_code_enc   BYTEA,                           -- the same code AES-256-GCM encrypted, for reprinting the sticker (006). NULL once claimed
+  claim_code_hash  TEXT,                            -- HMAC of the 12-char sticker claim code (D2). Kept in vendor stock, NULL once owned (008)
+  claim_code_enc   BYTEA,                           -- the same code AES-256-GCM encrypted, for reprinting the sticker (006). NULL once owned
   chip_model       TEXT        NOT NULL,            -- 'ESP32-S3' (read over USB)
   hw_model         TEXT        NOT NULL,            -- 'ARG-S1 rev B'
   batch            TEXT,                            -- 'B-2026-11-A'
@@ -250,8 +250,10 @@ CREATE TABLE devices (
   fw_at_register   TEXT,                            -- firmware flashed at the factory
   registered_by    UUID        REFERENCES users(id) ON DELETE SET NULL,
   owner_id         UUID        REFERENCES users(id) ON DELETE SET NULL,  -- one owner; family via device_shares
-  claimed_at       TIMESTAMPTZ,
-  vendor_id        UUID,                            -- vendor-owned device (007); FK added in section 4b
+  claimed_at       TIMESTAMPTZ,                     -- when the current holder claimed it (the customer, once sold)
+  claim_stage      TEXT        NOT NULL DEFAULT 'factory',  -- 'factory' | 'vendor_stock' | 'owned' (008)
+  stocked_at       TIMESTAMPTZ,                     -- when a vendor added it to its stock (008)
+  vendor_id        UUID,                            -- the vendor that stocks / sold it (007, 008); FK added in section 4b
   group_id         UUID,                            -- vendor group (007); FK added in section 4b
   name             TEXT,                            -- "Mom's bedroom"
   room             TEXT,                            -- "Master bedroom"
@@ -271,9 +273,11 @@ CREATE TABLE devices (
   CONSTRAINT devices_serial_format CHECK (serial_no ~ '^ARG-[0-9A-Z]{7}$'),
   CONSTRAINT devices_place_length CHECK (place IS NULL OR char_length(btrim(place)) BETWEEN 2 AND 60),
   CONSTRAINT devices_mqtt_username_format CHECK (mqtt_username ~ '^[0-9a-f]{12}$'),
-  CONSTRAINT devices_claim_consistent CHECK (      -- claimed by a person OR a vendor (007), never both
-    (owner_id IS NULL AND vendor_id IS NULL AND claimed_at IS NULL)
-    OR (claimed_at IS NOT NULL AND (owner_id IS NULL) <> (vendor_id IS NULL))
+  CONSTRAINT devices_claim_stage CHECK (claim_stage IN ('factory', 'vendor_stock', 'owned')),
+  CONSTRAINT devices_claim_consistent CHECK (      -- 008: the QR works twice (vendor stock, then customer)
+       (claim_stage = 'factory'      AND owner_id IS NULL     AND vendor_id IS NULL     AND claimed_at IS NULL)
+    OR (claim_stage = 'vendor_stock' AND owner_id IS NULL     AND vendor_id IS NOT NULL AND claimed_at IS NOT NULL)
+    OR (claim_stage = 'owned'        AND owner_id IS NOT NULL AND claimed_at IS NOT NULL)
   ));
 CREATE INDEX devices_owner_idx ON devices (owner_id);
 CREATE INDEX devices_claim_code_idx ON devices (claim_code_hash) WHERE claim_code_hash IS NOT NULL;
@@ -339,6 +343,7 @@ ALTER TABLE devices ADD FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE
 ALTER TABLE devices ADD FOREIGN KEY (group_id) REFERENCES vendor_groups(id) ON DELETE SET NULL;
 ALTER TABLE devices ADD CONSTRAINT devices_group_needs_vendor CHECK (group_id IS NULL OR vendor_id IS NOT NULL);
 CREATE INDEX devices_vendor_idx ON devices (vendor_id) WHERE vendor_id IS NOT NULL;
+CREATE INDEX devices_vendor_owner_idx ON devices (vendor_id, owner_id) WHERE vendor_id IS NOT NULL AND owner_id IS NOT NULL;
 
 -- Temporary access to one device. user_id is NULL until the link is accepted.
 CREATE TABLE device_access_grants (

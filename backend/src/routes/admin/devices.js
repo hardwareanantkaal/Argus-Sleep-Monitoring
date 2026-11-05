@@ -115,7 +115,7 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
   }
   pageVals.push(q.limit + 1);
   const rows = await db.many(
-    `SELECT d.id, d.serial_no, d.mqtt_username, d.name, d.owner_id, o.full_name AS owner_name, d.vendor_id, v.name AS vendor_name, d.timezone,
+    `SELECT d.id, d.serial_no, d.mqtt_username, d.name, d.owner_id, o.full_name AS owner_name, d.vendor_id, v.name AS vendor_name, d.timezone, d.claim_stage,
             d.chip_model, d.created_at, d.is_disabled, COALESCE(s.is_online, false) AS online, s.fw_version, s.last_seen_at
        ${from} ${pageWhere} ORDER BY d.created_at DESC, d.id DESC LIMIT $${pageVals.length}`, pageVals);
   const more = rows.length > q.limit;
@@ -123,6 +123,7 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
     id: r.id, serial: r.serial_no, mac: macColons(r.mqtt_username), name: r.name,
     owner: r.owner_id ? { id: r.owner_id, fullName: r.owner_name } : null,
     vendor: r.vendor_id ? { id: r.vendor_id, name: r.vendor_name } : null,
+    stage: r.claim_stage,
     online: r.online, isDisabled: r.is_disabled, tz: r.timezone, fw: r.fw_version, chip: r.chip_model,
     lastSeenAt: r.last_seen_at, createdAt: r.created_at,
   }));
@@ -157,7 +158,10 @@ router.get('/devices/:id', requireStaff('devices.view'), async (req, res) => {
     vendor,
     shares: shares.map((x) => ({ userId: x.id, fullName: x.full_name, phone: x.phone, permissions: x.perms.filter(Boolean) })),
     claimCodeActive: !!d.claim_code_hash,
-    stickerAvailable: !!d.claim_code_enc && !d.claimed_at,
+    // 008: 'factory' | 'vendor_stock' | 'owned'; the sticker works until a customer owns it
+    stage: d.claim_stage,
+    stockedAt: d.stocked_at,
+    stickerAvailable: !!d.claim_code_enc && d.claim_stage !== 'owned',
     sensorSettings: set ? { exitS: set.exit_s, liveS: set.live_s, idleS: set.idle_s, struggle: set.struggle,
       unattended: set.unattended, unattMin: set.unatt_min, version: set.version, appliedVersion: set.applied_version } : null,
   });
@@ -229,7 +233,8 @@ router.post('/devices/:id/claim-code', requireStaff('devices.register'), async (
   await db.tx(async (c) => {
     await c.query('UPDATE devices SET claim_code_hash = $2, claim_code_enc = $3 WHERE id = $1', [d.id, claim.hashCode(code), claim.sealCode(code)]);
     await audit(req, { action: 'device.claim_code', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
-      detail: d.claimed_at ? 'issued while claimed (works only after unclaim)' : null }, c);
+      detail: d.claim_stage === 'owned' ? 'issued while owned (works only after unclaim)'
+        : d.claim_stage === 'vendor_stock' ? 'issued while in vendor stock (the old sticker stops working)' : null }, c);
   });
   res.json(await codeResponse(d.serial_no, code));
 });
@@ -237,8 +242,8 @@ router.post('/devices/:id/claim-code', requireStaff('devices.register'), async (
 // 8.6b Reprint the sticker: the stored code of an unclaimed device.
 router.get('/devices/:id/sticker', requireStaff('devices.register'), async (req, res) => {
   const d = await loadDevice(req.params.id);
-  if (!d.claim_code_enc || d.claimed_at) {
-    throw E.conflict('NO_ACTIVE_CODE', d.claimed_at ? 'This device is claimed; issue a new code after unclaiming' : 'No stored code: issue a new one');
+  if (!d.claim_code_enc || d.claim_stage === 'owned') {
+    throw E.conflict('NO_ACTIVE_CODE', d.claim_stage === 'owned' ? 'This device is owned; issue a new code after unclaiming' : 'No stored code: issue a new one');
   }
   let code;
   try { code = claim.openCode(d.claim_code_enc); } catch {

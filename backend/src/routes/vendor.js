@@ -50,8 +50,19 @@ router.get('/', async (req, res) => {
   res.json({ vendor: req.vendor });
 });
 
+// Cards carry stage ('stock' | 'sold'), customer, stockedAt, soldAt (v2).
 router.get('/devices', async (req, res) => {
   res.json({ items: await views.listFor(req.user.id, req.vendor.id) });
+});
+
+// v2 Stock counts: { total, stock, sold, customers, online }
+router.get('/summary', async (req, res) => {
+  res.json(await vendors.summary(req.vendor.id));
+});
+
+// v2 The vendor's customers, each with the devices they bought.
+router.get('/customers', async (req, res) => {
+  res.json({ items: await vendors.customers(req.vendor.id) });
 });
 
 // ---- 15.3 Groups ------------------------------------------------------

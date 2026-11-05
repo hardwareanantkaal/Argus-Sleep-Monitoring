@@ -9,8 +9,9 @@ const live = require('./live');
 
 const BASE_SQL = `
   SELECT d.id, d.serial_no, d.name, d.room, d.timezone, d.place, d.sleep_cutoff, d.auto_update,
-         d.hw_model, d.owner_id, d.mqtt_username, d.vendor_id, d.group_id,
-         o.full_name AS owner_name, v.name AS vendor_name, g.name AS group_name,
+         d.hw_model, d.owner_id, d.mqtt_username, d.vendor_id, d.group_id, d.claim_stage, d.claimed_at, d.stocked_at,
+         o.full_name AS owner_name, o.phone AS owner_phone, o.country AS owner_country,
+         v.name AS vendor_name, g.name AS group_name,
          (SELECT p.via FROM device_user_permissions p WHERE p.device_id = d.id AND p.user_id = $1
            ORDER BY array_position(ARRAY['owner','vendor','share','grant'], p.via) LIMIT 1) AS via,
          (SELECT max(ag.ends_at) FROM device_access_grants ag WHERE ag.device_id = d.id AND ag.user_id = $1
@@ -52,9 +53,16 @@ async function card(r, userId) {
     isOwner,
     // 'owner' | 'share' | 'vendor' (vendor team) | 'grant' (temporary access), API.md §15
     access: r.via,
-    sharedBy: isOwner || !r.owner_id ? null : { fullName: r.owner_name },
+    sharedBy: isOwner || !r.owner_id || r.via === 'vendor' ? null : { fullName: r.owner_name },
     vendor: r.vendor_id ? { id: r.vendor_id, name: r.vendor_name } : null,
     group: r.via === 'vendor' && r.group_id ? { id: r.group_id, name: r.group_name } : null,
+    // Vendor team only (v2): 'stock' (not sold) | 'sold', and who bought it.
+    ...(r.via === 'vendor' ? {
+      stage: r.claim_stage === 'owned' ? 'sold' : 'stock',
+      customer: r.owner_id ? { id: r.owner_id, fullName: r.owner_name, phone: r.owner_phone, country: r.owner_country } : null,
+      stockedAt: r.stocked_at,
+      soldAt: r.claim_stage === 'owned' ? r.claimed_at : null,
+    } : {}),
     accessEndsAt: r.via === 'grant' ? r.access_ends_at : null,
     myPermissions: perms,
     status: { online, lastSeenAt: mem?.lastSeenAt || r.last_seen_at },

@@ -54,6 +54,11 @@ export interface DeviceCard {
   vendor?: { id: string; name: string } | null;
   group?: { id: string; name: string } | null;
   accessEndsAt?: string | null;
+  /** §15 v2, vendor team only: in stock (not sold) or sold, and the customer who bought it */
+  stage?: VendorStage;
+  customer?: { id: string; fullName: string; phone: string; country: string } | null;
+  stockedAt?: string | null;
+  soldAt?: string | null;
   /** never a nap-only day (API.md §4); fields typed nullable only so the UI stays defensive */
   lastNight?: { sleepDate: string; score: number | null; totalSleepMin: number | null } | null;
 }
@@ -214,13 +219,30 @@ export type DeviceAccess = 'owner' | 'share' | 'vendor' | 'grant';
 export interface Vendor {
   id: string; name: string; contactName: string | null; phone: string | null; email: string | null;
   status: 'active' | 'disabled'; deviceCount: number; memberCount: number; groupCount: number; createdAt: string;
+  /** v2: not sold yet / sold / distinct customers */
+  stockCount?: number; soldCount?: number; customerCount?: number;
+}
+export interface VendorCreated { vendor: Vendor; inviteUrl: string; expiresAt: string }
+export type VendorStage = 'stock' | 'sold';
+export interface VendorSummary { total: number; stock: number; sold: number; customers: number; online: number }
+export interface VendorCustomer {
+  id: string; fullName: string; phone: string; country: string; firstClaimedAt: string;
+  devices: { id: string; serial: string; name: string; claimedAt: string; online: boolean; fw: string | null; lastSeenAt: string | null }[];
 }
 export interface VendorInvite { id: string; label: string; role: VendorRole; expiresAt: string }
 export interface VendorDetail extends Vendor {
   members: { userId: string; fullName: string; phone: string; role: VendorRole }[];
   invites: VendorInvite[];
   groups: { id: string; name: string }[];
-  devices: { id: string; serial: string; name: string; groupId: string | null; online: boolean; fw: string | null; lastSeenAt: string | null; activeGrants: number }[];
+  summary?: VendorSummary;
+  customers?: VendorCustomer[];
+  devices: { id: string; serial: string; name: string; groupId: string | null; online: boolean; fw: string | null; lastSeenAt: string | null; activeGrants: number;
+    stage?: VendorStage; customer?: { id: string; fullName: string } | null; stockedAt?: string | null; soldAt?: string | null }[];
+}
+/** API 3.2: what claiming this sticker will do */
+export interface ClaimCheck {
+  serial: string; hwModel: string; registeredAt: string;
+  stage?: 'factory' | 'vendor_stock'; result?: 'stock' | 'owner'; soldBy?: { id: string; name: string } | null;
 }
 export interface VendorGroup { id: string; name: string; deviceCount: number }
 export interface VendorTeam {

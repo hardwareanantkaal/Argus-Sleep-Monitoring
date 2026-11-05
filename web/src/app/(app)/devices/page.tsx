@@ -37,7 +37,7 @@ export default function DevicesPage() {
                 <div className="between" style={{ alignItems: 'flex-start' }}>
                   <div className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <h2>{d.name}</h2>
-                    <span className="xs muted">{[d.room, d.sharedBy && `shared by ${d.sharedBy.fullName}`, d.vendor && d.vendor.name, d.group && d.group.name].filter(Boolean).join(' · ') || d.serial}</span>
+                    <span className="xs muted">{[d.room, d.sharedBy && `shared by ${d.sharedBy.fullName}`, d.vendor && (d.access === 'owner' || d.access === 'share' ? `sold by ${d.vendor.name}` : d.vendor.name), d.group && d.group.name].filter(Boolean).join(' · ') || d.serial}</span>
                     {d.access === 'grant' && d.accessEndsAt && <span className="pill warn" style={{ alignSelf: 'flex-start', marginTop: 4 }}><Icon name="clock" size={13} /> Access until {whenLocal(d.accessEndsAt)}</span>}
                   </div>
                   <StatusPill online={on} />

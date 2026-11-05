@@ -1,7 +1,8 @@
 'use client';
 
-// Vendor devices (API.md 15.2): every device of my vendor, with group, online, live summary and
-// how many temporary accesses are running. Filter by group; move a device to a group.
+// Vendor devices (API.md 15.2): stock counts (v2), then every device of my vendor with its stage
+// (in stock / sold + customer), group, online, live summary and how many temporary accesses are
+// running. Filter by stage and group; move a device to a group.
 
 import Link from 'next/link';
 import { useState } from 'react';
@@ -10,9 +11,10 @@ import { useAuth, useToast } from '@/components/Providers';
 import { RequireVendor } from '@/components/Shell';
 import { Async, Head, StatusPill, useApi } from '@/components/ui';
 import { errText, put } from '@/lib/api';
-import { ago, presenceText } from '@/lib/format';
+import { StagePill, StockTiles } from '@/components/vendor';
+import { ago, day, prettyPhone, presenceText } from '@/lib/format';
 import { useAccessChanged, useLive } from '@/lib/useLive';
-import type { DeviceCard, Grant, VendorGroup } from '@/lib/types';
+import type { DeviceCard, Grant, VendorGroup, VendorStage, VendorSummary } from '@/lib/types';
 
 export default function VendorDevicesPage() {
   return <RequireVendor><Inner /></RequireVendor>;
@@ -24,14 +26,18 @@ function Inner() {
   const q = useApi<{ items: DeviceCard[] }>('/vendor/devices');
   const groups = useApi<{ items: VendorGroup[] }>('/vendor/groups');
   const grants = useApi<{ items: Grant[] }>('/vendor/grants');
+  const summary = useApi<VendorSummary>('/vendor/summary');
   const [filter, setFilter] = useState<string>('all');
+  const [stage, setStage] = useState<'all' | VendorStage>('all');
   const items = q.data?.items || [];
   const { live, status } = useLive(items.map((d) => d.id), items.map((d) => d.id));
   useAccessChanged((m) => { if (m.myPermissions === null) q.setData((x) => x && { items: x.items.filter((d) => d.id !== m.deviceId) }); });
   const online = (d: DeviceCard) => status[d.id]?.online ?? d.status.online;
   const active = (id: string) => (grants.data?.items || []).filter((g) => g.device.id === id && g.status === 'active').length;
   const gl = groups.data?.items || [];
-  const shown = items.filter((d) => filter === 'all' || (filter === 'none' ? !d.group : d.group?.id === filter));
+  const shown = items.filter((d) => (stage === 'all' || d.stage === stage)
+    && (filter === 'all' || (filter === 'none' ? !d.group : d.group?.id === filter)));
+  const nStage = (s: VendorStage) => items.filter((d) => d.stage === s).length;
 
   const setGroup = async (d: DeviceCard, groupId: string) => {
     try {
@@ -46,6 +52,15 @@ function Inner() {
     <div className="wrap">
       <Head title="Devices" sub={q.data ? `${user?.vendor?.name} · ${items.length} sensor${items.length === 1 ? '' : 's'} · ${items.filter(online).length} online` : undefined}
         actions={<><Link className="btn ghost" href="/vendor/access"><Icon name="clock" /> Give access</Link><Link className="btn" href="/devices/add"><Icon name="plus" /> Add device</Link></>} />
+      {summary.data && <StockTiles s={summary.data} />}
+      <div className="row">
+        <div className="seg" role="tablist" aria-label="Stage">
+          {([['all', `All (${items.length})`], ['stock', `In stock (${nStage('stock')})`], ['sold', `Sold (${nStage('sold')})`]] as const).map(([k, l]) => (
+            <button key={k} role="tab" aria-selected={stage === k} className={stage === k ? 'on' : ''} onClick={() => setStage(k)}>{l}</button>
+          ))}
+        </div>
+        <Link className="btn ghost sm" href="/vendor/customers"><Icon name="person" /> Customers</Link>
+      </div>
       {gl.length > 0 && (
         <div className="row">
           <label className="small muted" htmlFor="vd-filter">Group</label>
@@ -69,8 +84,11 @@ function Inner() {
                     <h2>{d.name}</h2>
                     <span className="xs muted">{[d.room, d.serial].filter(Boolean).join(' · ')}</span>
                   </div>
-                  <StatusPill online={on} />
+                  <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><StagePill stage={d.stage} /><StatusPill online={on} /></div>
                 </div>
+                {d.stage === 'sold' && d.customer
+                  ? <div className="xs muted">Sold to <b>{d.customer.fullName}</b> · {prettyPhone(d.customer.phone)}{d.soldAt ? ` · ${day(d.soldAt)}` : ''}</div>
+                  : <div className="xs muted">In stock since {day(d.stockedAt)}. The customer scans the same sticker to become the owner.</div>}
                 {on && lv ? (
                   <div className="vitals">
                     <div className="vital"><span>Heart</span><b>{lv.hr || '—'}<span> bpm</span></b></div>
@@ -101,8 +119,8 @@ function Inner() {
       ) : (
         <div className="card empty">
           <Icon name="chip" size={30} />
-          <h2>{items.length ? 'No devices in this group' : 'No devices yet'}</h2>
-          <p>{items.length ? 'Pick another group, or move a device into this one.' : `Scan the QR sticker on a sensor to add it. It will belong to ${user?.vendor?.name}.`}</p>
+          <h2>{items.length ? 'No devices here' : 'No devices yet'}</h2>
+          <p>{items.length ? 'Pick another stage or group, or move a device into this group.' : `Scan the QR sticker on a sensor to add it to the stock of ${user?.vendor?.name}. Keep the sticker on the sensor: the customer scans it later.`}</p>
           {!items.length && <Link className="btn" href="/devices/add"><Icon name="plus" /> Add device</Link>}
         </div>
       )}</Async>

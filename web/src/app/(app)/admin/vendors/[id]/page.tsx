@@ -8,6 +8,7 @@ import { AdminStatusPill } from '@/components/admin';
 import { Icon } from '@/components/Icon';
 import { useAuth, useToast } from '@/components/Providers';
 import { RequireStaff } from '@/components/Shell';
+import { CustomerList, StagePill, StockTiles } from '@/components/vendor';
 import { Async, copyText, Head, useApi } from '@/components/ui';
 import { del, errText, post } from '@/lib/api';
 import { ago, day, prettyPhone } from '@/lib/format';
@@ -49,7 +50,7 @@ function Inner() {
             sub={[v.contactName, v.phone && prettyPhone(v.phone), v.email, `since ${day(v.createdAt)}`].filter(Boolean).join(' · ')}
             actions={<>
               {active ? <span className="pill ok">Active</span> : <span className="pill bad">Disabled</span>}
-              {active && <button className="btn" onClick={() => { setInviting(!inviting); setErr(''); }}><Icon name="plus" /> Invite vendor owner</button>}
+              {active && <button className="btn ghost" onClick={() => { setInviting(!inviting); setErr(''); }}><Icon name="plus" /> New owner link</button>}
             </>} />
 
           {!active && <div className="banner" role="status"><Icon name="alert" /><span>Disabled: its team and people with temporary access can&apos;t see its devices. Devices and history are kept.</span></div>}
@@ -67,7 +68,8 @@ function Inner() {
           )}
 
           {inviting && (
-            <div className="card"><h2 style={{ marginBottom: 14 }}>Invite the vendor owner</h2>
+            <div className="card"><h2 style={{ marginBottom: 14 }}>New owner invite link</h2>
+              <p className="small muted" style={{ marginBottom: 12 }}>Use this when the first link was lost or expired, or for a second owner.</p>
               <form className="form" onSubmit={invite}>
                 <div className="field"><label htmlFor="vo-name">Who is it for?</label><input className="inp" id="vo-name" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={v.contactName || 'e.g. Dr. Kavita Nair'} /><span className="hint">Only a label. The owner can then invite their own staff.</span></div>
                 {err && <p className="err" role="alert">{err}</p>}
@@ -76,19 +78,29 @@ function Inner() {
             </div>
           )}
 
+          {v.summary && <StockTiles s={v.summary} />}
+
           <div className="g21">
+            <div className="stack" style={{ gap: 16, minWidth: 0 }}>
             <div className="card"><h2 style={{ marginBottom: 12 }}>Devices ({v.devices.length})</h2>
               {v.devices.length ? (
-                <div className="tbl"><table><thead><tr><th>Serial</th><th>Name</th><th>Group</th><th>Status</th><th>Firmware</th><th>Access</th><th>Last seen</th></tr></thead>
+                <div className="tbl"><table><thead><tr><th>Serial</th><th>Name</th><th>Stage</th><th>Customer</th><th>Group</th><th>Status</th><th>Firmware</th><th>Access</th><th>Last seen</th></tr></thead>
                   <tbody>{v.devices.map((d) => (
                     <tr key={d.id} className={can('devices.view') ? 'click' : ''} onClick={() => can('devices.view') && router.push(`/admin/devices/${d.id}`)}>
-                      <td className="mono">{d.serial}</td><td>{d.name}</td><td>{groupName(d.groupId)}</td>
+                      <td className="mono">{d.serial}</td><td>{d.name}</td>
+                      <td><StagePill stage={d.stage} /></td>
+                      <td>{d.customer ? <>{d.customer.fullName}<br /><span className="xs muted">{day(d.soldAt)}</span></> : '—'}</td>
+                      <td>{groupName(d.groupId)}</td>
                       <td><AdminStatusPill d={{ online: d.online, owner: true }} /></td>
                       <td className="mono">{d.fw || '—'}</td><td className="num">{d.activeGrants}</td>
                       <td className="muted">{d.online ? 'Now' : ago(d.lastSeenAt)}</td>
                     </tr>
                   ))}</tbody></table></div>
-              ) : <p className="small muted">No devices yet. The vendor team claims sensors by QR, like customers.</p>}
+              ) : <p className="small muted">No devices yet. The vendor team scans the QR sticker to add a sensor to its stock.</p>}
+            </div>
+            <div className="card"><h2 style={{ marginBottom: 12 }}>Customers ({v.customers?.length ?? 0})</h2>
+              <CustomerList items={v.customers || []} deviceHref={(did) => (can('devices.view') ? `/admin/devices/${did}` : null)} />
+            </div>
             </div>
             <div className="stack" style={{ gap: 16 }}>
               <div className="card"><h2 style={{ marginBottom: 12 }}>Team</h2>

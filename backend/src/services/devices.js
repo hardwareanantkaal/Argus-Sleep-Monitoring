@@ -20,7 +20,8 @@ async function releaseDevice(c, device, req, reason) {
             unattended = DEFAULT, unatt_min = DEFAULT, updated_by = NULL
       WHERE device_id = $1`, [device.id]);
   await c.query(
-    `UPDATE devices SET owner_id = NULL, vendor_id = NULL, group_id = NULL, claimed_at = NULL, claim_code_hash = NULL, claim_code_enc = NULL,
+    `UPDATE devices SET claim_stage = 'factory', owner_id = NULL, vendor_id = NULL, group_id = NULL, claimed_at = NULL, stocked_at = NULL,
+            claim_code_hash = NULL, claim_code_enc = NULL,
             name = NULL, room = NULL, place = NULL
       WHERE id = $1`, [device.id]);
   await c.query(
