@@ -24,6 +24,14 @@ async function staffPermissions(userId, q = db) {
   return rows.map((r) => r.permission);
 }
 
+// The user's vendor membership (API.md §15), or null. Disabled vendors = null.
+async function vendorOf(userId, q = db) {
+  const { rows: [v] } = await q.query(
+    `SELECT v.id, v.name, m.role FROM vendor_members m JOIN vendors v ON v.id = m.vendor_id
+      WHERE m.user_id = $1 AND v.status = 'active'`, [userId]);
+  return v ? { id: v.id, name: v.name, role: v.role } : null;
+}
+
 // The `user` object of API.md §1.
 async function userView(u, q = db) {
   const isStaff = u.staff_role_id != null;
@@ -36,6 +44,7 @@ async function userView(u, q = db) {
     role: isStaff ? { id: u.staff_role_id, name: u.role_name } : null,
     permissions: isStaff ? await staffPermissions(u.id, q) : [],
     createdAt: u.created_at,
+    vendor: await vendorOf(u.id, q),
   };
 }
 
@@ -45,4 +54,4 @@ function touchActive(u) {
   db.query('UPDATE users SET last_active_at = now() WHERE id = $1', [u.id]).catch(() => {});
 }
 
-module.exports = { loadUser, loadUserByPhone, staffPermissions, userView, touchActive };
+module.exports = { vendorOf, loadUser, loadUserByPhone, staffPermissions, userView, touchActive };

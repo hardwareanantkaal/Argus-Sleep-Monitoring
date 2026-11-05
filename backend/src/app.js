@@ -41,12 +41,14 @@ function createApp({ mqttConnected = () => false } = {}) {
   api.use('/devices', require('./routes/alerts').rules);
   api.use('/alerts', require('./routes/alerts').list);
   api.use('/invites', require('./routes/invites'));
+  api.use('/vendor', require('./routes/vendor').router);
   const admin = express.Router();
   admin.use(requireUser);
   admin.use(require('./routes/admin/devices'));
   admin.use(require('./routes/admin/firmware'));
   admin.use(require('./routes/admin/team'));
   admin.use(require('./routes/admin/customers'));
+  admin.use(require('./routes/admin/vendors'));
   api.use('/admin', admin);
 
   api.use((req, res) => {

@@ -9,14 +9,20 @@ const live = require('./live');
 
 const BASE_SQL = `
   SELECT d.id, d.serial_no, d.name, d.room, d.timezone, d.place, d.sleep_cutoff, d.auto_update,
-         d.hw_model, d.owner_id, d.mqtt_username,
-         o.full_name AS owner_name,
+         d.hw_model, d.owner_id, d.mqtt_username, d.vendor_id, d.group_id,
+         o.full_name AS owner_name, v.name AS vendor_name, g.name AS group_name,
+         (SELECT p.via FROM device_user_permissions p WHERE p.device_id = d.id AND p.user_id = $1
+           ORDER BY array_position(ARRAY['owner','vendor','share','grant'], p.via) LIMIT 1) AS via,
+         (SELECT max(ag.ends_at) FROM device_access_grants ag WHERE ag.device_id = d.id AND ag.user_id = $1
+           AND ag.revoked_at IS NULL AND now() >= ag.starts_at AND now() < ag.ends_at) AS access_ends_at,
          s.is_online, s.last_seen_at, s.fw_version, s.wifi_rssi, s.wifi_ssid, s.uptime_s,
          ds.version AS settings_version, ds.applied_version,
          (SELECT array_agg(p.permission ORDER BY p.permission) FROM device_user_permissions p
            WHERE p.device_id = d.id AND p.user_id = $1) AS perms
     FROM devices d
     LEFT JOIN users o ON o.id = d.owner_id
+    LEFT JOIN vendors v ON v.id = d.vendor_id
+    LEFT JOIN vendor_groups g ON g.id = d.group_id
     LEFT JOIN device_state s ON s.device_id = d.id
     LEFT JOIN device_settings ds ON ds.device_id = d.id`;
 
@@ -44,7 +50,12 @@ async function card(r, userId) {
     tz: r.timezone,
     place: r.place,
     isOwner,
-    sharedBy: isOwner ? null : { fullName: r.owner_name },
+    // 'owner' | 'share' | 'vendor' (vendor team) | 'grant' (temporary access), API.md §15
+    access: r.via,
+    sharedBy: isOwner || !r.owner_id ? null : { fullName: r.owner_name },
+    vendor: r.vendor_id ? { id: r.vendor_id, name: r.vendor_name } : null,
+    group: r.via === 'vendor' && r.group_id ? { id: r.group_id, name: r.group_name } : null,
+    accessEndsAt: r.via === 'grant' ? r.access_ends_at : null,
     myPermissions: perms,
     status: { online, lastSeenAt: mem?.lastSeenAt || r.last_seen_at },
     live: has('live.view') && online ? live.getLive(r.id) : null,
@@ -66,11 +77,13 @@ async function detail(r, userId) {
   return out;
 }
 
-// All devices the user can access (owned + shared), as cards.
-async function listFor(userId) {
+// All devices the user can access (owned + shared + vendor + grants), as cards.
+// vendorId: only that vendor's devices (GET /vendor/devices).
+async function listFor(userId, vendorId = null) {
   const { rows } = await db.query(
     `${BASE_SQL} WHERE d.id IN (SELECT device_id FROM device_user_permissions WHERE user_id = $1)
-      ORDER BY (d.owner_id = $1) DESC, d.claimed_at, d.serial_no`, [userId]);
+      ${vendorId ? 'AND d.vendor_id = $2' : ''}
+      ORDER BY (d.owner_id = $1) DESC, d.claimed_at, d.serial_no`, vendorId ? [userId, vendorId] : [userId]);
   return Promise.all(rows.map((r) => card(r, userId)));
 }
 

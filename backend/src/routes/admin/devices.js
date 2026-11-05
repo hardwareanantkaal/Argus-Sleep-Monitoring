@@ -43,7 +43,7 @@ router.get('/dashboard', requireStaff(), async (req, res) => {
   const c = await db.one(`
     SELECT (SELECT count(*) FROM devices)::int AS registered,
            (SELECT count(*) FROM device_state s JOIN devices d ON d.id = s.device_id WHERE s.is_online)::int AS online,
-           (SELECT count(*) FROM devices WHERE owner_id IS NULL)::int AS unclaimed,
+           (SELECT count(*) FROM devices WHERE owner_id IS NULL AND vendor_id IS NULL)::int AS unclaimed,
            (SELECT count(*) FROM devices WHERE is_disabled)::int AS disabled,
            (SELECT count(*) FROM users WHERE staff_role_id IS NULL AND deleted_at IS NULL)::int AS customers,
            (SELECT count(*) FROM devices WHERE created_at > now() - interval '7 days')::int AS registered_week,
@@ -95,15 +95,15 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
     if (mac.length >= 4) { vals.push(`%${mac}%`); macSql = ` OR d.mqtt_username LIKE $${vals.length}`; }
     where.push(`(d.serial_no ILIKE $${i} OR d.name ILIKE $${i} OR o.full_name ILIKE $${i} OR o.phone ILIKE $${i}${macSql})`);
   }
-  if (q.status === 'online') where.push('s.is_online AND d.owner_id IS NOT NULL');
-  if (q.status === 'offline') where.push('NOT COALESCE(s.is_online, false) AND d.owner_id IS NOT NULL AND NOT d.is_disabled');
-  if (q.status === 'unclaimed') where.push('d.owner_id IS NULL');
+  if (q.status === 'online') where.push('s.is_online AND d.claimed_at IS NOT NULL');
+  if (q.status === 'offline') where.push('NOT COALESCE(s.is_online, false) AND d.claimed_at IS NOT NULL AND NOT d.is_disabled');
+  if (q.status === 'unclaimed') where.push('d.claimed_at IS NULL');
   if (q.status === 'disabled') where.push('d.is_disabled');
   if (q.fw) add('s.fw_version = ?', q.fw);
   if (q.tz) add('d.timezone = ?', q.tz);
   if (q.registeredFrom) add('d.created_at >= ?::date', q.registeredFrom);
   const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const from = `FROM devices d LEFT JOIN users o ON o.id = d.owner_id LEFT JOIN device_state s ON s.device_id = d.id`;
+  const from = `FROM devices d LEFT JOIN users o ON o.id = d.owner_id LEFT JOIN vendors v ON v.id = d.vendor_id LEFT JOIN device_state s ON s.device_id = d.id`;
   const total = (await db.one(`SELECT count(*)::int AS n ${from} ${filter}`, vals)).n;
 
   const cur = decCursor(q.cursor);
@@ -115,13 +115,14 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
   }
   pageVals.push(q.limit + 1);
   const rows = await db.many(
-    `SELECT d.id, d.serial_no, d.mqtt_username, d.name, d.owner_id, o.full_name AS owner_name, d.timezone,
+    `SELECT d.id, d.serial_no, d.mqtt_username, d.name, d.owner_id, o.full_name AS owner_name, d.vendor_id, v.name AS vendor_name, d.timezone,
             d.chip_model, d.created_at, d.is_disabled, COALESCE(s.is_online, false) AS online, s.fw_version, s.last_seen_at
        ${from} ${pageWhere} ORDER BY d.created_at DESC, d.id DESC LIMIT $${pageVals.length}`, pageVals);
   const more = rows.length > q.limit;
   const items = rows.slice(0, q.limit).map((r) => ({
     id: r.id, serial: r.serial_no, mac: macColons(r.mqtt_username), name: r.name,
     owner: r.owner_id ? { id: r.owner_id, fullName: r.owner_name } : null,
+    vendor: r.vendor_id ? { id: r.vendor_id, name: r.vendor_name } : null,
     online: r.online, isDisabled: r.is_disabled, tz: r.timezone, fw: r.fw_version, chip: r.chip_model,
     lastSeenAt: r.last_seen_at, createdAt: r.created_at,
   }));
@@ -134,6 +135,7 @@ router.get('/devices/:id', requireStaff('devices.view'), async (req, res) => {
   const s = await db.one('SELECT * FROM device_state WHERE device_id = $1', [d.id]);
   const set = await db.one('SELECT * FROM device_settings WHERE device_id = $1', [d.id]);
   const owner = d.owner_id ? await db.one('SELECT id, full_name, phone, country FROM users WHERE id = $1', [d.owner_id]) : null;
+  const vendor = d.vendor_id ? await db.one('SELECT id, name FROM vendors WHERE id = $1', [d.vendor_id]) : null;
   const regBy = d.registered_by ? await db.one('SELECT full_name FROM users WHERE id = $1', [d.registered_by]) : null;
   const shares = await db.many(
     `SELECT u.id, u.full_name, u.phone, array_agg(p.permission ORDER BY p.permission) AS perms
@@ -143,7 +145,7 @@ router.get('/devices/:id', requireStaff('devices.view'), async (req, res) => {
   const mem = live.getStatus(d.id);
   res.json({
     id: d.id, serial: d.serial_no, name: d.name, room: d.room,
-    hardware: { mac: macColons(d.mqtt_username), chip: d.chip_model, radar: 'DFRobot C1001', hwModel: d.hw_model,
+    hardware: { mac: macColons(d.mqtt_username), chip: d.chip_model, radar: 'Sensor', hwModel: d.hw_model,
       batch: d.batch, manufacturedAt: d.manufactured_at, fwAtRegister: d.fw_at_register,
       registeredAt: d.created_at, registeredBy: regBy?.full_name || null },
     connection: { online: mem ? mem.online : !!s?.is_online, lastSeenAt: mem?.lastSeenAt || s?.last_seen_at || null,
@@ -152,9 +154,10 @@ router.get('/devices/:id', requireStaff('devices.view'), async (req, res) => {
     tz: d.timezone, place: d.place, sleepCutoff: d.sleep_cutoff?.slice(0, 5), autoUpdate: d.auto_update,
     isDisabled: d.is_disabled, disabledReason: d.disabled_reason,
     owner: owner ? { id: owner.id, fullName: owner.full_name, phone: owner.phone, country: owner.country } : null,
+    vendor,
     shares: shares.map((x) => ({ userId: x.id, fullName: x.full_name, phone: x.phone, permissions: x.perms.filter(Boolean) })),
     claimCodeActive: !!d.claim_code_hash,
-    stickerAvailable: !!d.claim_code_enc && !d.owner_id,
+    stickerAvailable: !!d.claim_code_enc && !d.claimed_at,
     sensorSettings: set ? { exitS: set.exit_s, liveS: set.live_s, idleS: set.idle_s, struggle: set.struggle,
       unattended: set.unattended, unattMin: set.unatt_min, version: set.version, appliedVersion: set.applied_version } : null,
   });
@@ -226,7 +229,7 @@ router.post('/devices/:id/claim-code', requireStaff('devices.register'), async (
   await db.tx(async (c) => {
     await c.query('UPDATE devices SET claim_code_hash = $2, claim_code_enc = $3 WHERE id = $1', [d.id, claim.hashCode(code), claim.sealCode(code)]);
     await audit(req, { action: 'device.claim_code', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
-      detail: d.owner_id ? 'issued while claimed (works only after unclaim)' : null }, c);
+      detail: d.claimed_at ? 'issued while claimed (works only after unclaim)' : null }, c);
   });
   res.json(await codeResponse(d.serial_no, code));
 });
@@ -234,8 +237,8 @@ router.post('/devices/:id/claim-code', requireStaff('devices.register'), async (
 // 8.6b Reprint the sticker: the stored code of an unclaimed device.
 router.get('/devices/:id/sticker', requireStaff('devices.register'), async (req, res) => {
   const d = await loadDevice(req.params.id);
-  if (!d.claim_code_enc || d.owner_id) {
-    throw E.conflict('NO_ACTIVE_CODE', d.owner_id ? 'This device is claimed; issue a new code after unclaiming' : 'No stored code: issue a new one');
+  if (!d.claim_code_enc || d.claimed_at) {
+    throw E.conflict('NO_ACTIVE_CODE', d.claimed_at ? 'This device is claimed; issue a new code after unclaiming' : 'No stored code: issue a new one');
   }
   let code;
   try { code = claim.openCode(d.claim_code_enc); } catch {
@@ -249,7 +252,7 @@ router.get('/devices/:id/sticker', requireStaff('devices.register'), async (req,
 router.post('/devices/:id/unclaim', requireStaff('customers.edit'), async (req, res) => {
   const body = parse(z.object({ reason: z.string().trim().min(1).max(200) }), req.body);
   const d = await loadDevice(req.params.id);
-  if (!d.owner_id) throw E.conflict('NOT_CLAIMED', 'This device has no owner');
+  if (!d.claimed_at) throw E.conflict('NOT_CLAIMED', 'This device has no owner');
   const { rows } = await db.query('SELECT DISTINCT user_id FROM device_user_permissions WHERE device_id = $1', [d.id]);
   await db.tx(async (c) => {
     const locked = await loadDevice(d.id, c);
@@ -262,7 +265,7 @@ router.post('/devices/:id/unclaim', requireStaff('customers.edit'), async (req, 
 // 8.12 Delete a device that was NEVER claimed (e.g. a mistyped MAC).
 router.delete('/devices/:id', requireStaff('devices.register'), async (req, res) => {
   const d = await loadDevice(req.params.id);
-  const everClaimed = d.owner_id
+  const everClaimed = d.claimed_at
     || (await db.query("SELECT 1 FROM device_events WHERE device_id = $1 AND type = 'claimed' LIMIT 1", [d.id])).rowCount;
   if (everClaimed) throw E.conflict('DEVICE_IN_USE', 'This device has been claimed before and cannot be deleted');
   await db.tx(async (c) => {

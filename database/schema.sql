@@ -251,6 +251,8 @@ CREATE TABLE devices (
   registered_by    UUID        REFERENCES users(id) ON DELETE SET NULL,
   owner_id         UUID        REFERENCES users(id) ON DELETE SET NULL,  -- one owner; family via device_shares
   claimed_at       TIMESTAMPTZ,
+  vendor_id        UUID,                            -- vendor-owned device (007); FK added in section 4b
+  group_id         UUID,                            -- vendor group (007); FK added in section 4b
   name             TEXT,                            -- "Mom's bedroom"
   room             TEXT,                            -- "Master bedroom"
   -- Backend-only settings (NOT sent to the sensor, so they live here and
@@ -269,16 +271,100 @@ CREATE TABLE devices (
   CONSTRAINT devices_serial_format CHECK (serial_no ~ '^ARG-[0-9A-Z]{7}$'),
   CONSTRAINT devices_place_length CHECK (place IS NULL OR char_length(btrim(place)) BETWEEN 2 AND 60),
   CONSTRAINT devices_mqtt_username_format CHECK (mqtt_username ~ '^[0-9a-f]{12}$'),
-  CONSTRAINT devices_claim_consistent CHECK (
-    (owner_id IS NULL AND claimed_at IS NULL) OR (owner_id IS NOT NULL AND claimed_at IS NOT NULL)
-  )
-);
+  CONSTRAINT devices_claim_consistent CHECK (      -- claimed by a person OR a vendor (007), never both
+    (owner_id IS NULL AND vendor_id IS NULL AND claimed_at IS NULL)
+    OR (claimed_at IS NOT NULL AND (owner_id IS NULL) <> (vendor_id IS NULL))
+  ));
 CREATE INDEX devices_owner_idx ON devices (owner_id);
 CREATE INDEX devices_claim_code_idx ON devices (claim_code_hash) WHERE claim_code_hash IS NOT NULL;
 CREATE INDEX devices_serial_trgm_idx ON devices USING gin (serial_no gin_trgm_ops);
 CREATE INDEX devices_name_trgm_idx   ON devices USING gin (name gin_trgm_ops);
 CREATE TRIGGER devices_updated BEFORE UPDATE ON devices
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ---------------------------------------------------------------------
+-- 4b. Vendors (migration 007, docs/VENDOR.md): hospital / mall / person
+--     that owns devices, has a team, groups, and gives temporary access.
+-- ---------------------------------------------------------------------
+CREATE TABLE vendors (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          TEXT        NOT NULL,
+  contact_name  TEXT,
+  phone         TEXT,
+  email         TEXT,
+  status        TEXT        NOT NULL DEFAULT 'active',   -- 'active' | 'disabled'
+  created_by    UUID        REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT vendors_status CHECK (status IN ('active', 'disabled')),
+  CONSTRAINT vendors_name_length CHECK (char_length(btrim(name)) BETWEEN 1 AND 80)
+);
+
+CREATE TABLE vendor_members (
+  vendor_id   UUID        NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  user_id     UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,  -- one vendor per user
+  role        TEXT        NOT NULL,                                                -- 'owner' | 'staff'
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (vendor_id, user_id),
+  CONSTRAINT vendor_members_role CHECK (role IN ('owner', 'staff'))
+);
+
+-- Link-only, like staff_invites. role 'owner' is created by an admin, 'staff' by the vendor owner.
+CREATE TABLE vendor_invites (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendor_id    UUID        NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  role         TEXT        NOT NULL,
+  label        TEXT        NOT NULL,
+  token_hash   TEXT        NOT NULL UNIQUE,
+  invited_by   UUID        REFERENCES users(id) ON DELETE SET NULL,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  accepted_at  TIMESTAMPTZ,
+  accepted_by  UUID        REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at   TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT vendor_invites_role CHECK (role IN ('owner', 'staff')),
+  CONSTRAINT vendor_invites_label_length CHECK (char_length(btrim(label)) BETWEEN 1 AND 60)
+);
+CREATE INDEX vendor_invites_open_idx ON vendor_invites (vendor_id) WHERE accepted_at IS NULL AND revoked_at IS NULL;
+
+CREATE TABLE vendor_groups (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendor_id   UUID        NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  name        TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT vendor_groups_name_length CHECK (char_length(btrim(name)) BETWEEN 1 AND 60)
+);
+CREATE UNIQUE INDEX vendor_groups_name_uq ON vendor_groups (vendor_id, lower(name));
+
+ALTER TABLE devices ADD FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL;
+ALTER TABLE devices ADD FOREIGN KEY (group_id) REFERENCES vendor_groups(id) ON DELETE SET NULL;
+ALTER TABLE devices ADD CONSTRAINT devices_group_needs_vendor CHECK (group_id IS NULL OR vendor_id IS NOT NULL);
+CREATE INDEX devices_vendor_idx ON devices (vendor_id) WHERE vendor_id IS NOT NULL;
+
+-- Temporary access to one device. user_id is NULL until the link is accepted.
+CREATE TABLE device_access_grants (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id          UUID        NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  vendor_id          UUID        NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  user_id            UUID        REFERENCES users(id) ON DELETE CASCADE,
+  label              TEXT        NOT NULL,                 -- "Bed 4 - Mr Shah"
+  permissions        TEXT[]      NOT NULL,                 -- device permissions, never sharing.manage
+  starts_at          TIMESTAMPTZ NOT NULL,
+  ends_at            TIMESTAMPTZ NOT NULL,
+  granted_by         UUID        REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at         TIMESTAMPTZ,                          -- ended early
+  -- the login invite link
+  token_hash         TEXT        UNIQUE,
+  invite_expires_at  TIMESTAMPTZ NOT NULL,
+  accepted_at        TIMESTAMPTZ,
+  end_notified_at    TIMESTAMPTZ,                          -- access:changed sent after ends_at
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT grants_period CHECK (ends_at > starts_at),
+  CONSTRAINT grants_has_perms CHECK (cardinality(permissions) > 0 AND NOT ('sharing.manage' = ANY(permissions))),
+  CONSTRAINT grants_label_length CHECK (char_length(btrim(label)) BETWEEN 1 AND 60)
+);
+CREATE INDEX grants_device_idx ON device_access_grants (device_id);
+CREATE INDEX grants_user_idx ON device_access_grants (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX grants_end_idx ON device_access_grants (ends_at) WHERE end_notified_at IS NULL AND user_id IS NOT NULL;
 
 -- Settings that are sent to the sensor over MQTT (retained, versioned).
 -- Same sync idea as Water Tank: any real change bumps `version`; the
@@ -672,7 +758,9 @@ CREATE VIEW admin_stats AS
 -- 12. Permission views: the ONE place the backend asks "may X do Y?"
 -- ---------------------------------------------------------------------
 -- Device permissions: owner gets every 'device' permission; family gets
--- what is switched on for them.
+-- what is switched on for them; vendor members (007) get every device
+-- permission except sharing.manage on their vendor's devices; grant holders
+-- get theirs only while now() is in [starts_at, ends_at) and not revoked.
 --   SELECT 1 FROM device_user_permissions
 --    WHERE device_id = $1 AND user_id = $2 AND permission = 'history.view'
 CREATE VIEW device_user_permissions AS
@@ -681,7 +769,22 @@ CREATE VIEW device_user_permissions AS
    WHERE d.owner_id IS NOT NULL AND p.scope = 'device'
   UNION ALL
   SELECT sp.device_id, sp.user_id, sp.permission, 'share'::TEXT
-    FROM device_share_permissions sp;
+    FROM device_share_permissions sp
+  UNION ALL
+  SELECT d.id, m.user_id, p.code, 'vendor'::TEXT
+    FROM devices d
+    JOIN vendors v ON v.id = d.vendor_id AND v.status = 'active'
+    JOIN vendor_members m ON m.vendor_id = v.id
+    JOIN permissions p ON p.scope = 'device' AND p.code <> 'sharing.manage'
+  UNION ALL
+  SELECT g.device_id, g.user_id, perm, 'grant'::TEXT
+    FROM device_access_grants g
+    JOIN devices d ON d.id = g.device_id AND d.vendor_id = g.vendor_id
+    JOIN vendors v ON v.id = g.vendor_id AND v.status = 'active'
+    CROSS JOIN unnest(g.permissions) perm
+   WHERE g.user_id IS NOT NULL AND g.revoked_at IS NULL
+     AND now() >= g.starts_at AND now() < g.ends_at;
+
 
 -- Staff permissions: the Owner role has every 'staff' permission
 CREATE VIEW staff_user_permissions AS
@@ -714,14 +817,15 @@ INSERT INTO permissions (code, scope, label, sort_order) VALUES
   ('firmware.rollout', 'staff',  'Start OTA rollouts',         8),
   ('team.manage',      'staff',  'Manage team and roles',      9),
   ('audit.view',       'staff',  'View audit log',            10),
-  ('platform.settings','staff',  'Change sleep rules',        11);
+  ('platform.settings','staff',  'Change sleep rules',        11),
+  ('vendors.manage',   'staff',  'Manage vendors',            12);
 
 INSERT INTO staff_roles (name, is_owner) VALUES
   ('Owner', true), ('Developer', false), ('Manufacturing', false), ('Support', false);
 
 INSERT INTO staff_role_permissions (role_id, permission)
   SELECT r.id, p.code FROM staff_roles r JOIN permissions p ON p.scope = 'staff'
-   WHERE r.name = 'Developer' AND p.code NOT IN ('team.manage', 'platform.settings')
+   WHERE r.name = 'Developer' AND p.code NOT IN ('team.manage', 'platform.settings', 'vendors.manage')
   UNION ALL
   SELECT r.id, p FROM staff_roles r,
          unnest(ARRAY['devices.view','devices.register','firmware.view']) p

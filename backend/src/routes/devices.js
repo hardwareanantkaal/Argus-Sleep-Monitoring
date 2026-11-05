@@ -10,6 +10,7 @@ const claim = require('../lib/claim');
 const { limits } = require('../middleware/rateLimit');
 const { requireUser } = require('../middleware/auth');
 const views = require('../services/deviceViews');
+const { vendorOf } = require('../services/users');
 const { releaseDevice } = require('../services/devices');
 const realtime = require('../services/realtime');
 const sleep = require('../services/sleep');
@@ -59,13 +60,13 @@ async function findClaimable(req, code, serial, q = db, lock = '') {
   const key = req.user.id;
   limits.claim.check(key);
   const { rows: [d] } = await q.query(
-    `SELECT id, serial_no, hw_model, created_at, owner_id, is_disabled, mqtt_username
+    `SELECT id, serial_no, hw_model, created_at, owner_id, vendor_id, claimed_at, is_disabled, mqtt_username
        FROM devices WHERE claim_code_hash = $1 ${lock}`, [claim.hashCode(code)]);
   if (!d || (serial && serial.trim().toUpperCase() !== d.serial_no)) {
     limits.claim.fail(key);
     throw new ApiError(404, 'INVALID_CODE', 'That claim code is not valid', 'claimCode');
   }
-  if (d.owner_id) throw E.conflict('ALREADY_CLAIMED', 'This sensor already belongs to someone');
+  if (d.claimed_at) throw E.conflict('ALREADY_CLAIMED', 'This sensor already belongs to someone');
   if (d.is_disabled) throw E.forbidden('DEVICE_DISABLED', 'This sensor is disabled. Contact Argus support.');
   return d;
 }
@@ -99,17 +100,23 @@ router.post('/claim', async (req, res) => {
     room: z.string().trim().max(60).nullable().optional(),
     tz,
     place: place.nullable().optional(),
+    // API.md §15: vendor members claim for their vendor by default;
+    // asVendor:false claims for themselves instead.
+    asVendor: z.boolean().optional(),
   }), req.body);
   checkTz(body.tz);
   const code = codeFrom(body);
+  const vendor = await vendorOf(req.user.id);
+  if (body.asVendor === true && !vendor) throw E.forbidden('NOT_VENDOR_MEMBER', 'You are not on a vendor team');
+  const vendorId = vendor && body.asVendor !== false ? vendor.id : null;
   const deviceId = await db.tx(async (c) => {
     const d = await findClaimable(req, code, body.serial, c, 'FOR UPDATE');
     await c.query(
-      `UPDATE devices SET owner_id = $2, claimed_at = now(), claim_code_hash = NULL, claim_code_enc = NULL,
+      `UPDATE devices SET owner_id = $2, vendor_id = $7, claimed_at = now(), claim_code_hash = NULL, claim_code_enc = NULL,
               name = $3, room = $4, timezone = $5, place = $6,
               sleep_cutoff = (SELECT default_sleep_cutoff FROM app_settings WHERE id = 1)
         WHERE id = $1`,
-      [d.id, req.user.id, body.name, body.room || null, body.tz, body.place || null]);
+      [d.id, vendorId ? null : req.user.id, body.name, body.room || null, body.tz, body.place || null, vendorId]);
     await c.query('INSERT INTO device_settings (device_id) VALUES ($1) ON CONFLICT (device_id) DO NOTHING', [d.id]);
     for (const [type, enabled, low, high, dur, from, to] of DEFAULT_RULES) {
       await c.query(
@@ -117,9 +124,10 @@ router.post('/claim', async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`, [d.id, type, enabled, low, high, dur, from, to]);
     }
     await c.query(`INSERT INTO device_events (device_id, type, data) VALUES ($1, 'claimed', $2)`,
-      [d.id, JSON.stringify({ ownerId: req.user.id })]);
+      [d.id, JSON.stringify(vendorId ? { vendorId, by: req.user.id } : { ownerId: req.user.id })]);
     await audit(req, { action: 'device.claim', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
-      detail: body.qr ? 'Claimed by QR scan' : 'Claimed by typed code' }, c);
+      detail: (body.qr ? 'Claimed by QR scan' : 'Claimed by typed code') + (vendorId ? ` for vendor ${vendor.name}` : ''),
+      data: vendorId ? { vendorId } : undefined }, c);
     return d.id;
   });
   limits.claim.reset(req.user.id);
@@ -253,8 +261,11 @@ router.delete('/:id/me', device(), async (req, res) => {
   if (req.device.owner_id === req.user.id) {
     throw E.invalid('OWNER_CANNOT_LEAVE', 'The owner removes the device instead (Device settings → Remove)');
   }
+  if (req.device.via === 'vendor') throw E.invalid('VENDOR_DEVICE', 'Vendor devices stay with the vendor team');
   await db.tx(async (c) => {
     await c.query('DELETE FROM device_shares WHERE device_id = $1 AND user_id = $2', [req.device.id, req.user.id]);
+    await c.query(`UPDATE device_access_grants SET revoked_at = now(), end_notified_at = now()
+                    WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL`, [req.device.id, req.user.id]);
     await c.query('DELETE FROM user_device_alert_mutes WHERE device_id = $1 AND user_id = $2', [req.device.id, req.user.id]);
     await audit(req, { action: 'share.leave', targetType: 'device', targetId: req.device.id, targetLabel: req.device.serial_no }, c);
   });

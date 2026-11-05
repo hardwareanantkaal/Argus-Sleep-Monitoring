@@ -12,6 +12,7 @@ async function releaseDevice(c, device, req, reason) {
   await c.query('DELETE FROM alert_rules WHERE device_id = $1', [device.id]);
   await c.query('DELETE FROM device_invites WHERE device_id = $1', [device.id]);
   await c.query('DELETE FROM device_shares WHERE device_id = $1', [device.id]);
+  await c.query('DELETE FROM device_access_grants WHERE device_id = $1', [device.id]);
   // Back to factory defaults; the settings trigger bumps the version so the
   // sensor receives them on its next sync.
   await c.query(
@@ -19,12 +20,12 @@ async function releaseDevice(c, device, req, reason) {
             unattended = DEFAULT, unatt_min = DEFAULT, updated_by = NULL
       WHERE device_id = $1`, [device.id]);
   await c.query(
-    `UPDATE devices SET owner_id = NULL, claimed_at = NULL, claim_code_hash = NULL, claim_code_enc = NULL,
+    `UPDATE devices SET owner_id = NULL, vendor_id = NULL, group_id = NULL, claimed_at = NULL, claim_code_hash = NULL, claim_code_enc = NULL,
             name = NULL, room = NULL, place = NULL
       WHERE id = $1`, [device.id]);
   await c.query(
     `INSERT INTO device_events (device_id, type, message, data) VALUES ($1, 'unclaimed', $2, $3)`,
-    [device.id, reason, JSON.stringify({ ownerId: device.owner_id })]);
+    [device.id, reason, JSON.stringify({ ownerId: device.owner_id, vendorId: device.vendor_id || null })]);
   await audit(req, { action: 'device.unclaim', targetType: 'device', targetId: device.id,
     targetLabel: device.serial_no, detail: reason }, c);
 }
