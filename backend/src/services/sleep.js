@@ -56,7 +56,7 @@ async function onSession(mac, payload) {
   let m;
   try { m = JSON.parse(payload.toString()); } catch { m = null; }
   const sid = m && Number.isInteger(m.sid) && m.sid >= 0 ? m.sid : null;
-  const dev = await db.one('SELECT id, owner_id, vendor_id, timezone FROM devices WHERE mqtt_username = $1', [mac]);
+  const dev = await db.one('SELECT id, owner_id, vendor_id, claim_stage, timezone FROM devices WHERE mqtt_username = $1', [mac]);
   if (!dev) return;
   if (sid === null) {
     // Can't be acked without a sid: record it so support can see the bug.
@@ -64,8 +64,8 @@ async function onSession(mac, payload) {
       [dev.id, 'session without a valid sid was dropped']);
     return;
   }
-  if (!dev.owner_id && !dev.vendor_id) {
-    // Nobody owns this sensor: drop it, but ack so the flash queue empties.
+  if (dev.claim_stage !== 'owned' && dev.claim_stage !== 'vendor_use') {
+    // Nobody uses this sensor (factory, or vendor stock, 009): drop it, but ack so the flash queue empties.
     return ack(mac, { sid });
   }
   const v = validate(m);

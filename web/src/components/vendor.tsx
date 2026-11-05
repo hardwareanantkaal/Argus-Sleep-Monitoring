@@ -7,12 +7,12 @@ import Link from 'next/link';
 import { day, prettyPhone } from '@/lib/format';
 import type { GrantPerm, GrantStatus, VendorCustomer, VendorStage, VendorSummary } from '@/lib/types';
 
-/** v2: total / in stock / sold / customers */
+/** v2.1: in stock / in use / sold / customers */
 export function StockTiles({ s }: { s: VendorSummary }) {
   return (
     <div className="tiles">
-      <div className="card tile"><span className="label">All sensors</span><div className="v">{s.total}</div><span className="xs muted">{s.online} online now</span></div>
-      <div className="card tile"><span className="label">In stock</span><div className="v" style={{ color: 'var(--accent)' }}>{s.stock}</div><span className="xs muted">Not sold or not in use</span></div>
+      <div className="card tile"><span className="label">In stock</span><div className="v" style={{ color: 'var(--accent)' }}>{s.stock}</div><span className="xs muted">Ready to sell or use</span></div>
+      <div className="card tile"><span className="label">In use</span><div className="v">{s.inUse}</div><span className="xs muted">Used by you · {s.online} online</span></div>
       <div className="card tile"><span className="label">Sold</span><div className="v" style={{ color: 'var(--ok)' }}>{s.sold}</div><span className="xs muted">Owned by a customer</span></div>
       <div className="card tile"><span className="label">Customers</span><div className="v">{s.customers}</div><span className="xs muted">Bought one or more</span></div>
     </div>
@@ -20,10 +20,13 @@ export function StockTiles({ s }: { s: VendorSummary }) {
 }
 
 export function StagePill({ stage }: { stage?: VendorStage }) {
-  return stage === 'sold' ? <span className="pill ok">Sold</span> : <span className="pill acc">In stock</span>;
+  if (stage === 'sold') return <span className="pill ok">Sold</span>;
+  if (stage === 'in_use') return <span className="pill">In use</span>;
+  return <span className="pill acc">In stock</span>;
 }
 
-/** Customers with the devices each one bought. deviceHref: where a device row links to (null = no link). */
+/** Customers with the devices each one bought. deviceHref: where a device row links to (null = no link).
+ *  The vendor side gets serial + date only (v2.1: no access after the sale); admin also gets name + online. */
 export function CustomerList({ items, deviceHref }: { items: VendorCustomer[]; deviceHref: (id: string) => string | null }) {
   if (!items.length) return <p className="small muted">No customers yet. When a customer scans the sticker of a sensor in your stock, they appear here.</p>;
   return (
@@ -36,7 +39,7 @@ export function CustomerList({ items, deviceHref }: { items: VendorCustomer[]; d
           <td>{c.country}</td>
           <td>{c.devices.map((d) => {
             const href = deviceHref(d.id);
-            const label = <><span className="mono">{d.serial}</span>{d.name ? ` · ${d.name}` : ''} <span className={`pill ${d.online ? 'ok' : ''}`}><span className="dot" />{d.online ? 'Online' : 'Offline'}</span></>;
+            const label = <><span className="mono">{d.serial}</span>{d.name ? ` · ${d.name}` : ''}{d.online !== undefined && <> <span className={`pill ${d.online ? 'ok' : ''}`}><span className="dot" />{d.online ? 'Online' : 'Offline'}</span></>}</>;
             return <div key={d.id} className="small" style={{ padding: '2px 0' }}>{href ? <Link href={href}>{label}</Link> : label} <span className="xs muted">· {day(d.claimedAt)}</span></div>;
           })}</td>
           <td className="muted">{day(c.firstClaimedAt)}</td>

@@ -2,6 +2,7 @@
 // temporary access grants. Any member (owner or staff) may use it; only the
 // vendor owner manages the team. Every write is audited.
 const express = require('express');
+const { IANAZone } = require('luxon');
 const config = require('../config');
 const db = require('../db');
 const { parse, z } = require('../lib/validate');
@@ -9,6 +10,7 @@ const { audit } = require('../lib/audit');
 const { randomToken, hmac } = require('../lib/crypto');
 const { requireUser } = require('../middleware/auth');
 const views = require('../services/deviceViews');
+const alerts = require('../services/alerts');
 const realtime = require('../services/realtime');
 const vendors = require('../services/vendors');
 const { E } = require('../errors');
@@ -38,22 +40,94 @@ router.use(requireMember);
 
 const vAudit = (req, entry, c) => audit(req, { ...entry, data: { vendorId: req.vendor.id, ...(entry.data || {}) } }, c);
 
-async function vendorDevice(req, id) {
+// A device in this vendor's stock or in use (sold devices are records only, 009).
+// Pass a tx client `c` to lock the row.
+async function vendorDevice(req, id, c = null) {
   if (!isUuid(id)) throw E.notFound('Device not found');
-  const d = await db.one('SELECT id, serial_no, name FROM devices WHERE id = $1 AND vendor_id = $2', [id, req.vendor.id]);
+  const { rows: [d] } = await (c || db).query(
+    `SELECT id, serial_no, name, claim_stage FROM devices
+      WHERE id = $1 AND vendor_id = $2 AND claim_stage IN ('vendor_stock', 'vendor_use')${c ? ' FOR UPDATE' : ''}`,
+    [id, req.vendor.id]);
   if (!d) throw E.notFound('Device not found');
   return d;
 }
+const needInUse = (d) => {
+  if (d.claim_stage !== 'vendor_use') throw E.conflict('NOT_IN_USE', 'Use this sensor first ("Use here"). Sensors in stock have no data.');
+};
 
 // 15.2 The vendor and its devices
 router.get('/', async (req, res) => {
   res.json({ vendor: req.vendor });
 });
 
-// Cards carry stage ('stock' | 'sold'), customer, stockedAt, soldAt (v2).
+// items: stock + in-use devices as cards (stage 'stock' | 'in_use').
+// sold: records only, no access (009): {id, serial, customer, soldAt}.
 router.get('/devices', async (req, res) => {
-  res.json({ items: await views.listFor(req.user.id, req.vendor.id) });
+  const sold = await db.many(
+    `SELECT d.id, d.serial_no, d.claimed_at, u.id AS user_id, u.full_name, u.phone, u.country
+       FROM devices d JOIN users u ON u.id = d.owner_id
+      WHERE d.vendor_id = $1 AND d.claim_stage = 'owned' ORDER BY d.claimed_at DESC`, [req.vendor.id]);
+  res.json({
+    items: await views.listFor(req.user.id, req.vendor.id),
+    sold: sold.map((s) => ({ id: s.id, serial: s.serial_no, soldAt: s.claimed_at,
+      customer: { id: s.user_id, fullName: s.full_name, phone: s.phone, country: s.country } })),
+  });
 });
+
+// 009 "Use here": the vendor uses a stock sensor itself. Asks what a customer
+// claim asks (name, room, time zone, town) and an optional group. The QR is locked.
+const tzName = z.string().trim().min(1).max(60);
+router.post('/devices/:id/use', async (req, res) => {
+  const body = parse(z.object({
+    name: z.string().trim().min(1, 'Name is required').max(60),
+    room: z.string().trim().max(60).nullable().optional(),
+    tz: tzName,
+    place: z.string().trim().min(2, 'Place must be 2–60 characters').max(60).nullable().optional(),
+    groupId: z.uuid().nullable().optional(),
+  }), req.body);
+  if (!IANAZone.isValidZone(body.tz)) throw E.invalid('INVALID_TIMEZONE', 'Unknown time zone', 'tz');
+  const g = body.groupId ? await loadGroup(req, body.groupId) : null;
+  await db.tx(async (c) => {
+    const d = await vendorDevice(req, req.params.id, c);
+    if (d.claim_stage !== 'vendor_stock') throw E.conflict('ALREADY_IN_USE', 'This sensor is already in use');
+    await c.query(
+      `UPDATE devices SET claim_stage = 'vendor_use', name = $2, room = $3, timezone = $4, place = $5, group_id = $6,
+              sleep_cutoff = (SELECT default_sleep_cutoff FROM app_settings WHERE id = 1) WHERE id = $1`,
+      [d.id, body.name, body.room || null, body.tz, body.place || null, g?.id || null]);
+    await vAudit(req, { action: 'vendor.device.use', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
+      detail: `"${body.name}"${g ? ` in ${g.name}` : ''}` }, c);
+  });
+  await notifyTeam(req, req.params.id);
+  res.json(await views.detail(await views.rowFor(req.user.id, req.params.id), req.user.id));
+});
+
+// 009 Back to stock: the QR works again. Clean start for the next user: its
+// sleep history, alerts and temporary access are deleted, name and group cleared.
+router.post('/devices/:id/stock', async (req, res) => {
+  let users = [];
+  await db.tx(async (c) => {
+    const d = await vendorDevice(req, req.params.id, c);
+    if (d.claim_stage !== 'vendor_use') throw E.conflict('ALREADY_IN_STOCK', 'This sensor is already in stock');
+    users = (await c.query('SELECT DISTINCT user_id FROM device_user_permissions WHERE device_id = $1', [d.id])).rows.map((r) => r.user_id);
+    await c.query('DELETE FROM sleep_sessions WHERE device_id = $1', [d.id]);
+    await c.query('DELETE FROM alerts WHERE device_id = $1', [d.id]);
+    await c.query('DELETE FROM device_access_grants WHERE device_id = $1', [d.id]);
+    await c.query(`UPDATE devices SET claim_stage = 'vendor_stock', group_id = NULL, name = NULL, room = NULL, place = NULL
+                    WHERE id = $1`, [d.id]);
+    await vAudit(req, { action: 'vendor.device.stock', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
+      detail: d.name ? `was "${d.name}"; history deleted` : 'history deleted' }, c);
+  });
+  alerts.forget(req.params.id);
+  for (const u of users) await vendors.notifyUser(u, req.params.id);
+  res.json(await views.detail(await views.rowFor(req.user.id, req.params.id), req.user.id));
+});
+
+// Tell every team member's open browser that this device's permissions changed.
+async function notifyTeam(req, deviceId) {
+  alerts.forget(deviceId);   // stage changed: alert rules cache re-reads it
+  const { rows } = await db.query('SELECT user_id FROM vendor_members WHERE vendor_id = $1', [req.vendor.id]);
+  for (const r of rows) await vendors.notifyUser(r.user_id, deviceId);
+}
 
 // v2 Stock counts: { total, stock, sold, customers, online }
 router.get('/summary', async (req, res) => {
@@ -81,7 +155,7 @@ const dupName = (err) => {
 
 router.get('/groups', async (req, res) => {
   const rows = await db.many(
-    `SELECT g.id, g.name, (SELECT count(*)::int FROM devices d WHERE d.group_id = g.id) AS device_count
+    `SELECT g.id, g.name, (SELECT count(*)::int FROM devices d WHERE d.group_id = g.id AND d.claim_stage = 'vendor_use') AS device_count
        FROM vendor_groups g WHERE g.vendor_id = $1 ORDER BY lower(g.name)`, [req.vendor.id]);
   res.json({ items: rows.map((g) => ({ id: g.id, name: g.name, deviceCount: g.device_count })) });
 });
@@ -118,17 +192,28 @@ router.delete('/groups/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// Put a device in a group (groupId null = no group).
+// Put a device in a group (groupId null = no group). 009: groups hold in-use
+// devices only, so putting a STOCK device in a group puts it in use (QR locked,
+// named after its serial until renamed). "No group" keeps an in-use device in use;
+// "Back to stock" is its own action (POST /devices/:id/stock).
 router.put('/devices/:id/group', async (req, res) => {
   const body = parse(z.object({ groupId: z.uuid().nullable() }), req.body);
-  const d = await vendorDevice(req, req.params.id);
   const g = body.groupId ? await loadGroup(req, body.groupId) : null;
-  await db.tx(async (c) => {
-    await c.query('UPDATE devices SET group_id = $2 WHERE id = $1', [d.id, g?.id || null]);
-    await vAudit(req, { action: 'vendor.device.group', targetType: 'device', targetId: d.id, targetLabel: d.serial_no,
-      detail: g ? g.name : 'no group' }, c);
+  let nowInUse = false;
+  const d = await db.tx(async (c) => {
+    const row = await vendorDevice(req, req.params.id, c);
+    if (row.claim_stage === 'vendor_stock' && !g) return row;
+    nowInUse = row.claim_stage === 'vendor_stock';
+    await c.query(
+      `UPDATE devices SET group_id = $2, claim_stage = 'vendor_use', name = COALESCE(name, serial_no),
+              sleep_cutoff = CASE WHEN $3 THEN (SELECT default_sleep_cutoff FROM app_settings WHERE id = 1) ELSE sleep_cutoff END
+        WHERE id = $1`, [row.id, g?.id || null, nowInUse]);
+    await vAudit(req, { action: 'vendor.device.group', targetType: 'device', targetId: row.id, targetLabel: row.serial_no,
+      detail: (g ? g.name : 'no group') + (nowInUse ? ' (now in use)' : '') }, c);
+    return row;
   });
-  res.json({ deviceId: d.id, group: g ? { id: g.id, name: g.name } : null });
+  if (nowInUse) await notifyTeam(req, d.id);
+  res.json({ deviceId: d.id, group: g ? { id: g.id, name: g.name } : null, stage: nowInUse || d.claim_stage === 'vendor_use' ? 'in_use' : 'stock' });
 });
 
 // ---- 15.4 Team ----------------------------------------------------------
@@ -257,6 +342,7 @@ router.post('/grants', async (req, res) => {
     endsAt: isoTime,
   }), req.body);
   const d = await vendorDevice(req, body.deviceId);
+  needInUse(d);   // 009: temporary access only on sensors the vendor uses
   const perms = checkGrantPerms(body.permissions || DEFAULT_GRANT_PERMS);
   const starts = body.startsAt ? new Date(body.startsAt) : new Date();
   const ends = new Date(body.endsAt);

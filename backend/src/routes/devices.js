@@ -16,6 +16,7 @@ const realtime = require('../services/realtime');
 const sleep = require('../services/sleep');
 const settingsSync = require('../services/settingsSync');
 const commands = require('../services/commands');
+const alerts = require('../services/alerts');
 const { DateTime } = require('luxon');
 const { E, ApiError } = require('../errors');
 
@@ -59,6 +60,7 @@ const codeBody = { qr: z.string().max(100).optional(), claimCode: z.string().max
 // The QR works twice (vendor v2, migration 008):
 //   factory      → a vendor member (for the vendor) puts it in vendor stock; anyone else becomes the owner
 //   vendor_stock → a customer becomes the owner; the device stays "sold by" that vendor
+//   vendor_use   → locked: the vendor uses it itself (009); "back to stock" unlocks it
 // Sets d.result: 'stock' | 'owner'.
 async function findClaimable(req, code, serial, vendor, asVendor, q = db, lock = false) {
   const key = req.user.id;
@@ -75,6 +77,10 @@ async function findClaimable(req, code, serial, vendor, asVendor, q = db, lock =
   if (d.claim_stage === 'owned') throw E.conflict('ALREADY_CLAIMED', 'This sensor already belongs to someone');
   if (d.is_disabled) throw E.forbidden('DEVICE_DISABLED', 'This sensor is disabled. Contact Argus support.');
   const forVendor = !!vendor && asVendor !== false;
+  if (d.claim_stage === 'vendor_use') {
+    if (vendor && d.vendor_id === vendor.id) throw E.conflict('ALREADY_IN_STOCK', 'This sensor is already yours (in use)');
+    throw E.conflict('ALREADY_CLAIMED', 'This sensor already belongs to someone');
+  }
   if (d.claim_stage === 'vendor_stock' && forVendor) {
     if (d.vendor_id === vendor.id) throw E.conflict('ALREADY_IN_STOCK', 'This sensor is already in your stock');
     throw E.conflict('ALREADY_CLAIMED', 'This sensor already belongs to someone');
@@ -116,9 +122,10 @@ const DEFAULT_RULES = [
 router.post('/claim', async (req, res) => {
   const body = parse(z.object({
     ...codeBody,
-    name: z.string().trim().min(1, 'Name is required').max(60),
+    // Required when you become the owner; not asked when a vendor adds it to stock (009).
+    name: z.string().trim().min(1, 'Name is required').max(60).optional(),
     room: z.string().trim().max(60).nullable().optional(),
-    tz,
+    tz: tz.optional(),
     place: place.nullable().optional(),
     // API.md §15: vendor members claim for their vendor by default;
     // asVendor:false claims for themselves instead.
@@ -130,26 +137,33 @@ router.post('/claim', async (req, res) => {
   if (body.asVendor === true && !vendor) throw E.forbidden('NOT_VENDOR_MEMBER', 'You are not on a vendor team');
   let vendorId = null;    // set when this claim puts the device into the vendor's stock
   let soldBy = null;      // set when a customer claims from a vendor's stock
+  let vendorUsers = [];   // vendor team members who lose the device on a sale
   const deviceId = await db.tx(async (c) => {
     const d = await findClaimable(req, code, body.serial, vendor, body.asVendor, c, true);
-    const vals = [d.id, body.name, body.room || null, body.tz, body.place || null];
-    const common = `name = $2, room = $3, timezone = $4, place = $5,
-                    sleep_cutoff = (SELECT default_sleep_cutoff FROM app_settings WHERE id = 1)`;
     if (d.result === 'stock') {
-      // Into the vendor's stock. The claim code is KEPT: the customer scans the same sticker later.
+      // Into the vendor's stock: scan and confirm only. The claim code is KEPT: the
+      // customer scans the same sticker later. Name, room, time zone come with "Use here".
       vendorId = vendor.id;
-      await c.query(`UPDATE devices SET claim_stage = 'vendor_stock', vendor_id = $6, owner_id = NULL,
-                            claimed_at = now(), stocked_at = now(), ${common} WHERE id = $1`, [...vals, vendor.id]);
+      await c.query(`UPDATE devices SET claim_stage = 'vendor_stock', vendor_id = $2, owner_id = NULL, group_id = NULL,
+                            claimed_at = now(), stocked_at = now(), name = NULL, room = NULL, place = NULL WHERE id = $1`,
+      [d.id, vendor.id]);
     } else {
-      // The claimer becomes the owner; a vendor_stock device keeps vendor_id ("sold by").
+      if (!body.name) throw E.bad('VALIDATION', 'Name is required', 'name');
+      if (!body.tz) throw E.bad('VALIDATION', 'Time zone is required', 'tz');
+      // The claimer becomes the owner; a vendor_stock device keeps vendor_id as a record ("sold by").
+      // The vendor team loses all access (009) and nothing from before the sale is kept.
       if (d.claim_stage === 'vendor_stock') {
         soldBy = { id: d.vendor_id, name: d.vendor_name };
-        // Nights / alerts recorded while it was in stock (demos) are not the new owner's.
+        vendorUsers = (await c.query('SELECT DISTINCT user_id FROM device_user_permissions WHERE device_id = $1', [d.id]))
+          .rows.map((r) => r.user_id);
         await c.query('DELETE FROM sleep_sessions WHERE device_id = $1', [d.id]);
         await c.query('DELETE FROM alerts WHERE device_id = $1', [d.id]);
+        await c.query('DELETE FROM device_access_grants WHERE device_id = $1', [d.id]);
       }
-      await c.query(`UPDATE devices SET claim_stage = 'owned', owner_id = $6, claimed_at = now(),
-                            claim_code_hash = NULL, claim_code_enc = NULL, ${common} WHERE id = $1`, [...vals, req.user.id]);
+      await c.query(`UPDATE devices SET claim_stage = 'owned', owner_id = $6, claimed_at = now(), group_id = NULL,
+                            claim_code_hash = NULL, claim_code_enc = NULL, name = $2, room = $3, timezone = $4, place = $5,
+                            sleep_cutoff = (SELECT default_sleep_cutoff FROM app_settings WHERE id = 1)
+                      WHERE id = $1`, [d.id, body.name, body.room || null, body.tz, body.place || null, req.user.id]);
     }
     await c.query('INSERT INTO device_settings (device_id) VALUES ($1) ON CONFLICT (device_id) DO NOTHING', [d.id]);
     for (const [type, enabled, low, high, dur, from, to] of DEFAULT_RULES) {
@@ -167,6 +181,8 @@ router.post('/claim', async (req, res) => {
     return d.id;
   });
   limits.claim.reset(req.user.id);
+  alerts.forget(deviceId);
+  for (const u of vendorUsers) realtime.revokeDevice(u, deviceId, null);
   res.status(201).json(await views.detail(await views.rowFor(req.user.id, deviceId), req.user.id));
 });
 

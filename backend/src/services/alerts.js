@@ -30,9 +30,10 @@ function forget(deviceId) { ruleCache.delete(deviceId); }
 async function rulesFor(deviceId) {
   const hit = ruleCache.get(deviceId);
   if (hit && Date.now() - hit.at < RULES_TTL_MS) return hit;
-  const d = await db.one('SELECT name, timezone, owner_id, vendor_id FROM devices WHERE id = $1', [deviceId]);
+  const d = await db.one('SELECT name, timezone, claim_stage FROM devices WHERE id = $1', [deviceId]);
   const { rows } = await db.query('SELECT * FROM alert_rules WHERE device_id = $1 AND is_enabled', [deviceId]);
-  const v = { at: Date.now(), tz: d?.timezone || 'Asia/Kolkata', name: d?.name, owned: !!(d?.owner_id || d?.vendor_id),
+  // Alerts only for sensors someone uses: owned, or in use by a vendor (not vendor stock, 009).
+  const v = { at: Date.now(), tz: d?.timezone || 'Asia/Kolkata', name: d?.name, owned: d?.claim_stage === 'owned' || d?.claim_stage === 'vendor_use',
     rules: new Map(rows.map((r) => [r.type, r])) };
   ruleCache.set(deviceId, v);
   return v;

@@ -39,7 +39,8 @@ function Inner() {
   const [link, setLink] = useState<{ label: string; device: string; url: string; expiresAt: string } | null>(null);
   const [extend, setExtend] = useState<{ id: string; end: string } | null>(null);
 
-  const devs = devices.data?.items || [];
+  // v2.1: temporary access only on sensors in use (stock sensors keep no data)
+  const devs = (devices.data?.items || []).filter((d) => d.stage === 'in_use');
   const create = async (e: React.FormEvent) => {
     e.preventDefault(); setErr('');
     if (!form.deviceId) return setErr('Pick a device');

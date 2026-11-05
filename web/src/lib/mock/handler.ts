@@ -702,9 +702,9 @@ on('POST', '/admin/vendors/([^/]+)/(disable|enable)', (m) => {
 
 // 15.2 vendor side
 on('GET', '/vendor', () => { const { v, m } = myVendor(me()); return { vendor: { id: v.id, name: v.name, role: m.role } }; });
-on('GET', '/vendor/devices', () => { const u = me(); const { v } = myVendor(u); return { items: db.devices.filter((d) => d.vendorId === v.id).map((d) => ({ ...card(u, d), stage: 'stock' as const, customer: null })) }; });
-// v2 (sample data has no sold devices yet)
-on('GET', '/vendor/summary', () => { const { v } = myVendor(me()); const ds = db.devices.filter((d) => d.vendorId === v.id); return { total: ds.length, stock: ds.length, sold: 0, customers: 0, online: ds.filter((d) => d.online).length }; });
+// v2.1 sample data: every vendor sample device is in use; nothing in stock or sold
+on('GET', '/vendor/devices', () => { const u = me(); const { v } = myVendor(u); return { items: db.devices.filter((d) => d.vendorId === v.id).map((d) => ({ ...card(u, d), stage: 'in_use' as const })), sold: [] }; });
+on('GET', '/vendor/summary', () => { const { v } = myVendor(me()); const ds = db.devices.filter((d) => d.vendorId === v.id); return { total: ds.length, stock: 0, inUse: ds.length, sold: 0, customers: 0, online: ds.filter((d) => d.online).length }; });
 on('GET', '/vendor/customers', () => { myVendor(me()); return { items: [] }; });
 function vendorDevice(vendorId: string, id: string) { const d = db.devices.find((x) => x.id === id && x.vendorId === vendorId); if (!d) fail(404, 'NOT_FOUND', 'Device not found'); return d!; }
 function vendorGroup(vendorId: string, id: string) { const g = db.groups.find((x) => x.id === id && x.vendorId === vendorId); if (!g) fail(404, 'NOT_FOUND', 'Group not found'); return g!; }

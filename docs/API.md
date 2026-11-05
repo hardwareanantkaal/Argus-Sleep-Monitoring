@@ -463,8 +463,9 @@ A **vendor** is an organization or a person (hospital, mall, one individual) tha
 
 - A vendor device has `devices.vendor_id` set. In the vendor's **stock** it has no person owner; once **sold** (v2) the customer is the owner and `vendor_id` is kept ("sold by").
 - **v2 (migration 008), the QR works twice:** `devices.claim_stage` = `factory` → `vendor_stock` (a vendor member scanned it; the claim code is kept) → `owned` (a customer scanned the same sticker; code cleared). See 15.6 and [VENDOR.md](VENDOR.md) §v2.
-- **Vendor team** (owner + staff): every member sees every vendor device with `live.view`, `history.view`, `alerts.receive`, `settings.edit`. **Never** `sharing.manage`: nobody can family-share a vendor device. One vendor per user.
-- **Temporary access (grant):** one person, one device, from `startsAt` to `endsAt`. Access is checked on every request and every socket subscribe, so it stops by itself at `endsAt`. The vendor can extend or end it early.
+- **v2.1 (migration 009), clean vendor usage:** a 4th stage `vendor_use` (In use). `vendor_stock` = stock only: no sessions saved, no history, no alerts. `vendor_use` = the vendor uses it itself; QR locked. `owned` (sold) = the vendor keeps a record only, **no access**. See [VENDOR.md](VENDOR.md) §v2.1.
+- **Vendor team** (owner + staff): on **in-use** devices every member has `live.view`, `history.view`, `alerts.receive`, `settings.edit`; on **stock** devices only `live.view` + `settings.edit` (to test it); on **sold** devices nothing. **Never** `sharing.manage`. One vendor per user.
+- **Temporary access (grant):** in-use devices only (409 `NOT_IN_USE` otherwise). One person, one device, from `startsAt` to `endsAt`. Access is checked on every request and every socket subscribe, so it stops by itself at `endsAt`. The vendor can extend or end it early.
 - Vendors see the firmware version (`connection.fw`) in device views, but never the firmware / OTA admin endpoints (§9, staff only).
 - A **disabled** vendor: its team and grant holders lose access at once; devices and history are kept.
 - Every write below goes to `audit_log` (`vendor.*`).
@@ -476,15 +477,15 @@ A **vendor** is an organization or a person (hospital, mall, one individual) tha
 | 15.1a | GET | `/admin/vendors?q=&status=active\|disabled` | → `{items: [vendor]}` |
 | 15.1b | POST | `/admin/vendors` | v2, one step: `{name, ownerName, ownerPhone, ownerEmail?}` → `201 {vendor, inviteUrl, expiresAt}`. Creates the vendor (owner name / phone / email become its contact) AND the owner invite link (shown once, 7 days, label = owner name). |
 | 15.1b2 | PATCH | `/admin/vendors/:id` | `{name?, contactName?, phone?, email?}` → `vendor` |
-| 15.1c | GET | `/admin/vendors/:id` | → `vendor` + `{summary, customers: [vendorCustomer], members: [{userId, fullName, phone, role}], invites: [{id, label, role, expiresAt}], groups: [{id, name}], devices: [{id, serial, name, groupId, stage: "stock"\|"sold", customer: {id, fullName} \| null, stockedAt, soldAt, online, fw, lastSeenAt, activeGrants}]}` |
+| 15.1c | GET | `/admin/vendors/:id` | → `vendor` + `{summary, customers: [vendorCustomer], members: [{userId, fullName, phone, role}], invites: [{id, label, role, expiresAt}], groups: [{id, name}], devices: [{id, serial, name, groupId, stage: "stock"\|"in_use"\|"sold", customer: {id, fullName} \| null, stockedAt, soldAt, online, fw, lastSeenAt, activeGrants}]}`. Admin `vendorCustomer` devices include `name, online, fw, lastSeenAt`. |
 | 15.1d | POST | `/admin/vendors/:id/invites` | `{label}` → `201 {invite: {id, label, role: "owner", expiresAt}, inviteUrl, expiresAt}`. A new link for the vendor **owner** (lost link, second owner), shown once, 7 days. 409 `VENDOR_DISABLED`. |
 | 15.1e | DELETE | `/admin/vendors/:id/invites/:inviteId` | → `204` |
 | 15.1f | POST | `/admin/vendors/:id/disable` / `/enable` | → `vendor` |
 
-`vendor` = `{id, name, contactName, phone, email, status: "active"|"disabled", deviceCount, stockCount, soldCount, customerCount, memberCount, groupCount, createdAt}`.
-`summary` = `{total, stock, sold, customers, online}`.
-`vendorCustomer` = `{id, fullName, phone, country, firstClaimedAt, devices: [{id, serial, name, claimedAt, online, fw, lastSeenAt}]}`.
-Admin device views (8.2, 8.3) also show `vendor: {id, name} | null` and `stage: "factory"|"vendor_stock"|"owned"` (8.3 also `stockedAt`). 8.3 `stickerAvailable` is true in `factory` and `vendor_stock`; the sticker (8.6b) can be reprinted until a customer owns the device. 8.6 (new code) in `vendor_stock` replaces the stock sticker.
+`vendor` = `{id, name, contactName, phone, email, status: "active"|"disabled", deviceCount, stockCount, inUseCount, soldCount, customerCount, memberCount, groupCount, createdAt}`.
+`summary` = `{total, stock, inUse, sold, customers, online}` (`online` counts stock + in use only).
+`vendorCustomer` = `{id, fullName, phone, country, firstClaimedAt, devices: [{id, serial, claimedAt}]}` (a sales record).
+Admin device views (8.2, 8.3) also show `vendor: {id, name} | null` and `stage: "factory"|"vendor_stock"|"vendor_use"|"owned"` (8.3 also `stockedAt`). 8.3 `stickerAvailable` is true in every stage except `owned`; the sticker (8.6b) can be reprinted until a customer owns the device. 8.6 (new code) in `vendor_stock` replaces the stock sticker.
 Admin customer detail (7.2) devices also show `soldBy: {id, name} | null`.
 
 ### 15.2 Vendor side (any vendor team member; else 403 `NOT_VENDOR_MEMBER`)
@@ -492,10 +493,12 @@ Admin customer detail (7.2) devices also show `soldBy: {id, name} | null`.
 | # | Method | Path | Body → Response |
 |---|---|---|---|
 | 15.2a | GET | `/vendor` | → `{vendor: {id, name, role}}` |
-| 15.2b | GET | `/vendor/devices` | → `{items: [deviceCard]}`, only this vendor's devices, stock and sold. For the vendor team cards also include `group`, `stage: "stock"\|"sold"`, `customer: {id, fullName, phone, country} \| null`, `stockedAt`, `soldAt`. |
-| 15.2d | GET | `/vendor/summary` | v2 → `{total, stock, sold, customers, online}` |
-| 15.2e | GET | `/vendor/customers` | v2 → `{items: [vendorCustomer]}`: everyone who owns one of this vendor's devices, with those devices. |
-| 15.2c | PUT | `/vendor/devices/:id/group` | `{groupId \| null}` → `{deviceId, group}` |
+| 15.2b | GET | `/vendor/devices` | → `{items: [deviceCard], sold: [{id, serial, soldAt, customer: {id, fullName, phone, country}}]}`. `items` = stock + in-use devices; their cards also include `group`, `stage: "stock"\|"in_use"`, `stockedAt` (a stock sensor's `name` is its serial). `sold` = records only. |
+| 15.2d | GET | `/vendor/summary` | v2 → `{total, stock, inUse, sold, customers, online}` |
+| 15.2e | GET | `/vendor/customers` | v2 → `{items: [vendorCustomer]}`: everyone who bought one of this vendor's devices, with serial + date. |
+| 15.2f | POST | `/vendor/devices/:id/use` | v2.1 "Use here", stock only: `{name, room?, tz, place?, groupId?}` → `deviceDetail` (stage `in_use`, QR locked). 409 `ALREADY_IN_USE`, 422 `INVALID_TIMEZONE`. |
+| 15.2g | POST | `/vendor/devices/:id/stock` | v2.1 "Back to stock", in use only: deletes sleep history, alerts and temporary access; clears name, room, place, group; QR works again → `deviceDetail`. 409 `ALREADY_IN_STOCK`. |
+| 15.2c | PUT | `/vendor/devices/:id/group` | `{groupId \| null}` → `{deviceId, group, stage}`. v2.1: a stock device put in a group goes **in use** (named after its serial). `null` keeps an in-use device in use. Sold devices: 404. |
 
 The device itself (live, history, settings, alerts) uses the normal §3, §4 and §6 endpoints.
 
@@ -532,9 +535,12 @@ The device itself (live, history, settings, alerts) uses the normal §3, §4 and
 ### 15.6 Claim, invites and `/me`
 
 - **Claim (3.3), v2 two stages:**
-  - A **factory** sticker scanned by a vendor team member goes into the vendor's **stock** (`claim_stage = vendor_stock`, `vendor_id` set, no owner) and the claim code is **kept**. Send `asVendor: false` to claim for yourself instead; `asVendor: true` without a vendor = 403 `NOT_VENDOR_MEMBER`.
-  - A **vendor_stock** sticker scanned by anyone else (or with `asVendor: false`) makes them the **owner** (`claim_stage = owned`); `vendor_id` is kept ("sold by"), the code is cleared, and nights/alerts recorded while in stock are deleted.
+  - A **factory** sticker scanned by a vendor team member goes into the vendor's **stock** (`claim_stage = vendor_stock`, `vendor_id` set, no owner) and the claim code is **kept**. v2.1: the body needs only the code (`name`, `tz` etc. are ignored; they come with 15.2f "Use here"). Send `asVendor: false` to claim for yourself instead; `asVendor: true` without a vendor = 403 `NOT_VENDOR_MEMBER`.
+  - When you become the **owner**, `name` and `tz` are required (400 `VALIDATION`).
+  - A **vendor_stock** sticker scanned by anyone else (or with `asVendor: false`) makes them the **owner** (`claim_stage = owned`); `vendor_id` is kept as a record ("sold by"), the code is cleared, the group is cleared, and nights, alerts and temporary access from before the sale are deleted. The vendor team loses access at once (`access:changed` with `null`).
+  - A `vendor_use` sticker is locked: its own vendor → 409 `ALREADY_IN_STOCK` ("already yours, in use"); anyone else → 409 `ALREADY_CLAIMED`.
   - A vendor member scanning a `vendor_stock` sticker: their own vendor → 409 `ALREADY_IN_STOCK`; another vendor → 409 `ALREADY_CLAIMED`. An `owned` device has no code → `INVALID_CODE` (or `ALREADY_CLAIMED` if a code was issued while owned).
+  - **Sessions and alerts** (§10, §6) are saved only for `owned` and `vendor_use` devices; a stock device's sessions are acked and dropped.
   - **Check (3.2)** takes the same `asVendor?` and also returns `stage: "factory"|"vendor_stock"`, `result: "stock"|"owner"` (what claiming will do) and `soldBy: {id, name} | null`. The web app shows "Add to stock of <vendor>" or "Sold by <vendor>" on the confirm step.
   - The customer's device card has `vendor: {id, name}` with `access: "owner"`: shown as "Sold by <vendor>".
 - **Invites (5.6, 5.7):** `/invites/:token` also accepts:
@@ -543,4 +549,4 @@ The device itself (live, history, settings, alerts) uses the normal §3, §4 and
 - **`/me` (2.1)** adds `vendor: {id, name, role: "owner"|"staff"} | null`.
 - **Leaving (3.10):** a grant holder may leave (ends the grant). Vendor team members get 422 `VENDOR_DEVICE`.
 - **Remove / unclaim (3.9, 8.7):** a device in vendor stock has no person owner, so 3.9 is not available; support can unclaim it with 8.7. A sold device: the customer (owner) can remove it with 3.9. Both send the device back to `factory` (history, grants and the vendor link deleted, as for any device); the admin issues a new code (8.6) before anyone can claim it again.
-- **Data visibility (v2):** no privacy limit for now. Vendor team members keep their device permissions (live, history, alerts, settings) on sold devices, and temporary access works on stock and sold devices. `sharing.manage` stays owner-only.
+- **Data visibility (v2.1, replaces v2):** once sold, the vendor has **no access** to the device (no live, history, alerts, settings, temporary access); it only keeps the sales record (15.2b `sold`, 15.2e). `sharing.manage` stays owner-only.

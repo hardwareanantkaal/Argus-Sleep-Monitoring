@@ -54,11 +54,9 @@ export interface DeviceCard {
   vendor?: { id: string; name: string } | null;
   group?: { id: string; name: string } | null;
   accessEndsAt?: string | null;
-  /** §15 v2, vendor team only: in stock (not sold) or sold, and the customer who bought it */
+  /** §15 v2.1, vendor team only: in stock (no data) or in use by the vendor. Sold devices are records, see VendorDevices. */
   stage?: VendorStage;
-  customer?: { id: string; fullName: string; phone: string; country: string } | null;
   stockedAt?: string | null;
-  soldAt?: string | null;
   /** never a nap-only day (API.md §4); fields typed nullable only so the UI stays defensive */
   lastNight?: { sleepDate: string; score: number | null; totalSleepMin: number | null } | null;
 }
@@ -220,14 +218,18 @@ export interface Vendor {
   id: string; name: string; contactName: string | null; phone: string | null; email: string | null;
   status: 'active' | 'disabled'; deviceCount: number; memberCount: number; groupCount: number; createdAt: string;
   /** v2: not sold yet / sold / distinct customers */
-  stockCount?: number; soldCount?: number; customerCount?: number;
+  stockCount?: number; inUseCount?: number; soldCount?: number; customerCount?: number;
 }
 export interface VendorCreated { vendor: Vendor; inviteUrl: string; expiresAt: string }
-export type VendorStage = 'stock' | 'sold';
-export interface VendorSummary { total: number; stock: number; sold: number; customers: number; online: number }
+export type VendorStage = 'stock' | 'in_use' | 'sold';
+export interface VendorSummary { total: number; stock: number; inUse: number; sold: number; customers: number; online: number }
+/** A sold device as the vendor sees it: a record only, no access (v2.1) */
+export interface SoldRecord { id: string; serial: string; soldAt: string; customer: { id: string; fullName: string; phone: string; country: string } }
+export interface VendorDevices { items: DeviceCard[]; sold: SoldRecord[] }
 export interface VendorCustomer {
   id: string; fullName: string; phone: string; country: string; firstClaimedAt: string;
-  devices: { id: string; serial: string; name: string; claimedAt: string; online: boolean; fw: string | null; lastSeenAt: string | null }[];
+  /** name / online / fw / lastSeenAt: admin only */
+  devices: { id: string; serial: string; claimedAt: string; name?: string; online?: boolean; fw?: string | null; lastSeenAt?: string | null }[];
 }
 export interface VendorInvite { id: string; label: string; role: VendorRole; expiresAt: string }
 export interface VendorDetail extends Vendor {

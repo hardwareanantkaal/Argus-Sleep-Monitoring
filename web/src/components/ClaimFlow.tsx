@@ -93,10 +93,29 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
     } catch (e2) { setErr(errText(e2)); setBusy(false); }
   };
 
+  // v2.1: a vendor adds a sensor to stock with scan + confirm only. Name, room and time zone come later with "Use here".
+  if (vendor && forVendor) {
+    const addToStock = async () => {
+      setErr(''); setBusy(true);
+      try { onDone(await post<DeviceDetail>('/devices/claim', { ...k, asVendor: true })); } catch (e2) { setErr(errText(e2)); setBusy(false); }
+    };
+    return (
+      <div className="card stack" style={{ gap: 14 }}>
+        <p className="small">Found <span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}.</p>
+        <div className="note"><Icon name="info" /><span>It goes into the <b>stock of {vendor.name}</b>. Keep the sticker on it: to sell it, the customer scans the same sticker and becomes the owner. To use it yourself, pick <b>Use here</b> on the Stock &amp; devices page.</span></div>
+        {err && <p className="err" role="alert">{err}</p>}
+        <div className="row"><button className="btn" onClick={addToStock} disabled={busy}>{busy ? 'Adding…' : 'Add to stock'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
+        <details className="small muted"><summary style={{ cursor: 'pointer' }}>More</summary>
+          <button className="link small" style={{ marginTop: 8 }} onClick={() => setForVendor(false)}>Claim it for myself instead (my own account, not {vendor.name})</button>
+        </details>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <p className="small" style={{ marginBottom: 14 }}>Found <span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}. It will appear under this name.</p>
-      {soldBy && <div className="note" style={{ marginBottom: 14 }}><Icon name="tag" /><span>Sold by <b>{soldBy.name}</b>. You will be the owner and can share it with family. The {soldBy.name} team can also see this sensor, to support you.</span></div>}
+      {soldBy && <div className="note" style={{ marginBottom: 14 }}><Icon name="tag" /><span>Sold by <b>{soldBy.name}</b>. You will be the owner and can share it with family. {soldBy.name} keeps only a record of the sale and can&apos;t see your data.</span></div>}
       <form className="form" onSubmit={submit}>
         <div className="field"><label htmlFor="cl-name">Name</label><input className="inp" id="cl-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Nani's room" /><span className="hint">Tip: use the person&apos;s name or the room.</span></div>
         <div className="field"><label htmlFor="cl-room">Room (optional)</label><input className="inp" id="cl-room" value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Ground floor bedroom" /></div>
@@ -104,16 +123,9 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
           <div className="field"><label htmlFor="cl-tz">Time zone where the sensor is</label><TzSelect id="cl-tz" value={tz} onChange={setTz} options={TIMEZONES} /><span className="hint">Filled in from this device. Change it if the sensor is in another place.</span></div>
           <div className="field"><label htmlFor="cl-place">Town or city (optional)</label><input className="inp" id="cl-place" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Surat" /><span className="hint">Shown as “{place.trim() || 'Surat'} time” to family in other time zones. Leave empty to show “{placeName(tz, null)} time”.</span></div>
         </div>
-        {vendor && (
-          <div className="stack" style={{ gap: 6 }}>
-            {forVendor && <div className="note"><Icon name="info" /><span>This sensor goes into the <b>stock of {vendor.name}</b>. Everyone on its team will see it. Keep the sticker on it: when you sell it, the customer scans the same sticker and becomes the owner.</span></div>}
-            <label className="row small" style={{ gap: 8, flexWrap: 'nowrap' }}>
-              <input type="checkbox" checked={!forVendor} onChange={(e) => setForVendor(!e.target.checked)} /> Claim it for myself instead (not for {vendor.name})
-            </label>
-          </div>
-        )}
+        {vendor && <button className="link small" type="button" style={{ alignSelf: 'flex-start' }} onClick={() => setForVendor(true)}>Add it to the stock of {vendor.name} instead</button>}
         {err && <p className="err" role="alert">{err}</p>}
-        <div className="row"><button className="btn" type="submit" disabled={busy}>{busy ? 'Adding…' : vendor && forVendor ? 'Add to stock' : 'Add device'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
+        <div className="row"><button className="btn" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add device'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
       </form>
     </div>
   );

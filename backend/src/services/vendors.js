@@ -15,15 +15,19 @@ async function summary(vendorId) {
   return db.one(
     `SELECT count(*)::int AS total,
             count(*) FILTER (WHERE d.claim_stage = 'vendor_stock')::int AS stock,
+            count(*) FILTER (WHERE d.claim_stage = 'vendor_use')::int AS "inUse",
             count(*) FILTER (WHERE d.claim_stage = 'owned')::int AS sold,
             count(DISTINCT d.owner_id)::int AS customers,
-            count(*) FILTER (WHERE s.is_online)::int AS online
+            -- online: only the vendor's own (stock + in use); sold sensors are not its business (009)
+            count(*) FILTER (WHERE s.is_online AND d.claim_stage <> 'owned')::int AS online
        FROM devices d LEFT JOIN device_state s ON s.device_id = d.id WHERE d.vendor_id = $1`, [vendorId]);
 }
 
 // v2: the vendor's customers = everyone who owns one of its devices, each
 // with the devices they bought (one customer can have many).
-async function customers(vendorId) {
+// 009: the vendor itself only gets the sales record (serial + date); `full`
+// (admin) adds name, online, firmware.
+async function customers(vendorId, { full = false } = {}) {
   const rows = await db.many(
     `SELECT u.id AS user_id, u.full_name, u.phone, u.country, d.id, d.serial_no, d.name, d.claimed_at,
             COALESCE(s.is_online, false) AS online, s.fw_version, s.last_seen_at
@@ -37,8 +41,10 @@ async function customers(vendorId) {
       c = { id: r.user_id, fullName: r.full_name, phone: r.phone, country: r.country, firstClaimedAt: r.claimed_at, devices: [] };
       out.push(c);
     }
-    c.devices.push({ id: r.id, serial: r.serial_no, name: r.name, claimedAt: r.claimed_at,
-      online: live.getStatus(r.id)?.online ?? r.online, fw: r.fw_version, lastSeenAt: r.last_seen_at });
+    c.devices.push(full
+      ? { id: r.id, serial: r.serial_no, name: r.name, claimedAt: r.claimed_at,
+        online: live.getStatus(r.id)?.online ?? r.online, fw: r.fw_version, lastSeenAt: r.last_seen_at }
+      : { id: r.id, serial: r.serial_no, claimedAt: r.claimed_at });
   }
   return out;
 }

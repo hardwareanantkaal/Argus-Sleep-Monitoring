@@ -46,7 +46,7 @@ async function card(r, userId) {
   return {
     id: r.id,
     serial: r.serial_no,
-    name: r.name,
+    name: r.name || r.serial_no,   // vendor stock sensors have no name yet (009)
     room: r.room,
     tz: r.timezone,
     place: r.place,
@@ -56,12 +56,11 @@ async function card(r, userId) {
     sharedBy: isOwner || !r.owner_id || r.via === 'vendor' ? null : { fullName: r.owner_name },
     vendor: r.vendor_id ? { id: r.vendor_id, name: r.vendor_name } : null,
     group: r.via === 'vendor' && r.group_id ? { id: r.group_id, name: r.group_name } : null,
-    // Vendor team only (v2): 'stock' (not sold) | 'sold', and who bought it.
+    // Vendor team only: 'stock' | 'in_use' (009). Sold devices are not cards for
+    // the vendor any more (no access); they come as records in GET /vendor/devices.
     ...(r.via === 'vendor' ? {
-      stage: r.claim_stage === 'owned' ? 'sold' : 'stock',
-      customer: r.owner_id ? { id: r.owner_id, fullName: r.owner_name, phone: r.owner_phone, country: r.owner_country } : null,
+      stage: r.claim_stage === 'vendor_use' ? 'in_use' : 'stock',
       stockedAt: r.stocked_at,
-      soldAt: r.claim_stage === 'owned' ? r.claimed_at : null,
     } : {}),
     accessEndsAt: r.via === 'grant' ? r.access_ends_at : null,
     myPermissions: perms,

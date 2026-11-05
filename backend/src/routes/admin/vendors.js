@@ -19,6 +19,7 @@ const INVITE_DAYS = 7;
 const LIST_SQL = `
   SELECT v.*, (SELECT count(*)::int FROM devices d WHERE d.vendor_id = v.id) AS device_count,
          (SELECT count(*)::int FROM devices d WHERE d.vendor_id = v.id AND d.claim_stage = 'vendor_stock') AS stock_count,
+         (SELECT count(*)::int FROM devices d WHERE d.vendor_id = v.id AND d.claim_stage = 'vendor_use') AS in_use_count,
          (SELECT count(*)::int FROM devices d WHERE d.vendor_id = v.id AND d.claim_stage = 'owned') AS sold_count,
          (SELECT count(DISTINCT d.owner_id)::int FROM devices d WHERE d.vendor_id = v.id) AS customer_count,
          (SELECT count(*)::int FROM vendor_members m WHERE m.vendor_id = v.id) AS member_count,
@@ -26,9 +27,10 @@ const LIST_SQL = `
     FROM vendors v`;
 const vendorView = (v) => ({
   id: v.id, name: v.name, contactName: v.contact_name, phone: v.phone, email: v.email, status: v.status,
-  deviceCount: v.device_count, stockCount: v.stock_count, soldCount: v.sold_count, customerCount: v.customer_count,
-  memberCount: v.member_count, groupCount: v.group_count, createdAt: v.created_at,
+  deviceCount: v.device_count, stockCount: v.stock_count, inUseCount: v.in_use_count, soldCount: v.sold_count,
+  customerCount: v.customer_count, memberCount: v.member_count, groupCount: v.group_count, createdAt: v.created_at,
 });
+const STAGE = { vendor_stock: 'stock', vendor_use: 'in_use', owned: 'sold' };
 
 // The vendor-owner invite link (shown once). Used by the one-step create and the re-invite.
 async function ownerInvite(req, c, v, label) {
@@ -126,13 +128,13 @@ router.get('/vendors/:id', need, async (req, res) => {
   res.json({
     ...vendorView(v),
     summary: await vendors.summary(v.id),
-    customers: await vendors.customers(v.id),
+    customers: await vendors.customers(v.id, { full: true }),
     members: members.map((m) => ({ userId: m.id, fullName: m.full_name, phone: m.phone, role: m.role })),
     invites: invites.map((i) => ({ id: i.id, label: i.label, role: i.role, expiresAt: i.expires_at })),
     groups: groups.map((g) => ({ id: g.id, name: g.name })),
     devices: devices.map((d) => ({
       id: d.id, serial: d.serial_no, name: d.name, groupId: d.group_id,
-      stage: d.claim_stage === 'owned' ? 'sold' : 'stock',
+      stage: STAGE[d.claim_stage],
       customer: d.owner_id ? { id: d.owner_id, fullName: d.owner_name } : null,
       stockedAt: d.stocked_at, soldAt: d.claim_stage === 'owned' ? d.claimed_at : null,
       online: live.getStatus(d.id)?.online ?? d.online, fw: d.fw_version, lastSeenAt: d.last_seen_at, activeGrants: d.active_grants,

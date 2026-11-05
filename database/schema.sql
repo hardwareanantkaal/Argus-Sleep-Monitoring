@@ -251,10 +251,10 @@ CREATE TABLE devices (
   registered_by    UUID        REFERENCES users(id) ON DELETE SET NULL,
   owner_id         UUID        REFERENCES users(id) ON DELETE SET NULL,  -- one owner; family via device_shares
   claimed_at       TIMESTAMPTZ,                     -- when the current holder claimed it (the customer, once sold)
-  claim_stage      TEXT        NOT NULL DEFAULT 'factory',  -- 'factory' | 'vendor_stock' | 'owned' (008)
+  claim_stage      TEXT        NOT NULL DEFAULT 'factory',  -- 'factory' | 'vendor_stock' | 'vendor_use' | 'owned' (008, 009)
   stocked_at       TIMESTAMPTZ,                     -- when a vendor added it to its stock (008)
   vendor_id        UUID,                            -- the vendor that stocks / sold it (007, 008); FK added in section 4b
-  group_id         UUID,                            -- vendor group (007); FK added in section 4b
+  group_id         UUID,                            -- vendor group (007), in-use devices only (009); FK added in section 4b
   name             TEXT,                            -- "Mom's bedroom"
   room             TEXT,                            -- "Master bedroom"
   -- Backend-only settings (NOT sent to the sensor, so they live here and
@@ -273,11 +273,11 @@ CREATE TABLE devices (
   CONSTRAINT devices_serial_format CHECK (serial_no ~ '^ARG-[0-9A-Z]{7}$'),
   CONSTRAINT devices_place_length CHECK (place IS NULL OR char_length(btrim(place)) BETWEEN 2 AND 60),
   CONSTRAINT devices_mqtt_username_format CHECK (mqtt_username ~ '^[0-9a-f]{12}$'),
-  CONSTRAINT devices_claim_stage CHECK (claim_stage IN ('factory', 'vendor_stock', 'owned')),
-  CONSTRAINT devices_claim_consistent CHECK (      -- 008: the QR works twice (vendor stock, then customer)
-       (claim_stage = 'factory'      AND owner_id IS NULL     AND vendor_id IS NULL     AND claimed_at IS NULL)
-    OR (claim_stage = 'vendor_stock' AND owner_id IS NULL     AND vendor_id IS NOT NULL AND claimed_at IS NOT NULL)
-    OR (claim_stage = 'owned'        AND owner_id IS NOT NULL AND claimed_at IS NOT NULL)
+  CONSTRAINT devices_claim_stage CHECK (claim_stage IN ('factory', 'vendor_stock', 'vendor_use', 'owned')),
+  CONSTRAINT devices_claim_consistent CHECK (      -- 008/009: the QR works twice (vendor stock, then customer)
+       (claim_stage = 'factory'                       AND owner_id IS NULL     AND vendor_id IS NULL     AND claimed_at IS NULL)
+    OR (claim_stage IN ('vendor_stock', 'vendor_use') AND owner_id IS NULL     AND vendor_id IS NOT NULL AND claimed_at IS NOT NULL)
+    OR (claim_stage = 'owned'                         AND owner_id IS NOT NULL AND claimed_at IS NOT NULL)
   ));
 CREATE INDEX devices_owner_idx ON devices (owner_id);
 CREATE INDEX devices_claim_code_idx ON devices (claim_code_hash) WHERE claim_code_hash IS NOT NULL;
@@ -341,7 +341,7 @@ CREATE UNIQUE INDEX vendor_groups_name_uq ON vendor_groups (vendor_id, lower(nam
 
 ALTER TABLE devices ADD FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL;
 ALTER TABLE devices ADD FOREIGN KEY (group_id) REFERENCES vendor_groups(id) ON DELETE SET NULL;
-ALTER TABLE devices ADD CONSTRAINT devices_group_needs_vendor CHECK (group_id IS NULL OR vendor_id IS NOT NULL);
+ALTER TABLE devices ADD CONSTRAINT devices_group_needs_vendor CHECK (group_id IS NULL OR claim_stage = 'vendor_use');
 CREATE INDEX devices_vendor_idx ON devices (vendor_id) WHERE vendor_id IS NOT NULL;
 CREATE INDEX devices_vendor_owner_idx ON devices (vendor_id, owner_id) WHERE vendor_id IS NOT NULL AND owner_id IS NOT NULL;
 
@@ -763,9 +763,11 @@ CREATE VIEW admin_stats AS
 -- 12. Permission views: the ONE place the backend asks "may X do Y?"
 -- ---------------------------------------------------------------------
 -- Device permissions: owner gets every 'device' permission; family gets
--- what is switched on for them; vendor members (007) get every device
--- permission except sharing.manage on their vendor's devices; grant holders
--- get theirs only while now() is in [starts_at, ends_at) and not revoked.
+-- what is switched on for them; vendor members (007, 009) get every device
+-- permission except sharing.manage on their vendor's IN-USE devices, only
+-- live.view + settings.edit on stock, nothing on sold devices; grant holders
+-- (in-use devices only) get theirs only while now() is in [starts_at, ends_at)
+-- and not revoked.
 --   SELECT 1 FROM device_user_permissions
 --    WHERE device_id = $1 AND user_id = $2 AND permission = 'history.view'
 CREATE VIEW device_user_permissions AS
@@ -781,10 +783,12 @@ CREATE VIEW device_user_permissions AS
     JOIN vendors v ON v.id = d.vendor_id AND v.status = 'active'
     JOIN vendor_members m ON m.vendor_id = v.id
     JOIN permissions p ON p.scope = 'device' AND p.code <> 'sharing.manage'
+   WHERE d.claim_stage = 'vendor_use'
+      OR (d.claim_stage = 'vendor_stock' AND p.code IN ('live.view', 'settings.edit'))
   UNION ALL
   SELECT g.device_id, g.user_id, perm, 'grant'::TEXT
     FROM device_access_grants g
-    JOIN devices d ON d.id = g.device_id AND d.vendor_id = g.vendor_id
+    JOIN devices d ON d.id = g.device_id AND d.vendor_id = g.vendor_id AND d.claim_stage = 'vendor_use'
     JOIN vendors v ON v.id = g.vendor_id AND v.status = 'active'
     CROSS JOIN unnest(g.permissions) perm
    WHERE g.user_id IS NOT NULL AND g.revoked_at IS NULL

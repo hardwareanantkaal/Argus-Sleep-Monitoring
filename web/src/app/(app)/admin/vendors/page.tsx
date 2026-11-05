@@ -84,12 +84,12 @@ function Inner() {
       </div>
       <Async q={q}>{(r) => r.items.length ? (
         <div className="card"><div className="tbl"><table>
-          <thead><tr><th>Name</th><th>Owner / contact</th><th>In stock</th><th>Sold</th><th>Customers</th><th>Team</th><th>Status</th><th>Since</th></tr></thead>
+          <thead><tr><th>Name</th><th>Owner / contact</th><th>In stock</th><th>In use</th><th>Sold</th><th>Customers</th><th>Team</th><th>Status</th><th>Since</th></tr></thead>
           <tbody>{r.items.map((v) => (
             <tr key={v.id} className="click" onClick={() => router.push(`/admin/vendors/${v.id}`)}>
               <td><b>{v.name}</b></td>
               <td>{v.contactName || '—'}<br /><span className="xs muted">{[v.phone && prettyPhone(v.phone), v.email].filter(Boolean).join(' · ')}</span></td>
-              <td className="num">{v.stockCount ?? v.deviceCount}</td><td className="num">{v.soldCount ?? 0}</td><td className="num">{v.customerCount ?? 0}</td><td className="num">{v.memberCount}</td>
+              <td className="num">{v.stockCount ?? v.deviceCount}</td><td className="num">{v.inUseCount ?? 0}</td><td className="num">{v.soldCount ?? 0}</td><td className="num">{v.customerCount ?? 0}</td><td className="num">{v.memberCount}</td>
               <td>{v.status === 'active' ? <span className="pill ok">Active</span> : <span className="pill bad">Disabled</span>}</td>
               <td className="muted">{day(v.createdAt)}</td>
             </tr>
