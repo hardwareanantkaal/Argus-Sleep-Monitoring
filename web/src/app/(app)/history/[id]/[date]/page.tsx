@@ -1,18 +1,21 @@
 'use client';
 
-// Night detail (API.md 4.2): the joined hypnogram D/L/A/O with out-of-bed gaps shaded,
-// the sessions that were joined, naps shown separately (not counted in totals).
+// Night detail (API.md 4.2), laid out like the Firebase-era session page: session header with score,
+// stat tiles, the stage timeline (step line, hover tooltip, out-of-bed gaps shaded), the sessions that
+// were joined, naps shown separately (not counted in totals). Download CSV is built in the browser.
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Hypnogram } from '@/components/charts';
 import { Icon } from '@/components/Icon';
-import { Async, Head, Legend, Loading, PH, ScoreRing, STAGES, TzTag, useApi } from '@/components/ui';
+import { StageTiles, StageTimeline } from '@/components/StageTimeline';
+import { Async, Head, Loading, TzTag, useApi } from '@/components/ui';
 import { dur, minutesIn, sleepDateLabel, timeIn } from '@/lib/format';
 import { isMain, type DeviceDetail, type MainNight, type NightDetail, type NightsResponse } from '@/lib/types';
 
 const mins = (a: string, b: string) => Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
+const short = (m: number) => (m < 60 ? `${Math.round(m)}m` : dur(m));
 const ZERO = { avg: 0, min: 0, max: 0 };
+const STAGE_WORD: Record<string, string> = { D: 'Deep', L: 'Light', A: 'Awake', O: 'Out of bed' };
 
 /** A main night with every detail field filled in, so the screen never trips on a stray null. */
 function full(n: MainNight) {
@@ -23,12 +26,33 @@ function full(n: MainNight) {
   };
 }
 
+/** One row per epoch: local time, UTC time, stage. Made in the browser; nothing new on the server. */
+function downloadCsv(hyp: string, startIso: string, epochS: number, tz: string, name: string) {
+  const t0 = Date.parse(startIso);
+  const local = (ms: number) => new Date(ms).toLocaleString('sv-SE', { timeZone: tz, hour12: false });
+  const rows = ['local_time,utc_time,stage,minutes'];
+  for (let i = 0; i < hyp.length; i++) {
+    const ms = t0 + i * epochS * 1000;
+    rows.push(`${local(ms)},${new Date(ms).toISOString()},${STAGE_WORD[hyp[i]] || hyp[i]},${epochS / 60}`);
+  }
+  const url = URL.createObjectURL(new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `${name.replace(/[^\w.-]+/g, '-')}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function Tile({ l, v, s }: { l: string; v: React.ReactNode; s?: string }) {
+  return <div className="dhero"><span className="lbl">{l}</span><b>{v}</b>{s && <span className="sub">{s}</span>}</div>;
+}
+
 /** Naps: listed and drawn, never counted in the night's totals or trends. */
 function NapCharts({ naps, tz, epochMin }: { naps: NightDetail['naps']; tz: string; epochMin: number }) {
   return <>{naps.filter((p) => p.hyp).map((p) => (
-    <div className="card" key={`h${p.start}`}>
-      <div className="ch"><div className="t"><h2>Nap · {timeIn(p.start, tz)} → {timeIn(p.end, tz)}</h2><span className="xs muted">{p.totalSleepMin != null ? `${dur(p.totalSleepMin)} asleep · ` : ''}not counted in totals or trends</span></div><Legend /></div>
-      <div className="chartbox"><Hypnogram hyp={p.hyp!} startMin={minutesIn(p.start, tz)} epochMin={epochMin} label="Nap sleep stages" /></div>
+    <div className="dcard" key={`h${p.start}`}>
+      <div className="dc-h"><span className="dc-t t-violet"><Icon name="moon" size={17} /><span>Nap · {timeIn(p.start, tz)} → {timeIn(p.end, tz)}</span></span>
+        <span className="chip">{p.totalSleepMin != null ? `${short(p.totalSleepMin)} asleep · ` : ''}not in totals</span></div>
+      <StageTimeline hyp={p.hyp!} startMin={minutesIn(p.start, tz)} epochMin={epochMin} startIso={p.start} tz={tz} label="Nap sleep stages" />
     </div>
   ))}</>;
 }
@@ -53,11 +77,11 @@ export default function NightPage() {
   return (
     <Async q={q}>{(raw) => {
       if (!tz) return <Loading />;
-      const devName = dev.data?.name ? dev.data.name + ' · ' : '';
+      const devName = dev.data?.name || '';
       if (!isMain(raw)) return (
         // A date with only naps has no main sleep (API.md §4): no score, no totals.
-        <div className="wrap">
-          <Head title={<>{sleepDateLabel(raw.sleepDate)}<TzTag tz={tz} place={place} /></>} sub={`${devName}naps only`} actions={nav} back={[`/history/${id}`, 'Sleep history']} />
+        <div className="wrap dash">
+          <Head title={<>{sleepDateLabel(raw.sleepDate)}<TzTag tz={tz} place={place} /></>} sub={`${devName ? devName + ' · ' : ''}naps only`} actions={nav} back={[`/history/${id}`, 'Sleep history']} />
           <div className="card empty"><Icon name="moon" size={30} /><h2>No main sleep this day</h2>
             <p>The sensor only saw {raw.naps.length === 1 ? 'a nap' : `${raw.naps.length} naps`}, none of them long enough to count as a night&apos;s sleep (3 h or more in bed). Naps don&apos;t count in the averages or trends.</p></div>
           <div className="card"><h2 style={{ marginBottom: 14 }}>Naps</h2><div className="stack" style={{ gap: 10 }}>
@@ -71,40 +95,58 @@ export default function NightPage() {
         </div>
       );
       const n = full(raw);
-      const total = n.stageMin.deep + n.stageMin.light + n.stageMin.awake + n.stageMin.outOfBed || 1;
-      const verdict = n.score >= 80 ? 'A good night' : n.score >= 65 ? 'A fair night' : 'A restless night';
+      const sm = n.stageMin;
+      const sleep = sm.deep + sm.light;
+      const pct = (v: number) => (sleep ? Math.round((v / sleep) * 100) : 0);
+      const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '');
+      const nSess = n.sessions.length;
       return (
-        <div className="wrap">
-          <Head title={<>{sleepDateLabel(n.sleepDate)} night<TzTag tz={tz} place={place} /></>}
-            sub={`${devName}${timeIn(n.start, tz)} → ${timeIn(n.end, tz)}`}
+        <div className="wrap dash">
+          <Head title={<>{devName || 'Sleep history'}<TzTag tz={tz} place={place} /></>} sub={sleepDateLabel(n.sleepDate)}
             actions={nav} back={[`/history/${id}`, 'Sleep history']} />
-          <div className="card"><div className="row" style={{ gap: 24, alignItems: 'center' }}>
-            <ScoreRing v={n.score} lg />
-            <div className="stack" style={{ gap: 4, flex: 1, minWidth: 200 }}>
-              <span className="label">Sleep score <PH /></span>
-              <h2 style={{ fontSize: 22 }}>{verdict}</h2>
-              <p className="muted small">{dur(n.totalSleepMin)} asleep out of {dur(n.inBedMin)} in bed, woke {n.wakeUps} time{n.wakeUps === 1 ? '' : 's'}{n.exits ? `, got up ${n.exits} time${n.exits === 1 ? '' : 's'}` : ''}.</p>
-            </div>
-          </div></div>
-          <div className="tiles">
-            <div className="card tile"><span className="label">Total sleep</span><div className="v">{dur(n.totalSleepMin)}</div></div>
-            <div className="card tile"><span className="label">Time in bed</span><div className="v">{dur(n.inBedMin)}</div></div>
-            <div className="card tile"><span className="label">Out of bed</span><div className="v">{n.oobMin}<small>min</small></div></div>
-            <div className="card tile"><span className="label">Efficiency</span><div className="v">{n.efficiencyPct}<small>%</small></div></div>
-          </div>
-          <div className="card">
-            <div className="ch"><div className="t"><h2>Sleep stages</h2><span className="xs muted">Main sleep, {n.sessions.length} session{n.sessions.length === 1 ? '' : 's'}{n.sessions.length > 1 ? ' joined' : ''} · each block is {n.epochS / 60} minutes</span></div><Legend /></div>
-            <div className="chartbox"><Hypnogram hyp={n.hyp} startMin={minutesIn(n.start, tz)} epochMin={n.epochS / 60} /></div>
-          </div>
-          <div className="g2">
-            <div className="card"><h2 style={{ marginBottom: 14 }}>Time in each stage</h2><div className="stagelist">
-              {STAGES.map(([k, l, c]) => (
-                <div className="r" key={k} style={{ gridTemplateColumns: '84px minmax(0,1fr) 72px' }}>
-                  <span>{l}</span><div className="track"><i className={c} style={{ width: `${(n.stageMin[k] / total) * 100}%` }} /></div>
-                  <b className="num" style={{ textAlign: 'right' }}>{dur(n.stageMin[k])}</b>
+          <div className="dcard">
+            <div className="sess-head">
+              <div className="stack" style={{ gap: 8 }}>
+                <div className="row" style={{ gap: 10 }}>
+                  <h1>Session: {n.sleepDate}{nSess > 1 ? ` · ${nSess} joined` : ''}</h1>
+                  <button className="btn sm tint-emerald" onClick={() => downloadCsv(n.hyp, n.start, n.epochS, tz, `${devName || 'argus'}-${n.sleepDate}`)}><Icon name="upload" size={15} /> Download CSV</button>
                 </div>
-              ))}
-            </div></div>
+                <span className="tw">Time window: <b>{when(n.start)}</b> to <b>{when(n.end)}</b></span>
+              </div>
+              <div className="sess-score"><b>{n.score}</b><span>Session score</span></div>
+            </div>
+          </div>
+
+          <div className="dash-tiles5">
+            <Tile l="Asleep time" v={short(n.totalSleepMin)} s={`${n.totalSleepMin} total sleep minutes`} />
+            <Tile l="In bed time" v={short(n.inBedMin)} s={`${n.inBedMin} total time in bed`} />
+            <Tile l="Deep rest ratio" v={`${pct(sm.deep)}%`} s={`${short(sm.deep)} deep`} />
+            <Tile l="Light rest ratio" v={`${pct(sm.light)}%`} s={`${short(sm.light)} light`} />
+            <Tile l="Sleep efficiency" v={`${n.efficiencyPct}%`} s="Asleep ÷ time in bed" />
+          </div>
+
+          <div className="dpanel"><div className="dash-stats five">
+            <Tile l="Awakenings" v={n.wakeUps} s="Woken up count" />
+            <Tile l="Turnovers" v={n.turns} s="Body rotation count" />
+            <Tile l="Apnea events" v={n.apnea} s="Breathing pause count" />
+            <Tile l="Avg heart rate" v={<>{n.hr.avg}<small> BPM</small></>} s={`Range ${n.hr.min}–${n.hr.max}`} />
+            <Tile l="Avg respiration" v={<>{n.br.avg}<small> RPM</small></>} s={`Range ${n.br.min}–${n.br.max}`} />
+          </div></div>
+
+          <div className="dcard">
+            <div className="dc-h"><span className="dc-t t-cyan"><Icon name="activity" size={18} /><span>Sleep Stage Timeline Graph · Session {n.sleepDate}</span></span><span className="chip">Continuous hypnogram</span></div>
+            <StageTiles deep={sm.deep} light={sm.light} awake={sm.awake} />
+            <StageTimeline hyp={n.hyp} startMin={minutesIn(n.start, tz)} epochMin={n.epochS / 60} startIso={n.start} tz={tz} />
+            <span className="xs muted">Each step is {n.epochS / 60} minutes{nSess > 1 ? '. Shaded bands are the out-of-bed gaps between joined sessions' : ''}. Hover or touch the graph to see each stage and its time.</span>
+          </div>
+
+          <div className="g2">
+            <div className="card"><h2 style={{ marginBottom: 14 }}>Out of bed and movement</h2><dl className="kv">
+              <dt>Time out of bed</dt><dd className="num">{short(n.oobMin)}</dd>
+              <dt>Bed exits</dt><dd className="num">{n.exits}</dd>
+              <dt>Large / small movement</dt><dd className="num">{n.bigMvPct}% / {n.smallMvPct}%</dd>
+              <dt>Abnormal struggle</dt><dd className="num">{n.struggles}</dd>
+            </dl></div>
             <div className="card"><h2 style={{ marginBottom: 14 }}>Sessions</h2><div className="stack" style={{ gap: 10 }}>
               {n.sessions.map((s, k) => (
                 <div key={s.start} className="stack" style={{ gap: 10 }}>
@@ -122,21 +164,6 @@ export default function NightPage() {
             </div></div>
           </div>
           <NapCharts naps={n.naps} tz={tz} epochMin={n.epochS / 60} />
-          <div className="card"><h2 style={{ marginBottom: 14 }}>Body during sleep <PH /></h2><div className="g2" style={{ gap: '9px 32px' }}>
-            <dl className="kv">
-              <dt>Heart rate avg</dt><dd className="num">{n.hr.avg} bpm</dd>
-              <dt>Heart rate min / max</dt><dd className="num">{n.hr.min} / {n.hr.max} bpm</dd>
-              <dt>Breath rate avg</dt><dd className="num">{n.br.avg} /min</dd>
-              <dt>Breath rate min / max</dt><dd className="num">{n.br.min} / {n.br.max} /min</dd>
-              <dt>Apnea events</dt><dd className="num">{n.apnea}</dd>
-            </dl>
-            <dl className="kv">
-              <dt>Turn-overs</dt><dd className="num">{n.turns}</dd>
-              <dt>Large / small movement</dt><dd className="num">{n.bigMvPct}% / {n.smallMvPct}%</dd>
-              <dt>Bed exits</dt><dd className="num">{n.exits}</dd>
-              <dt>Abnormal struggle</dt><dd className="num">{n.struggles}</dd>
-            </dl>
-          </div></div>
         </div>
       );
     }}</Async>

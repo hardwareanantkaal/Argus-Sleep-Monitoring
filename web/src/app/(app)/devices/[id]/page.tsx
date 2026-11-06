@@ -7,7 +7,8 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Hypnogram, Spark } from '@/components/charts';
+import { Spark } from '@/components/charts';
+import { StageTiles, StageTimeline } from '@/components/StageTimeline';
 import { Icon } from '@/components/Icon';
 import { firstLocalMin, pushStage } from '@/components/LiveTelemetry';
 import { Placement } from '@/components/Placement';
@@ -236,14 +237,9 @@ function LiveHypnogram({ lv, tz, stages }: { lv: LiveValues | null; tz: string; 
     <div className="dcard">
       <div className="dc-h"><span className="dc-t t-violet"><Icon name="moon" size={17} /><span>Live Sleep Stage Timeline (current session)</span></span>{s && <Legend />}</div>
       {!s ? <p className="sub">No active session. The timeline appears while someone is in bed.</p> : <>
-        <div className="dash-tiles4">
-          <div className="stile"><span>Total in bed</span><b>{dur(s.bed)}</b></div>
-          <div className="stile"><span>Deep</span><b className="t-violet">{dur(s.dp)}</b></div>
-          <div className="stile"><span>Light</span><b className="t-cyan">{dur(s.lt)}</b></div>
-          <div className="stile"><span>Awake</span><b className="t-amber">{dur(s.aw)}</b></div>
-        </div>
+        <StageTiles deep={s.dp} light={s.lt} awake={s.aw} />
         {hyp.length >= 1 && firstMin != null
-          ? <div className="chartbox"><Hypnogram hyp={hyp} startMin={firstMin} epochMin={1} label="Live sleep stages" /></div>
+          ? <StageTimeline hyp={hyp} startMin={firstMin} epochMin={1} startIso={new Date((stages.first ?? 0) * 60000).toISOString()} tz={tz} label="Live sleep stages" />
           : <p className="sub">Building the chart… one block per minute.</p>}
         <span className="xs muted">Totals cover the whole session (from the sensor). The chart covers the time since this page opened.</span>
       </>}
@@ -325,33 +321,37 @@ function Nightly({ d, lv }: { d: DeviceDetail; lv: LiveValues | null }) {
   const deepPct = n?.dp ?? (s.slp ? Math.round((s.dp / s.slp) * 100) : 0);
   const lightPct = n?.sh ?? (s.slp ? Math.round((s.lt / s.slp) * 100) : 0);
   return <>
-    <div className="dash-night-top">
-      <div className="dcard dnight">
-        <Ring v={score} rating={rating} />
-        <div className="kv2" style={{ flex: 1, minWidth: 160 }}>
+    <div className="dcard dqi">
+      <div className="dqi-h">Sleep Quality Index <b className="t-amber">{rating && rating !== '—' ? rating : 'None'}</b></div>
+      <div className="dqi-body">
+        <Ring v={score} />
+        <div className="dqi-pills">
+          <div><span>Time asleep</span><b>{(asleep / 60).toFixed(1)} hrs</b></div>
+          <div><span>Deep ratio</span><b>{deepPct}%</b></div>
+        </div>
+        <div className="kv2" style={{ minWidth: 190 }}>
           <span>Stage now</span><b>{STAGE_NAME[s.st] ?? '—'}</b>
           <span>Started</span><b>{new Date(s.start * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: d.tz })}</b>
-          <span>Time asleep</span><b>{(asleep / 60).toFixed(1)} hrs</b>
           <span>Fell asleep after</span><b>{s.on} min</b>
           <span>Wake-ups</span><b>{s.wk}</b>
         </div>
       </div>
-      <div className="dash-tiles3">
-        <Hero l="Total sleep" v={dur(asleep)} s={`${asleep} minutes`} />
-        <Hero l="Deep ratio" v={`${deepPct}%`} tone="violet" s="Restorative sleep" />
-        <Hero l="Light ratio" v={`${lightPct}%`} tone="cyan" s="Light sleep" />
-        <Hero l="Awake" v={`${s.aw}m`} tone="amber" s="Awake in bed" />
-        <Hero l="Out of bed" v={n ? `${n.oob}m` : '—'} tone="rose" s="Minutes out of bed" />
-        <Hero l="Night score" v={<>{n?.sc ?? score}<small>/100</small></>} tone="violet" s={n ? "Radar's night score" : 'Live session score'} />
-      </div>
     </div>
-    {n && <div className="dash-stats five">
-      <Stat l="Apnea events" v={n.apn} tone="rose" s="Breathing pauses" />
-      <Stat l="Bed exits" v={n.ex} tone="amber" s="Times out of bed" />
-      <Stat l="Turnovers" v={n.tn} tone="violet" s="Body rotations" />
-      <Stat l="Avg heart rate" v={n.hr} u="BPM" tone="cyan" s="Night average" />
-      <Stat l="Avg respiration" v={n.resp} u="RPM" tone="emerald" s="Night average" />
-    </div>}
+    <div className="dash-tiles5">
+      <Hero l="Total sleep duration" v={dur(asleep)} s={`${asleep} minutes`} />
+      <Hero l="Deep rest ratio" v={`${deepPct}%`} s="Restorative sleep" />
+      <Hero l="Light rest ratio" v={`${lightPct}%`} s="Light sleep phase" />
+      <Hero l="Awake duration" v={`${s.aw}m`} s="Awake period in bed" />
+      <Hero l="Out of bed time" v={n ? `${n.oob}m` : '—'} s="Minutes out of bed" />
+      <Hero l="Nightly score" v={<>{n?.sc ?? score}<small>/100</small></>} s={n ? 'Overall score' : 'Live session score'} />
+    </div>
+    {n && <div className="dpanel"><div className="dash-stats five">
+      <Stat l="Apnea disruptions" v={n.apn} s="Breathing pause events" />
+      <Stat l="Bed exits" v={n.ex} s="Times exited bed" />
+      <Stat l="Position turnovers" v={n.tn} s="Body rotations" />
+      <Stat l="Avg cardiac rate" v={n.hr} u="BPM" s="Nightly heart rate average" />
+      <Stat l="Avg respiration" v={n.resp} u="RPM" s="Nightly respiration average" />
+    </div></div>}
   </>;
 }
 

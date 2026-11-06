@@ -365,3 +365,48 @@ a.btn{text-decoration:none}
   .dnight{justify-content:center}
   .dcard .big{font-size:24px}
 }
+
+/* ---- stage timeline + coloured stage tiles (StageTimeline.tsx) ---- */
+.stl{position:relative;background:var(--panel-2);border:1px solid var(--line);border-radius:18px;padding:10px 8px 4px;touch-action:pan-y;user-select:none}
+.stl svg{display:block;width:100%;height:auto;min-width:0}
+.stl svg .stl-grid{stroke:var(--line);stroke-dasharray:3 5}
+.stl svg .stl-row{font-family:var(--display);font-size:15px;font-weight:700}
+.stl svg .stl-tick{font-family:var(--mono);font-size:12px}
+.stl svg .stl-oob{fill:var(--muted);opacity:.13}
+.stl-tip{position:absolute;top:6px;transform:translateX(-50%);pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:3px;white-space:nowrap;z-index:2}
+.stl-tip-t{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.stl-tip b{display:flex;align-items:center;gap:7px;font-size:14px}
+.stl-tip i{width:9px;height:9px;border-radius:50%}
+.stiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.stile2{border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);min-width:0}
+.stile2 span{font-size:13px;color:var(--muted)}
+.stile2 b{font-family:var(--display);font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stile2 b small{font-size:14px;font-weight:600;color:var(--muted)}
+.stile2 em{font-style:normal;font-size:12px;color:var(--muted)}
+.stile2.emerald{background:color-mix(in srgb,var(--emerald) 10%,var(--panel));border-color:color-mix(in srgb,var(--emerald) 35%,var(--line))} .stile2.emerald b{color:var(--emerald)}
+.stile2.violet{background:color-mix(in srgb,var(--violet) 12%,var(--panel));border-color:color-mix(in srgb,var(--violet) 40%,var(--line))} .stile2.violet b{color:var(--violet)}
+.stile2.cyan{background:color-mix(in srgb,var(--cyan) 10%,var(--panel));border-color:color-mix(in srgb,var(--cyan) 35%,var(--line))} .stile2.cyan b{color:var(--cyan)}
+.stile2.amber{background:color-mix(in srgb,var(--amber) 10%,var(--panel));border-color:color-mix(in srgb,var(--amber) 40%,var(--line))} .stile2.amber b{color:var(--amber)}
+@media (max-width:860px){.stiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.stile2 b{font-size:20px}.stile2{padding:12px}}
+
+/* nightly block (device page) and night detail, Firebase-era layout */
+.dqi{display:flex;flex-direction:column;align-items:center;gap:14px}
+.dqi-h{display:flex;align-items:baseline;gap:10px;font-weight:700;color:var(--muted)}
+.dqi-h b{font-size:18px;font-weight:600}
+.dqi-body{display:flex;align-items:center;gap:28px;flex-wrap:wrap;justify-content:center}
+.dqi-pills{display:flex;flex-direction:column;gap:10px}
+.dqi-pills div{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:8px 16px;display:flex;flex-direction:column}
+.dqi-pills span{font-size:12.5px;color:var(--muted)} .dqi-pills b{font-family:var(--display);font-size:20px;font-weight:800}
+.dash-tiles5{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.dpanel{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:16px}
+.dpanel .dstat{background:var(--panel-2)}
+.sess-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.sess-head h1{font-family:var(--display);font-size:22px;font-weight:800}
+.sess-head .tw{font-size:13px;color:var(--muted)} .sess-head .tw b{color:var(--ink);font-weight:600}
+.sess-score{text-align:right;display:flex;flex-direction:column;align-items:flex-end}
+.sess-score b{font-family:var(--display);font-size:38px;font-weight:800;color:var(--cyan);line-height:1}
+.sess-score span{font-size:13px;color:var(--muted)}
+.btn.tint-emerald{background:color-mix(in srgb,var(--emerald) 12%,transparent);color:var(--emerald);border-color:color-mix(in srgb,var(--emerald) 40%,transparent)}
+@media (max-width:980px){.dash-tiles5{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.dash-tiles5{grid-template-columns:repeat(2,minmax(0,1fr))}.sess-score{align-items:flex-start;text-align:left}}
