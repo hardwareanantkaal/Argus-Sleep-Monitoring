@@ -7,6 +7,9 @@
   --live:#4fd6bd; --live-soft:rgba(79,214,189,.14);
   --ok:#4cd38a; --ok-soft:rgba(76,211,138,.14); --warn:#f2b45c; --warn-soft:rgba(242,180,92,.15); --bad:#ff7a7a; --bad-soft:rgba(255,122,122,.15);
   --st-deep:#5468e0; --st-light:#93a8ff; --st-awake:#f2b45c;
+  /* dashboard accents (device live page) */
+  --cyan:#22c3dd; --emerald:#2fcf95; --violet:#8b93ff; --amber:#f5a524; --rose:#f8506d;
+  --glow:radial-gradient(at 0% 0%,rgba(34,195,221,.07) 0,transparent 50%),radial-gradient(at 100% 0%,rgba(139,147,255,.08) 0,transparent 50%);
   --shadow:0 10px 30px rgba(0,0,0,.35);
   --display:var(--font-display),"Segoe UI",system-ui,sans-serif;
   --body:var(--font-body),"Segoe UI",system-ui,sans-serif;
@@ -20,6 +23,8 @@
   --live:#0b937c; --live-soft:rgba(11,147,124,.1);
   --ok:#17834c; --ok-soft:rgba(23,131,76,.1); --warn:#a35f00; --warn-soft:rgba(163,95,0,.1); --bad:#c8352d; --bad-soft:rgba(200,53,45,.1);
   --st-deep:#3346b8; --st-light:#8193ee; --st-awake:#e09a35;
+  --cyan:#0284c7; --emerald:#059669; --violet:#4f46e5; --amber:#c26a00; --rose:#e11d48;
+  --glow:none;
   --shadow:0 10px 30px rgba(20,30,70,.12);
   color-scheme:light;
 }
