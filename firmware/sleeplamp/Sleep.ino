@@ -1,5 +1,6 @@
 // Argus Sleep Monitoring · Sleep.ino — on-device sleep-staging engine.
-// STAGING ALGORITHM = the accurate SleepLamp engine, unchanged. The only
+// STAGING: SleepLamp movement engine + (v2.1) radar eSleepState votes, an
+// asleep-HR baseline, deep-block caps/refractory and a deep-share budget. The only
 // additions are read-only bookkeeping for the MQTT session summary (Unix
 // start/end, out-of-bed minutes, bed exits); none of it feeds back into the
 // staging decisions. The bed-exit timeout comes from the server setting exit_s.
@@ -32,6 +33,7 @@ static uint32_t epStart = 0;
 static int  nSamp=0, sumRange=0, bursts=0, presCnt=0, bedCnt=0;
 static long sumHR=0;  static int nHR=0;
 static long sumBR=0;  static int nBR=0;
+static int  ssVote[4]={0,0,0,0};          // radar's own eSleepState this epoch: 0 deep 1 light 2 awake 3 none
 
 // ---- session state ----
 static bool sOn=false;
@@ -43,6 +45,15 @@ static long sesHR=0;  static int sesHRn=0; // averaged over asleep minutes only
 static long sesBR=0;  static int sesBRn=0;
 static uint32_t startTs=0;                 // Unix UTC at bed entry (0 = NTP not synced yet)
 static int  oobMin=0, exits=0;             // minutes out of bed / number of bed exits
+static uint32_t startMs=0;                 // millis() at bed entry
+static int  hrSleep=0;                     // asleep (light) heart-rate baseline, slow EMA
+static int  hrSleepN=0;                    // light minutes that fed hrSleep
+static int  deepRun=0;                     // length of the current deep block
+static int  lightSinceDeep=0;              // light minutes since the last deep block ended
+static int  sleepRun=0;                    // asleep minutes since the latest onset
+// diagnostics only (sent in the session message, never used for staging):
+// how much the radar's movement range really was while the person lay in bed
+static long mrSum=0; static int mrN=0, mrMin=100, mrQuiet=0, mrVQuiet=0, bedOff=0;
 
 // 45% efficiency + 25% deep share (target 25%) + 15% duration (target 7 h)
 // + 15% few awakenings. Clamped 1..99 so a junk-free score is always plausible.
@@ -58,7 +69,9 @@ static int scoreOf(int bed, int sleep, int deep, int wk) {
 static void resetSession() {
   sOn=false; stage=3; bedMin=deepMin=lightMin=awakeMin=0;
   quietRun=vQuietRun=oobRun=0; onset=-1; wakes=turns=0; hrBase=0;
-  sesHR=sesBR=0; sesHRn=sesBRn=0; startTs=0; oobMin=exits=0;
+  sesHR=sesBR=0; sesHRn=sesBRn=0; startTs=0; oobMin=exits=0; startMs=0;
+  hrSleep=hrSleepN=0; deepRun=0; lightSinceDeep=DEEP_REFRACT_EP; sleepRun=0;
+  mrSum=0; mrN=0; mrMin=100; mrQuiet=mrVQuiet=0; bedOff=0;
 }
 
 // dropTrail: minutes spent already-gone before the out-of-bed timeout fired
@@ -76,9 +89,28 @@ static void buildReport(NightReport& r, int dropTrail) {
   r.score    = scoreOf(r.bedMin, r.sleepMin, r.deepMin, r.wakes);
   r.oobMin   = max(0, oobMin - dropTrail);
   r.exits    = exits;
+  r.mrAvg    = mrN ? (int)(mrSum / mrN) : 0;
+  r.mrMin    = mrN ? mrMin : 0;
+  r.quietPct = mrN ? mrQuiet  * 100 / mrN : 0;
+  r.vQuietPct= mrN ? mrVQuiet * 100 / mrN : 0;
+  r.bedOffPct= mrN ? bedOff   * 100 / mrN : 0;
   r.startTs  = startTs;
+  r.startMs  = startMs;
+  r.endMs    = millis() - (uint32_t)dropTrail * 60000UL;   // the moment they left
   uint32_t now = nowEpoch();
-  r.endTs    = now ? now - (uint32_t)dropTrail * 60 : 0;   // the moment they left
+  r.endTs    = now ? now - (uint32_t)dropTrail * 60 : 0;
+  // NTP synced only after bed entry: derive the start from the uptime clock
+  if (!r.startTs && r.endTs && startMs)
+    r.startTs = r.endTs - (r.endMs - startMs) / 1000;
+}
+
+// Report of the session still running, as if it ended now (minus any
+// out-of-bed tail). Only with real clock time and when long enough to keep.
+// Called from the sensor task (same thread as sleepFeed).
+bool sleepSnapshot(NightReport& r) {
+  if (!sOn || !nowEpoch()) return false;
+  buildReport(r, oobRun);
+  return r.startTs && r.endTs > r.startTs && r.bedMin >= max(1, g_set.min_sess);
 }
 
 void sleepFeed(const SensorData& s, SleepLive& outLive,
@@ -94,6 +126,7 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
   if (now - epStart >= epLen * 3) {
     epStart = now; nSamp = 0; sumRange = 0; bursts = 0;
     presCnt = bedCnt = 0; sumHR = sumBR = 0; nHR = nBR = 0;
+    memset(ssVote, 0, sizeof(ssVote));
   }
 
   nSamp++; sumRange += s.movingRange;
@@ -102,6 +135,7 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
   if (s.presence && s.inBed) bedCnt++;
   if (s.heartRate  > 0) { sumHR += s.heartRate;  nHR++; }
   if (s.breathRate > 0) { sumBR += s.breathRate; nBR++; }
+  if (s.sleepState >= 0 && s.sleepState <= 3) ssVote[s.sleepState]++;
 
   // ---- epoch boundary: one staging decision per "minute" ----
   if (now - epStart >= epLen && nSamp >= 3) {
@@ -113,13 +147,26 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
     int  epBR      = nBR ? (int)(sumBR/nBR) : 0;
     // burst thresholds as a fraction of the epoch, so they hold at any
     // epoch length: 4% of a 60 s epoch ≈ 2.4 s of movement spikes.
-    bool quiet     = inbed && meanRange <= QUIET_RANGE && burstPct <= 4;
-    bool vQuiet    = quiet && meanRange <= 4 && burstPct <= 1;
+    // the radar's own staging for this minute (majority vote, needs >50%)
+    bool radarDeep  = ssVote[0] * 2 > nSamp;
+    bool radarAwake = ssVote[2] * 2 > nSamp;
+    bool radarSleep = (ssVote[0] + ssVote[1]) * 2 > nSamp;   // radar says light or deep
+    // 2.4.0 FIX ("100% awake all night"): the C1001's in-bed flag drops to 0
+    // while a still sleeper is plainly there (seen on the old dashboard:
+    // "Out of bed" + still + 71 cm). Such a minute was neither "out of bed"
+    // nor "quiet", so it counted as AWAKE and sleep could never begin.
+    // A session has already confirmed the bed, so inside it presence is enough.
+    bool lying     = sOn ? present : inbed;
+    // quiet = little movement; OR the radar itself stages the minute as
+    // sleep while there is no wake-level movement
+    bool quiet     = lying && burstPct <= 4 &&
+                     (meanRange <= QUIET_RANGE || (radarSleep && meanRange < WAKE_RANGE));
+    bool vQuiet    = quiet && burstPct <= 1 && (meanRange <= 4 || (radarDeep && meanRange <= QUIET_RANGE));
 
     if (!sOn) {
       if (inbed) {                              // ---- session begins ----
         resetSession(); sOn = true; stage = 2;
-        startTs = nowEpoch();
+        startTs = nowEpoch(); startMs = millis() - epLen;
         LOG.println(F("[SLEEP] session started (in bed)"));
       }
     } else {
@@ -127,9 +174,16 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
       if (!present) {                           // out of bed / out of zone
         if (oobRun == 0) exits++;
         oobRun++; awakeMin++; oobMin++;
-        stage = 2; quietRun = vQuietRun = 0;
+        if (stage == 0) lightSinceDeep = 0;
+        stage = 2; quietRun = vQuietRun = 0; deepRun = 0; sleepRun = 0;
       } else {
         oobRun = 0;
+        if (!inbed) bedOff++;                   // diagnostics: present but radar says "not in bed"
+        {                                       // diagnostics: movement while lying in bed
+          mrSum += meanRange; mrN++; mrMin = min(mrMin, meanRange);
+          if (quiet) mrQuiet++;
+          if (vQuiet) mrVQuiet++;
+        }
         if (stage == 2 && epHR > 0)             // learn baseline while awake
           hrBase = hrBase ? (hrBase*3 + epHR)/4 : epHR;
 
@@ -141,28 +195,57 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
             awakeMin -= quietRun; lightMin += quietRun;
             if (onset < 0) onset = max(0, bedMin - quietRun);
             vQuietRun = vQuiet ? 1 : 0;
+            sleepRun = quietRun; lightSinceDeep += quietRun;
             LOG.println(F("[SLEEP] fell asleep (light)"));
           }
         } else {                                // asleep
-          // awakening = sustained movement (>=13% of the epoch ≈ 8 s) or
-          // high mean activity for the whole minute
-          bool moveWake = meanRange >= WAKE_RANGE || burstPct >= 13;
+          // awakening = sustained movement (>=13% of the epoch ≈ 8 s), high
+          // mean activity for the whole minute, or the radar itself says
+          // "awake" while there is more than quiet-level movement
+          bool moveWake = meanRange >= WAKE_RANGE || burstPct >= 13 ||
+                          (radarAwake && !quiet);
           if (moveWake) {
+            if (stage == 0) lightSinceDeep = 0;
             stage = 2; wakes++; awakeMin++; quietRun = vQuietRun = 0;
+            deepRun = 0; sleepRun = 0;
             LOG.println(F("[SLEEP] awakening (movement)"));
           } else {
             if (burstPct >= 3) turns++;         // brief stir (~2 s), still asleep
             vQuietRun = vQuiet ? vQuietRun + 1 : 0;
+            sleepRun++;
+            int slept = deepMin + lightMin;
+            int deepPct = slept > 0 ? deepMin * 100 / slept : 0;
+            // HR evidence vs the ASLEEP baseline (light-sleep HR), falling
+            // back to the awake-in-bed baseline until it is learned
+            int base = hrSleepN >= 10 ? hrSleep : hrBase;
+            bool hrLow = epHR > 0 && base > 0 && epHR <= base - max(2, base / 25);
+            bool hrUnknown = epHR == 0 || base == 0;
             if (stage == 1) {
-              bool hrLow = epHR > 0 && hrBase > 0 &&
-                           epHR <= hrBase - max(3, hrBase/20);
-              if (vQuietRun >= DEEP_AFTER_EP && (hrLow || hrBase==0 || epHR==0))
-                stage = 0;
-              lightMin++;
+              lightMin++; lightSinceDeep++;
+              if (epHR > 0) { hrSleep = hrSleep ? (hrSleep * 7 + epHR) / 8 : epHR; hrSleepN++; }
+              // deep entry: a long very-quiet run, some light sleep first,
+              // a gap since the last deep block, and physiological evidence.
+              bool evidence;
+              if (deepPct >= DEEP_HARD_PCT && slept >= 60) evidence = false;
+              else if (deepPct >= DEEP_TARGET_PCT && slept >= 60)
+                evidence = radarDeep && hrLow;              // over budget: need both
+              else if (slept >= 300)                        // late night: deep is rare
+                evidence = radarDeep && (hrLow || hrUnknown);
+              else
+                evidence = radarDeep || hrLow || (hrUnknown && vQuietRun >= DEEP_AFTER_EP * 2);
+              if (vQuietRun >= DEEP_AFTER_EP && sleepRun >= DEEP_FIRST_LIGHT &&
+                  lightSinceDeep >= DEEP_REFRACT_EP && evidence) {
+                stage = 0; deepRun = 0;
+                LOG.println(F("[SLEEP] deep"));
+              }
             } else {                            // deep
-              bool hrUp = epHR > 0 && hrBase > 0 && epHR >= hrBase - 1;
-              if (!vQuiet || hrUp) stage = 1;
-              deepMin++;
+              deepMin++; deepRun++;
+              bool hrUp = epHR > 0 && base > 0 && epHR >= base;
+              if (!vQuiet || hrUp || deepRun >= DEEP_MAX_BLOCK ||
+                  (!radarDeep && ssVote[1] * 2 > nSamp && deepRun >= 10)) {
+                stage = 1; lightSinceDeep = 0; deepRun = 0;
+                LOG.println(F("[SLEEP] deep -> light"));
+              }
             }
             if (epHR > 0) { sesHR += epHR; sesHRn++; }
             if (epBR > 0) { sesBR += epBR; sesBRn++; }
@@ -170,14 +253,19 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
         }
       }
       if (oobRun >= max(1, g_set.exit_s / SLEEP_EPOCH_SEC)) {               // ---- auto end ----
-        if (bedMin - oobRun >= AUTO_SAVE_MIN && deepMin + lightMin >= 1) {
+        // Keep every session that was long enough, EVEN with 0 minutes asleep:
+        // a long "all awake" session is real data (and tells us the staging
+        // missed the sleep). It used to be thrown away here, silently.
+        if (bedMin - oobRun >= max(1, g_set.min_sess)) {
           buildReport(outRep, oobRun); repReady = true;
-        } else LOG.println(F("[SLEEP] session too short, discarded"));
+          if (deepMin + lightMin == 0) LOG.println(F("[SLEEP] session saved with no sleep detected"));
+        } else LOG.printf("[SLEEP] session too short (%d min in bed), discarded\n", bedMin - oobRun);
         resetSession();
       }
     }
     epStart = now; nSamp = 0; sumRange = 0; bursts = 0;
     presCnt = bedCnt = 0; sumHR = sumBR = 0; nHR = nBR = 0;
+    memset(ssVote, 0, sizeof(ssVote));
   }
 
   outLive.active  = sOn;     outLive.stage    = stage;

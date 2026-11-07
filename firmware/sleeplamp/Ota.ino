@@ -157,7 +157,9 @@ void otaLoop() {
   bool sessionActive;
   xSemaphoreTake(mux, portMAX_DELAY); sessionActive = live.active; xSemaphoreGive(mux);
   static uint32_t tNote = 0;
+  static long deferredRid = 0;                 // report "deferred" once per offer
   if (sessionActive) {
+    if (deferredRid != job.rid) { deferredRid = job.rid; otaStatus(job.rid, "deferred", "sleep session active"); }
     if (millis() - tNote > 600000UL) { tNote = millis(); LOG.println("[OTA] sleep session running — deferred"); }
     return;
   }

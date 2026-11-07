@@ -27,7 +27,7 @@ struct SensorData {
 
 // On-device sleep-session recording (1 sample/min, ~10 h ring buffer).
 // stage: 0 deep, 1 light, 2 awake in bed, 3 no session, 4 out of bed (in a session)
-#define SESS_MAX 600
+#define SESS_MAX 1440   // 24 h: a night longer than the old 600 min ring broke the hypnogram
 struct SessSample { uint8_t stage, hr, br; };
 
 // Live output of the on-device sleep-staging engine (Sleep.ino).
@@ -42,9 +42,12 @@ struct SleepLive {
 
 struct NightReport {
   bool     valid = false;
-  uint32_t startTs = 0, endTs = 0;               // Unix UTC: bed in / bed out
+  uint32_t startTs = 0, endTs = 0;               // Unix UTC: bed in / bed out (0 = NTP not synced yet)
+  uint32_t startMs = 0, endMs = 0;               // millis() at bed in / bed out (fills start/end after a late NTP sync)
   int  bedMin=0, sleepMin=0, deepMin=0, lightMin=0, awakeMin=0, oobMin=0, exits=0;
   int  onsetMin=0, wakes=0, turns=0, avgHR=0, avgBR=0, apnea=0, score=0;
+  int  mrAvg=0, mrMin=0, quietPct=0, vQuietPct=0;  // diagnostics: movement range in bed
+  int  bedOffPct=0;                                // diagnostics: % present minutes the radar said "not in bed"
 };
 
 // One finished session, ready to become a <p>/<d>/session message
@@ -58,6 +61,7 @@ struct SessionOut {
 struct DevSettings {
   int v = 0, exit_s = 300, live_s = 2, idle_s = 60;
   int struggle = 1, unattended = 0, unatt_min = 30;
+  int min_sess = AUTO_SAVE_MIN;                  // discard sessions shorter than this (minutes)
 };
 
 // A firmware update offered on <p>/<d>/ota (Ota.ino)
@@ -101,6 +105,9 @@ bool   mqttConnected();
 void   mqttPublish(const String& sub, const String& payload, int qos, bool retain);
 void   eventPush(const char* type, uint32_t ts = 0);   // thread-safe
 void   sessionSubmit(const SessionOut& s);              // thread-safe
+void   sessionCheckpointSave(const SessionOut& s);      // running session -> flash (sensor task)
+void   sessionCheckpointClear();
+bool   sleepSnapshot(NightReport& r);                   // Sleep.ino: report of the running session
 void   settingsLoad();
 // Provision.ino — WiFi portal (APMODE scan-and-pick network list), local OTA page, factory reset
 int    wifiNetCount(); String wifiNetSsid(int i);  String wifiNetPass(int i);

@@ -66,6 +66,10 @@ async function onSession(mac, payload) {
   }
   if (dev.claim_stage !== 'owned' && dev.claim_stage !== 'vendor_use') {
     // Nobody uses this sensor (factory, or vendor stock, 009): drop it, but ack so the flash queue empties.
+    // Log it, so a test sensor that was never claimed doesn't look like it "sent nothing".
+    const len = m && Number.isInteger(m.start) && Number.isInteger(m.end) ? `${Math.round((m.end - m.start) / 60)} min ` : '';
+    await db.query(`INSERT INTO device_events (device_id, type, severity, message, data) VALUES ($1, 'session_received', 'warning', $2, $3)`,
+      [dev.id, `${len}session dropped: sensor is not in use by a customer (${dev.claim_stage})`, JSON.stringify({ sid })]);
     return ack(mac, { sid });
   }
   const v = validate(m);
@@ -151,7 +155,10 @@ const maxOf = (group, field) => {
 
 // One group -> the night fields of API.md §4 (calculation table).
 function summarize(group) {
-  const epochS = group[0].epoch_s || 300;
+  // Firmware 2.4.0 sends 1-minute steps (epoch_s 60), older firmware 5-minute
+  // steps. A night joining both uses the finer step; coarse letters are repeated.
+  const epochS = Math.min(...group.map((s) => s.epoch_s || 300));
+  const fit = (s) => (s.hyp || '').replace(/./g, (ch) => ch.repeat(Math.max(1, Math.round((s.epoch_s || 300) / epochS))));
   let hyp = '';
   let gapMin = 0;
   group.forEach((s, i) => {
@@ -160,7 +167,7 @@ function summarize(group) {
       gapMin += gap;
       hyp += 'O'.repeat(Math.max(0, Math.round((gap * 60) / epochS)));
     }
-    hyp += s.hyp || '';
+    hyp += fit(s);
   });
   const count = (ch) => [...hyp].filter((x) => x === ch).length;
   const toMin = (n) => Math.round((n * epochS) / 60);

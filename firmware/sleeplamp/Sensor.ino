@@ -31,7 +31,7 @@ static bool radarInit() {
 
   uint8_t mode = hu.getWorkMode();
   if (mode != 2) {                                    // not in sleep mode -> switch once
-    LOG.println("[C1001] switching to sleep mode (takes ~20 s, once)");
+    LOG.println("[RADAR] switching to sleep mode (takes ~20 s, once)");
     if (hu.configWorkMode(hu.eSleepMode) != 0) return false;
     hu.sensorRet();                                   // reset required after mode change
     vTaskDelay(pdMS_TO_TICKS(12000));                 // let the radar reboot fully
@@ -80,7 +80,7 @@ void sensorTask(void*) {
     if (!radarOk || g_sensorReset) {
       bool userAsk = g_sensorReset; g_sensorReset = false;
       if (userAsk) {
-        LOG.println("[C1001] recalibrating (user) — LED off/on + sensor reset");
+        LOG.println("[RADAR] recalibrating (user) — LED off/on + sensor reset");
         hu.configLEDLight(hu.eHPLed, 0);                // LED off — visible "recalibrating" cue
         hu.sensorRet();
         vTaskDelay(pdMS_TO_TICKS(11000));
@@ -92,7 +92,7 @@ void sensorTask(void*) {
       if (!radarOk) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }   // retry every ~2 s, web stays up
       if (recalPending) { recalPending = false; g_recalDone = true; }  // Mqtt.ino acks `recalibrate`
       failStreak = 0;
-      LOG.println("[C1001] link up, sleep mode active");
+      LOG.println("[RADAR] link up, sleep mode active");
     }
 
     // ---- harvest everything the radar PUSHED since last cycle (no queries) ----
@@ -111,7 +111,7 @@ void sensorTask(void*) {
     if (rawP < 0) rawP = hu.smHumanData(hu.eHumanPresence);
     if (rawP == 0 || rawP == 1) { cur.presence = rawP; failStreak = 0; }
     else if (++failStreak >= 12) {                     // ~10 s of dead/garbage answers
-      LOG.println("[C1001] link lost, auto-reinit");
+      LOG.println("[RADAR] link lost, auto-reinit");
       radarOk = false; continue;
     }
 
@@ -179,7 +179,7 @@ void sensorTask(void*) {
     }
     lastAbn = cur.abnormal;
 
-    SessionOut so; bool haveSo = false;
+    static SessionOut so; bool haveSo = false;   // static: ~1.6 KB, keep it off the task stack
     if (repReady) {
       if (cur.cApnea > 0 && cur.cApnea <= 40) rp.apnea = cur.cApnea;  // radar apnea if sane
       so.r = rp; so.bigMv = cur.cLarge; so.smallMv = cur.cMinor; so.struggles = struggles;
@@ -212,6 +212,26 @@ void sensorTask(void*) {
     if (haveSo) {
       eventPush("bed_out", rp.endTs);
       sessionSubmit(so);                               // Mqtt.ino stores it in flash + publishes
+    }
+
+    // ---- 2.4.0: checkpoint the RUNNING session to flash every few minutes ----
+    // The session in progress lives in RAM; a power cut or reboot used to lose
+    // the whole night (seen 6-7 Nov: sensor lost power at 09:18 with the
+    // session still open). On the next boot Mqtt.ino sends the last checkpoint
+    // as a finished session.
+    static uint32_t lastCkpt = 0;
+    if (wasOn && !lv.active) sessionCheckpointClear();         // ended (sent) or discarded
+    else if (lv.active && millis() - lastCkpt >= SESSION_CKPT_MS) {
+      lastCkpt = millis();
+      static SessionOut ck;
+      if (sleepSnapshot(ck.r)) {
+        if (cur.cApnea > 0 && cur.cApnea <= 40) ck.r.apnea = cur.cApnea;
+        ck.bigMv = cur.cLarge; ck.smallMv = cur.cMinor; ck.struggles = struggles;
+        xSemaphoreTake(mux, portMAX_DELAY);
+        buildSummary(ck);
+        xSemaphoreGive(mux);
+        sessionCheckpointSave(ck);
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(400));   // radar updates ~1 Hz — no point hammering the UART

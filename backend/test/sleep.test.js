@@ -73,6 +73,9 @@ test('an unclaimed sensor gets an ack but nothing is stored', async () => {
   const s = await sensor(d.mac);
   assert.deepEqual(await s.send(session({ sid: 3 })), { sid: 3 });
   assert.equal((await db.query('SELECT 1 FROM sleep_sessions WHERE device_id = $1', [d.id])).rowCount, 0);
+  const { rows: [ev] } = await db.query(`SELECT severity, message FROM device_events WHERE device_id = $1 AND type = 'session_received'`, [d.id]);
+  assert.equal(ev.severity, 'warning');
+  assert.match(ev.message, /session dropped: sensor is not in use/);
 });
 
 // ---- grouping into nights (fixed data, Asia/Kolkata = UTC+5:30) --------

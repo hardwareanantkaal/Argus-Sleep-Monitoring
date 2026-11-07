@@ -34,6 +34,7 @@ static QueueHandle_t inQ;
 // ---- events and sessions: sensor task -> loop() ----
 struct EvMsg { char t[12]; uint32_t ts; };
 static QueueHandle_t evQ, sessQ;
+#define CKPT_FILE "/cur.bin"     // the running session, checkpointed by the sensor task
 
 // ================= identity + time =================
 String deviceId() {
@@ -77,6 +78,7 @@ void settingsLoad() {
   g_set.struggle   = p.getInt("struggle", 1);
   g_set.unattended = p.getInt("unatt", 0);
   g_set.unatt_min  = p.getInt("unatt_min", 30);
+  g_set.min_sess   = p.getInt("min_sess", AUTO_SAVE_MIN);
   p.end();
 }
 
@@ -93,6 +95,7 @@ static void settingsApply(const char* json) {
   s.struggle   = d["struggle"]   | s.struggle;
   s.unattended = d["unattended"] | s.unattended;
   s.unatt_min  = d["unatt_min"]  | s.unatt_min;
+  s.min_sess   = constrain((int)(d["min_sess"] | s.min_sess), 1, 240);
   // TODO(hardware): push struggle/unattended to the C1001 once those config
   // calls are checked on a real board (DEVICE-DATA.md ⚠). Stored only for now.
 
@@ -101,9 +104,10 @@ static void settingsApply(const char* json) {
   p.putInt("live_s", s.live_s); p.putInt("idle_s", s.idle_s);
   p.putInt("struggle", s.struggle); p.putInt("unatt", s.unattended);
   p.putInt("unatt_min", s.unatt_min);
+  p.putInt("min_sess", s.min_sess);
   p.end();
   g_set = s;
-  LOG.printf("[MQTT] settings v%d saved (exit %ds, live %ds, idle %ds)\n", s.v, s.exit_s, s.live_s, s.idle_s);
+  LOG.printf("[MQTT] settings v%d saved (exit %ds, live %ds, idle %ds, min_sess %d min)\n", s.v, s.exit_s, s.live_s, s.idle_s, s.min_sess);
   mqttPublish("settings/ack", String("{\"v\":") + v + "}", 1, false);   // also re-acks a duplicate v
 }
 
@@ -125,7 +129,10 @@ static void eventsDrain() {
 }
 
 // ================= sessions: store in flash, publish, delete on ack =================
-void sessionSubmit(const SessionOut& s) { if (sessQ) xQueueSend(sessQ, &s, 0); }
+void sessionSubmit(const SessionOut& s) {
+  if (sessQ && xQueueSend(sessQ, &s, pdMS_TO_TICKS(2000)) != pdTRUE)
+    LOG.println("[SESSION] queue full (no NTP time yet?) — session lost");
+}
 
 static void sessionQueueTrim() {
   File dir = LittleFS.open("/sq");
@@ -147,12 +154,19 @@ static void sessionStore(const SessionOut& s) {
   p.end();
 
   const NightReport& r = s.r;
-  uint32_t end   = r.endTs ? r.endTs : nowEpoch();
-  uint32_t start = r.startTs ? r.startTs : (end ? end - (uint32_t)r.bedMin * 60 : 0);
+  // Only called once NTP is synced (see mqttLoop). If the session ended before
+  // the sync, rebuild start/end from the uptime clock (millis) — never send 0.
+  uint32_t nowE = nowEpoch(), nowMs = millis();
+  uint32_t end   = r.endTs   ? r.endTs   : nowE - (nowMs - r.endMs) / 1000;
+  uint32_t start = r.startTs ? r.startTs : nowE - (nowMs - r.startMs) / 1000;
+  if (!r.startMs && !r.startTs) start = end - (uint32_t)r.bedMin * 60;
+  if (end > nowE) end = nowE;
+  if (start >= end) start = end - max(60, r.bedMin * 60);   // backend: end > start
+  if (end - start > 86400) start = end - 86400;               // backend: <= 24 h
 
   JsonDocument d;
   d["sid"] = sid;           d["start"] = start;          d["end"] = end;
-  d["score"] = r.score;     d["sleep_min"] = r.sleepMin;
+  d["score"] = constrain(r.score, 0, 100);     d["sleep_min"] = r.sleepMin;
   d["wake_min"] = max(0, r.awakeMin - r.oobMin);
   d["light_pct"] = r.sleepMin ? r.lightMin * 100 / r.sleepMin : 0;
   d["deep_pct"]  = r.sleepMin ? r.deepMin  * 100 / r.sleepMin : 0;
@@ -162,8 +176,16 @@ static void sessionStore(const SessionOut& s) {
   d["hr_avg"] = r.avgHR;    d["hr_min"] = s.hrMin;       d["hr_max"] = s.hrMax;
   d["br_avg"] = r.avgBR;    d["br_min"] = s.brMin;       d["br_max"] = s.brMax;
   d["struggles"] = s.struggles;
-  d["hyp"] = s.hyp;         d["fw"] = FW_VERSION;
+  // diagnostics (backend keeps them in sleep_sessions.raw): the radar's movement
+  // range while in bed vs the engine's limits (quiet <= QUIET_RANGE, very quiet <= 4)
+  d["mr_avg"] = r.mrAvg;    d["mr_min"] = r.mrMin;
+  d["quiet_pct"] = r.quietPct; d["vquiet_pct"] = r.vQuietPct; d["bed_off_pct"] = r.bedOffPct;
+  d["hyp"] = s.hyp;         d["epoch_s"] = HYP_EPOCH_S;  d["fw"] = FW_VERSION;
   String out; serializeJson(d, out);
+  if (out.length() >= 4000) {                               // broker limit 4096
+    LOG.printf("[SESSION] #%lu too big (%d B), hypnogram dropped\n", (unsigned long)sid, out.length());
+    d["hyp"] = ""; out = ""; serializeJson(d, out);
+  }
 
   if (fsOk) {
     File f = LittleFS.open(String("/sq/") + sid + ".json", "w");
@@ -276,6 +298,33 @@ void mqttInit() {
   fsOk = LittleFS.begin(true);
   if (fsOk && !LittleFS.exists("/sq")) LittleFS.mkdir("/sq");
   if (!fsOk) LOG.println("[MQTT] LittleFS mount failed — sessions won't survive a reboot");
+
+  // A session was running when power was lost / the ESP rebooted: send its
+  // last checkpoint as a finished session (mqttLoop stores + publishes it).
+  if (fsOk && LittleFS.exists(CKPT_FILE)) {
+    File f = LittleFS.open(CKPT_FILE, "r");
+    SessionOut s;
+    bool ok = f && f.size() == sizeof(s) && f.read((uint8_t*)&s, sizeof(s)) == sizeof(s) &&
+              s.r.startTs && s.r.endTs > s.r.startTs;
+    if (f) f.close();
+    LittleFS.remove(CKPT_FILE);
+    if (ok) {
+      s.r.startMs = s.r.endMs = 0;                 // millis() from before the reboot mean nothing now
+      s.hyp[sizeof(s.hyp) - 1] = 0;
+      xQueueSend(sessQ, &s, 0);
+      LOG.printf("[SESSION] recovered an interrupted session (%d min in bed)\n", s.r.bedMin);
+    }
+  }
+}
+
+void sessionCheckpointSave(const SessionOut& s) {
+  if (!fsOk) return;
+  File f = LittleFS.open(CKPT_FILE, "w");
+  if (f) { f.write((const uint8_t*)&s, sizeof(s)); f.close(); }
+}
+
+void sessionCheckpointClear() {
+  if (fsOk && LittleFS.exists(CKPT_FILE)) LittleFS.remove(CKPT_FILE);
 }
 
 void mqttBegin() {
@@ -312,7 +361,7 @@ static void publishInfo() {
   d["ip"] = WiFi.localIP().toString();
   d["ssid"] = WiFi.SSID();
   d["chip"] = ESP.getChipModel();
-  d["radar"] = radarOk ? 1 : 0;
+  d["radar"] = radarOk ? 1 : 0;                        // generic 1/0 flag, never a model name
   d["rst"] = (r >= 0 && r < (int)(sizeof(rst) / sizeof(rst[0]))) ? rst[r] : "unknown";
   String out; serializeJson(d, out);
   mqttPublish("info", out, 1, true);
@@ -352,8 +401,10 @@ void mqttLoop() {
   uint32_t now = millis();
 
   // finished sessions go to flash first, even while offline
-  SessionOut s;
-  while (xQueueReceive(sessQ, &s, 0) == pdTRUE) sessionStore(s);
+  static SessionOut s;                          // ~1.6 KB (1-minute hypnogram)
+  // ...but only once NTP is synced, so start/end are real Unix UTC
+  // (a session ending before the first sync waits here, max 2 in the queue)
+  if (nowEpoch()) while (xQueueReceive(sessQ, &s, 0) == pdTRUE) sessionStore(s);
   if (!cli) return;
 
   if (justConnected) {

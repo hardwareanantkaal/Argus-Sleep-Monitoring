@@ -26,6 +26,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <esp_ota_ops.h>
 #include "config.h"
 #include "types.h"
 
@@ -82,7 +83,8 @@ static void printTelemetry() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  LOG.println("\n===== " DEVICE_BRAND " booting =====");
+  LOG.printf("\n===== " DEVICE_BRAND " v" FW_VERSION " booting (partition %s) =====\n",
+             esp_ota_get_running_partition()->label);
 
   // 5 quick power-cycles -> setup hotspot (counter cleared after 10 s uptime in loop)
   Preferences bp; bp.begin("boot", false);
@@ -99,7 +101,7 @@ void setup() {
   // we're busy handling WiFi/MQTT. Init itself happens inside sensorTask.
   Serial1.setRxBufferSize(1024);
   Serial1.begin(115200, SERIAL_8N1, RADAR_RX, RADAR_TX);
-  LOG.println("[C1001] init runs in background (radar needs ~10-15 s after power-on)");
+  LOG.println("[RADAR] init runs in background (radar needs ~10-15 s after power-on)");
 
   WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.setHostname(WIFI_HOSTNAME);
   WiFi.setAutoReconnect(true);

@@ -28,9 +28,11 @@
 #define MQTT_URI          "mqtts://argus.ecobridgers.com:8884"   // Contabo prod (8883 = Water Tank)
 #define MQTT_PREFIX       "argus"          // <p> in docs/API.md
 #define MQTT_DUMMY_PASS   "x"              // broker ignores it (MAC-only login), must be non-empty
-#define MQTT_KEEPALIVE_S  60
+#define MQTT_KEEPALIVE_S  15
 #define SESSION_RESEND_MS 60000UL          // re-publish un-acked sessions this often
 #define SESSION_QUEUE_MAX 30               // keep at most this many un-acked sessions in flash
+#define HYP_EPOCH_S       60               // "epoch_s" in the session message (= HYP_BLOCK_MIN*60)
+#define SESSION_CKPT_MS   300000UL         // save the running session to flash this often (power-cut safety)
 
 // ---------------- time sync (NTP) ----------------
 // Timestamps sent to the server are always Unix UTC. The offset below is only
@@ -51,14 +53,21 @@
 // `exit_s` (default 300 s), see DevSettings in types.h.
 #define SLEEP_EPOCH_SEC   60   // one staging decision per minute
 #define ONSET_QUIET_EP     3   // quiet minutes in bed -> counted as asleep
-#define DEEP_AFTER_EP     10   // very-quiet asleep minutes -> deep sleep
+#define DEEP_AFTER_EP      8   // very-quiet asleep minutes -> deep sleep candidate
+#define DEEP_MAX_BLOCK    40   // a deep block longer than this is ended (cycles ~90 min)
+#define DEEP_REFRACT_EP   20   // light minutes required between two deep blocks
+#define DEEP_FIRST_LIGHT  10   // light minutes after sleep onset before deep is allowed
+#define DEEP_TARGET_PCT   22   // above this deep share, deep needs radar AND HR evidence
+#define DEEP_HARD_PCT     30   // above this deep share, no new deep block
 #define QUIET_RANGE        8   // mean movement <= this = quiet minute
 #define WAKE_RANGE        14   // mean movement >= this while asleep = awakening
 #define BURST_RANGE       30   // single-sample movement spike
-#define AUTO_SAVE_MIN     15   // sessions shorter than this (in bed) are discarded
-#define HYP_BLOCK_MIN      5   // hypnogram: one character per 5 minutes
+#define AUTO_SAVE_MIN     25   // default for the server setting min_sess (minutes)
+#define HYP_BLOCK_MIN      1   // hypnogram: one character per minute (2.4.0; was 5)
 
 // ---------------- misc ----------------
-#define FW_VERSION      "2.0.0"   // first MQTT build (Firebase removed)
+// MUST match the version you type when uploading the .bin for OTA, or the
+// device reports the update as failed ("expected vX but running vY").
+#define FW_VERSION      "2.4.0"
 #define SERIAL_PRINT_MS 2000
 #define LOG_RING_BYTES  8192      // recent log kept in RAM for the `logs` command

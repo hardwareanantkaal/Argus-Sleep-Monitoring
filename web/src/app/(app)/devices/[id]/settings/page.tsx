@@ -199,7 +199,7 @@ function WifiFirmware({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail
         {recal === 'done' && <span className="pill ok">Recalibrated ✓</span>}
         {recal === 'failed' && <span className="pill bad">Didn’t recalibrate</span>}
       </div>
-      {placing && <Placement id={d.id} online={d.status.online} recal={recal} onRecalibrate={recalibrate} />}
+      {placing && <Placement id={d.id} online={d.status.online} />}
     </div>
   );
 }
