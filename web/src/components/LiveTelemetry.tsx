@@ -9,8 +9,10 @@ import { Legend } from './ui';
 import { dur, minutesIn, timeIn, uptime } from '@/lib/format';
 import type { LiveValues } from '@/lib/types';
 
-const LEVEL = ['None', 'Low', 'Medium', 'High'];
-const RATING = ['—', 'Poor', 'Fair', 'Good'];
+// Sensor 'sleep abnormality' (0x84 0x8E): a reason, not a level. 3 = none.
+const LEVEL = ['Slept < 4 h', 'Slept > 12 h', 'Long absence', 'None'];
+// Sensor quality rating (0x84 0x90): 0 none, 1 good, 2 general, 3 poor.
+const RATING = ['—', 'Good', 'General', 'Poor'];
 const STRUGGLE: [string, string][] = [['None', ''], ['Normal', 'ok'], ['Abnormal', 'bad']];
 const STAGE = ['Deep', 'Light', 'Awake', '—'];
 export const STAGE_LETTER = ['D', 'L', 'A', 'O'];
@@ -25,9 +27,9 @@ export function CompositeCard({ lv, fw, rssi }: { lv: LiveValues | null; fw?: st
       <div className="ch"><div className="t"><h2>Composite Telemetry &amp; Firmware Diagnostics</h2><span className="xs muted">From the Sensor, live only</span></div></div>
       {c ? <div className="g2" style={{ gap: '9px 32px', marginBottom: 14 }}>
         <dl className="kv">
-          <dt>Disturbance</dt><dd>{LEVEL[c.dis] ?? c.dis} <span className="muted xs">({c.dis}/3)</span></dd>
+          <dt>Disturbance</dt><dd>{LEVEL[c.dis] ?? c.dis}</dd>
           <dt>Struggle</dt><dd>{STRUGGLE[c.abn] ? <span className={`pill ${STRUGGLE[c.abn][1]}`}>{c.abn === 2 && '⚠ '}{STRUGGLE[c.abn][0]}</span> : c.abn}</dd>
-          <dt>Quality rating</dt><dd>{RATING[c.rat] ?? c.rat} <span className="muted xs">({c.rat}/3)</span></dd>
+          <dt>Quality rating</dt><dd>{RATING[c.rat] ?? c.rat}</dd>
           <dt>Breath avg</dt><dd className="num">{c.resp} /min</dd>
           <dt>Heart avg</dt><dd className="num">{c.hr} bpm</dd>
         </dl>

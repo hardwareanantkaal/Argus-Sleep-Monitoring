@@ -22,8 +22,10 @@ import type { DeviceDetail, LiveValues } from '@/lib/types';
 
 const KEEP = 40; // points in each sparkline
 const MOTION = ['None', 'Still', 'Active'];
-const LEVEL = ['None', 'Low', 'Medium', 'High'];
-const RATING = ['—', 'Poor', 'Fair', 'Good'];
+// Sensor 'sleep abnormality' (0x84 0x8E): a reason, not a level. 3 = none.
+const LEVEL = ['Slept < 4 h', 'Slept > 12 h', 'Long absence', 'None'];
+// Sensor quality rating (0x84 0x90): 0 none, 1 good, 2 general, 3 poor.
+const RATING = ['—', 'Good', 'General', 'Poor'];
 const STRUGGLE: [string, string][] = [['None', ''], ['Normal', 'ok'], ['Abnormal', 'bad']];
 const STAGE_TONE: Record<number, string> = { 0: 'violet', 1: 'cyan', 2: 'amber' };
 
@@ -93,11 +95,11 @@ export default function LivePage() {
             <LiveHypnogram lv={lv} tz={d.tz} stages={stages.current} />
           </Section>
 
-          <Section title="Composite Telemetry & Diagnostics" sub="The radar's own rolling values for this session">
+          <Section title="Composite Telemetry & Diagnostics" sub={lv?.cmp && !lv.cmp.resp && !lv.cmp.hr ? "Collecting: the sensor updates these about every 10 minutes of sleep" : "The sensor's own rolling values, updated about every 10 minutes"}>
             <Composite lv={lv} />
           </Section>
 
-          <Section title="Nightly Session" sub="The session running now, plus the radar's night statistics">
+          <Section title="Nightly Session" sub={lv?.ngt && !lv.ngt.sc ? "Live session now. The sensor's night statistics arrive when the sleep ends (bed exit)" : "The session running now, plus the sensor's night statistics"}>
             <Nightly d={d} lv={lv} />
           </Section>
 
@@ -180,7 +182,8 @@ function LiveCards({ lv, online, hr: hrs, br: brs }: { lv: LiveValues | null; on
   const bs = BREATH_STATE[lv?.bs ?? 4] || BREATH_STATE[4];
   const motion = lv?.mv == null ? '—' : MOTION[lv.mv] ?? '—';
   const inBed = lv?.bed === 1;
-  const stage = inBed && lv ? STAGE_NAME[lv.ss] ?? '—' : '—';
+  const st = lv?.sess ? lv.sess.st : lv?.ss;   // engine stage during a session, else the sensor's
+  const stage = inBed && lv && st != null ? STAGE_NAME[st] ?? '—' : '—';
   return (
     <div className="dash-grid4">
       <div className="dcard">
@@ -221,7 +224,7 @@ function LiveCards({ lv, online, hr: hrs, br: brs }: { lv: LiveValues | null; on
       </div>
 
       <div className="dcard">
-        <CardHead icon="moon" tone="violet" title="Current Sleep Stage" chip={stage} chipTone={inBed && lv ? STAGE_TONE[lv.ss] : ''} />
+        <CardHead icon="moon" tone="violet" title="Current Sleep Stage" chip={stage} chipTone={inBed && lv && st != null ? STAGE_TONE[st] : ''} />
         <div className="big">{stage}</div>
         <span className="sub">{inBed ? 'From the radar, live' : 'Shown while someone is in bed'} · no REM on this sensor</span>
       </div>
@@ -256,8 +259,8 @@ function Composite({ lv }: { lv: LiveValues | null }) {
   return <>
     <div className="dash-grid3">
       <div className="dcard">
-        <CardHead icon="alert" tone="rose" title="Sleep Disturbance" chip={c.dis ? 'Disturbance' : 'Normal'} chipTone={c.dis ? 'rose' : 'emerald'} />
-        <div className="big t-rose">{LEVEL[c.dis] ?? c.dis}</div><span className="sub">Level {c.dis} of 3</span>
+        <CardHead icon="alert" tone="rose" title="Sleep Disturbance" chip={c.dis === 3 ? 'Normal' : 'Alert'} chipTone={c.dis === 3 ? 'emerald' : 'rose'} />
+        <div className={`big ${c.dis === 3 ? 't-emerald' : 't-rose'}`}>{LEVEL[c.dis] ?? c.dis}</div><span className="sub">Sleep abnormality reported by the sensor</span>
       </div>
       <div className="dcard">
         <CardHead icon="person" tone="amber" title="Struggle Monitor" chip={st[0]} chipTone={st[1] === 'bad' ? 'rose' : st[1] === 'ok' ? 'emerald' : ''} />
@@ -265,7 +268,7 @@ function Composite({ lv }: { lv: LiveValues | null }) {
       </div>
       <div className="dcard">
         <CardHead icon="check" tone="cyan" title="Quality Rating" chip={RATING[c.rat] ?? c.rat} chipTone="cyan" />
-        <div className="big t-cyan">{RATING[c.rat] ?? c.rat}</div><span className="sub">Rated by the radar, {c.rat} of 3</span>
+        <div className="big t-cyan">{RATING[c.rat] ?? c.rat}</div><span className="sub">{c.rat ? 'Rated by the sensor' : 'Rated by the sensor at the end of sleep'}</span>
       </div>
     </div>
     <div className="dash-stats">
