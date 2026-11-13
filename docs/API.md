@@ -310,7 +310,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 
 How to use it: [MANUFACTURING.md](MANUFACTURING.md).
 
-**Who uses it:** staff with `factory.flash` and/or `factory.monitor` (Manufacturing and Developer by default; the Owner has every permission). The Factory log also opens with `devices.view`.
+**Who uses it:** staff with `factory.flash` and/or `factory.monitor` (Manufacturing and Developer by default; the Owner has every permission). The run list (9.28–9.29) also opens with `devices.view`; the station uses it for a board's history (there is no separate Factory log screen).
 
 **Where the work happens:** flashing and the serial monitor run **in the browser** on the PC the board is plugged into (Chrome or Edge, Web Serial + `esptool-js`). The backend never touches USB. It hands out the factory image, records each board's result and lists the results.
 
@@ -324,7 +324,7 @@ How to use it: [MANUFACTURING.md](MANUFACTURING.md).
 | 9.22 | PUT | `/admin/firmware/:id/factory-image` | `firmware.upload` | multipart `factoryFile`, `flashSize?` → release. Checks: size ≤ `flashSize`; byte `0xE9` at `0x1000` (ESP32, S2) or `0x0` (S3, C3, C6), else `422 NOT_FACTORY_IMAGE`; **the app at `0x10000` must be byte-for-byte the release's OTA `.bin`**, else `422 IMAGE_MISMATCH` (stops a 2.4.1 image being uploaded as 2.4.0). ESP8266 → `422 NOT_NEEDED`. |
 | 9.23 | DELETE | `/admin/firmware/:id/factory-image` | `firmware.upload` | → `204`. Also clears the factory default. |
 
-### Station and factory log (screens: Station, Factory log)
+### Station and bench runs (screen: Manufacturing)
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
 | 9.24 | GET | `/admin/factory/releases?chip` | `factory.flash` | → `{items: [{id, version, channel, chipModel, notes, isDefault, factory: {fileSize, sha256, flashSize, address: 0, sameAsOta}}]}`. Only releases with a factory image, the default first. |
@@ -482,8 +482,7 @@ These are fields the old Firebase site showed. **Live only, never stored.**
 | Register by USB | 8.4, 8.2 (`registeredFrom=today`) |
 | Customers / detail | 7.1–7.5 |
 | Firmware & OTA | 9.1–9.8, 9.22–9.23, socket `rollout:progress` |
-| Manufacturing station | 9.24–9.27, 8.4 (`factoryRunId`) |
-| Factory log | 9.28–9.29 |
+| Manufacturing (Flash · Serial monitor & test · Register tabs) | 9.24–9.29, 8.4 (`factoryRunId`) |
 | Team & permissions | 9.10–9.18 |
 | Audit log | 9.19 |
 | Sleep rules | 9.20, 9.21 |

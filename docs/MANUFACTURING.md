@@ -28,27 +28,26 @@ Upload limit through Nginx is 8 MB per request: fine for 4 MB-flash boards (1.3 
 
 ## 2. Factory team: the Manufacturing screen
 
-Menu **Manufacturing**. Everything for one board is on this one screen: **1 · Board and code**, **2 · Serial log**, **3 · Checks** and **4 · Register**. Close Arduino IDE and any serial monitor first.
+Menu **Manufacturing**. First press **Connect board** (top card) and pick the board's COM port; close Arduino IDE first. The card then shows the chip, the MAC and what was done to the board. Then use any of the three tabs, in any order:
 
-1. **Board and code.** Plug the board in, press **Connect board** and pick the COM port. The screen reads the chip and MAC and shows whether the board is new, was tested before, or is already registered. Type the bench name once (e.g. "Bench 2"); the PC remembers it. The default release is selected: press **Erase and flash**. The image downloads once per release (sha256 checked) and is written from `0x0`, which also erases old Wi-Fi settings and data (about 30–60 s for 4 MB). **Skip, test only** tests without flashing.
-2. **Serial log.** After flashing, the board is reset and its output appears live at 115200 baud, with the live values (radar, presence, heart rate, heap…) under it. You can pause, clear, reset the board or send a line.
-3. **Checks** tick by themselves from the firmware's own prints:
+- **Flash firmware.** The default release for that chip is selected. **Erase and flash** writes the whole image from `0x0` (also erases old Wi-Fi settings and data), about 30–60 s for 4 MB. The image downloads once per release (sha256 checked).
+- **Serial monitor & test.** **Open serial monitor** resets the board and shows its output at 115200 baud, with live values (radar, presence, heart rate, heap…). The tests tick by themselves:
 
-   | Check | Pass when | Limit |
-   |---|---|---|
-   | Boots | `===== … vX.Y.Z booting` appears | 10 s |
-   | Firmware version | that version = the flashed release | — |
-   | Device ID | `[Argus] deviceId:` = the MAC read over USB | 15 s |
-   | Free memory | `heap:` in the telemetry ≥ 40 000 | 25 s |
-   | Radar link | `[RADAR] link up` or `radar:OK` | 60 s |
-   | Presence | press **Start**, then sit or wave; `presence:1` appears | 30 s (can be skipped) |
+  | Test | Pass when | Limit |
+  |---|---|---|
+  | Boots | `===== … vX.Y.Z booting` appears | 10 s |
+  | Firmware version | that version = the flashed release | — |
+  | Device ID | `[Argus] deviceId:` = the MAC read over USB | 15 s |
+  | Free memory | `heap:` in the telemetry ≥ 40 000 | 25 s |
+  | Radar link | `[RADAR] link up` or `radar:OK` | 60 s |
+  | Presence | press **Start**, then sit or wave; `presence:1` appears | 30 s (can be skipped) |
 
-   A crash line (`Guru Meditation`, `Backtrace:`, brownout) fails the board. **Pass** unlocks when every check is green; **Fail** and **Abort** are always there. The last 16 KB of the serial log is saved with the result. Unplugging the board during a test saves it as **aborted**.
-4. **Register** unlocks as soon as **the code is flashed and at least one check has passed**; the test can keep running. Choose the hardware model and batch, press **Register and make sticker**: you get the serial, the claim code (shown only once) and the QR; **Print sticker** prints only the label. Finish the test with Pass or Fail, then press **Next board** (top right).
+  A crash line (`Guru Meditation`, `Backtrace:`, brownout) fails the board.
+- **Register.** Choose the hardware model and batch, press **Register and make sticker**: you get the serial, the claim code (shown only once) and the QR; **Print sticker** prints only the label. If the board was flashed and at least one test passed on this screen, the test result is linked to the device.
 
-A board without USB, or many at once: the link at the bottom of the Register card opens the old screen (type the MAC or upload a CSV).
+**Next board** (top card) saves the test result with the last 16 KB of the serial log (pass if every test passed, fail if one failed) and clears the screen. Unplugging the board saves it as aborted.
 
-The **Factory log** shows every board: counts per day and per person, the failure reasons, and each board's checks and serial log.
+A board without USB, or many at once: the Register tab links to the old screen (type the MAC or upload a CSV).
 
 ## 3. Who can do what
 
@@ -58,7 +57,6 @@ The **Factory log** shows every board: counts per day and per person, the failur
 | `factory.monitor` | Station: serial monitor + checks | ✓ | ✓ | ✓ | |
 | `devices.register` | Register + sticker | ✓ | ✓ | ✓ | |
 | `firmware.upload` | Upload, factory image, Make default | ✓ | ✓ | | |
-| `devices.view` | Factory log | ✓ | ✓ | ✓ | ✓ |
 
 Change these on **Team**.
 
@@ -73,4 +71,4 @@ cd web && npm test                   # bench checks, no browser or board needed
 
 - **Flashing and the serial monitor have not been tried on a real board yet.** If a cheap USB cable fails at high speed, lower `baudrate` in `web/src/lib/serial.ts` from 921600 to 460800.
 - The serial format is still provisional until D8.
-- The Factory log reloads when you change a filter (no live socket event yet).
+- Bench results are saved on the server (API §9b) but have no screen of their own; the station uses them to show whether a board was tested or registered before.

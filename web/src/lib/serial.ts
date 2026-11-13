@@ -13,8 +13,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface Board { port: SerialPortLike; transport: any; loader: Loader; desc: string; chip: string; mac: string }
 
-export async function connectBoard(log: (l: string) => void): Promise<Board> {
-  const port = await (navigator as any).serial.requestPort();
+/** Bootloader mode + chip + MAC. Pass `port` to reuse a port already picked (no picker shown). */
+export async function connectBoard(log: (l: string) => void, reuse?: SerialPortLike): Promise<Board> {
+  const port = reuse || await (navigator as any).serial.requestPort();
   const { ESPLoader, Transport } = await import('esptool-js');
   const transport = new Transport(port, false);
   const loader = new ESPLoader({
