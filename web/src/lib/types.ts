@@ -97,7 +97,7 @@ export interface NightDetail extends NightCard {
   wakeUps: number | null;
   exits: number | null;
   oobMin: number | null;
-  sessions: { start: string; end: string }[] | null;
+  sessions: { id?: string; start: string; end: string }[] | null;
   epochS: number;
   hyp: string | null;
   hr: { avg: number; min: number; max: number } | null;

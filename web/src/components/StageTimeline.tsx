@@ -33,7 +33,27 @@ function runsOf(hyp: string): Run[] {
   return out;
 }
 
-export function StageTimeline({ hyp, startMin, epochMin = 5, startIso, tz, label = 'Sleep stages through the session' }: { hyp: string; startMin: number; epochMin?: number; startIso?: string; tz?: string; label?: string }) {
+/** Display smoothing for 1-minute data: a blip shorter than `maxMin` minutes
+ *  between two stretches of the SAME stage takes that stage (L L A L L -> L L L L L).
+ *  Drawing only; totals always come from the stored data. Out of bed is never changed. */
+export function smoothHyp(hyp: string, epochMin: number, maxMin = 2): string {
+  const maxN = Math.floor(maxMin / epochMin);
+  if (maxN < 1) return hyp;
+  const r = runsOf(hyp);
+  for (let k = 1; k < r.length - 1; k++) {
+    const a = r[k - 1], b = r[k], c = r[k + 1];
+    if (b.st !== 'O' && a.st === c.st && a.st !== 'O' && b.j - b.i <= maxN) b.st = a.st;
+  }
+  return r.map((x) => x.st.repeat(x.j - x.i)).join('');
+}
+
+/** The stage changes of a hypnogram: one row per stretch (stage, start offset, minutes). */
+export function stageChanges(hyp: string, epochMin: number) {
+  return runsOf(hyp).map((r) => ({ stage: NAME[r.st], code: r.st, startMin: r.i * epochMin, minutes: (r.j - r.i) * epochMin }));
+}
+
+export function StageTimeline({ hyp: rawHyp, startMin, epochMin = 5, startIso, tz, label = 'Sleep stages through the session', smooth = true }: { hyp: string; startMin: number; epochMin?: number; startIso?: string; tz?: string; label?: string; smooth?: boolean }) {
+  const hyp = smooth ? smoothHyp(rawHyp, epochMin) : rawHyp;
   const box = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; idx: number } | null>(null);
   // Draw at the real pixel width (1 unit = 1 px), so labels stay readable on a phone
@@ -67,12 +87,14 @@ export function StageTimeline({ hyp, startMin, epochMin = 5, startIso, tz, label
   for (const r of runs) { if (r.st === 'O') flush(); else cur.push(r); }
   flush();
 
-  // Time ticks: the smallest step that keeps labels at least 58 px apart
+  // Time labels at the STAGE CHANGES (like the old dashboard: 12:32, 13:03, 13:40 …),
+  // skipping any that would sit closer than 46 px to the previous label, plus the end.
   const perMin = (W - L - R) / span;
-  const step = [5, 10, 15, 30, 60, 120, 180, 240].find((s) => s * perMin >= 58) ?? 360;
   const ticks: number[] = [];
-  for (let m = Math.ceil(startMin / step) * step; m <= startMin + span; m += step) ticks.push(m);
-  if (!ticks.length || (ticks[0] - startMin) * perMin > 58) ticks.unshift(startMin);
+  const addTick = (m: number) => { if (!ticks.length || (m - ticks[ticks.length - 1]) * perMin >= 46) ticks.push(m); };
+  for (const r of runs) addTick(startMin + r.i * epochMin);
+  const endM = startMin + span;
+  if (ticks.length && (endM - ticks[ticks.length - 1]) * perMin >= 46) ticks.push(endM);
 
   const run = hover ? runs.find((r) => hover.idx >= r.i && hover.idx < r.j) : null;
   const onMove = (e: React.PointerEvent) => {
@@ -112,9 +134,13 @@ export function StageTimeline({ hyp, startMin, epochMin = 5, startIso, tz, label
         {runs.filter((r) => r.st !== 'O').map((r) => (
           <line key={`s${r.i}`} x1={X(r.i)} x2={X(r.j)} y1={ROW_Y[r.st]} y2={ROW_Y[r.st]} stroke={COL[r.st]} strokeWidth={3.5} strokeLinecap="round" />
         ))}
-        {runs.filter((r) => r.st !== 'O' && X(r.j) - X(r.i) >= 14 && runs.length * 14 < W).map((r) => (
-          <circle key={`m${r.i}`} cx={X(r.i)} cy={ROW_Y[r.st]} r={3.5} fill="var(--panel)" stroke={COL[r.st]} strokeWidth={2} />
+        {/* a dot at every stage change (and the end), unless dots would overlap */}
+        {runs.filter((r, k) => r.st !== 'O' && (k === 0 || X(r.i) - X(runs[k - 1].i) >= 7)).map((r) => (
+          <circle key={`m${r.i}`} cx={X(r.i)} cy={ROW_Y[r.st]} r={4} fill={COL[r.st]} stroke="var(--panel)" strokeWidth={1.5} />
         ))}
+        {runs.length > 0 && runs[runs.length - 1].st !== 'O' && (
+          <circle cx={X(n)} cy={ROW_Y[runs[runs.length - 1].st]} r={4} fill={COL[runs[runs.length - 1].st]} stroke="var(--panel)" strokeWidth={1.5} />
+        )}
         {ticks.map((m) => {
           const x = L + ((W - L - R) * (m - startMin)) / span;
           return <g key={m}><line className="stl-grid" x1={x} x2={x} y1={BASE} y2={BASE + 5} /><text x={x} y={H - 10} textAnchor="middle" className="stl-tick">{hm(m)}</text></g>;

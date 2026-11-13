@@ -296,6 +296,22 @@ router.get('/:id/nights/:sleepDate', device('history.view'), async (req, res) =>
   res.json(sleep.nightDetail(n));
 });
 
+// 4.3 Delete one stored session (13 Nov, "session management" like the old
+// site). Owner only; on a device without an owner (vendor in use), settings.edit.
+router.delete('/:id/sessions/:sessionId', device(), async (req, res) => {
+  const d = req.device;
+  const may = d.owner_id ? d.owner_id === req.user.id : d.perms.includes('settings.edit');
+  if (!may) throw E.forbidden('FORBIDDEN', 'Only the owner can delete sleep history');
+  const sessionId = parse(z.object({ sessionId: z.string().regex(/^\d{1,18}$/, 'Bad session id') }), req.params).sessionId;
+  const { rows: [s] } = await db.query(
+    'DELETE FROM sleep_sessions WHERE id = $1 AND device_id = $2 RETURNING started_at, ended_at', [sessionId, d.id]);
+  if (!s) throw E.notFound('Session not found');
+  const min = Math.round((s.ended_at - s.started_at) / 60000);
+  await audit(req, { action: 'device.session.delete', targetType: 'device', targetId: d.id,
+    targetLabel: d.serial_no, detail: `${new Date(s.started_at).toISOString()} (${min} min)` });
+  res.status(204).end();
+});
+
 // Everyone who can access a device (to update their sockets after a change).
 async function accessUsers(deviceId, q = db) {
   const { rows } = await q.query('SELECT DISTINCT user_id FROM device_user_permissions WHERE device_id = $1', [deviceId]);

@@ -253,8 +253,11 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
               // CLEARLY up, real movement, or 2 not-very-quiet minutes in a row.
               bool hrUp = epHR > 0 && base > 0 && epHR >= base + max(3, base / 20);
               deepBad = vQuiet ? 0 : deepBad + 1;
-              if (!quiet || deepBad >= 2 || hrUp || deepRun >= DEEP_MAX_BLOCK ||
-                  (!radarDeep && ssVote[1] * 2 > nSamp && deepRun >= 20)) {
+              // 2.5.2: a deep block lasts at least DEEP_MIN_BLOCK minutes unless the
+              // person really moves (!quiet) — no more 1-3 minute deep fragments.
+              bool softEnd = deepBad >= 2 || hrUp ||
+                             (!radarDeep && ssVote[1] * 2 > nSamp && deepRun >= 20);
+              if (!quiet || deepRun >= DEEP_MAX_BLOCK || (softEnd && deepRun >= DEEP_MIN_BLOCK)) {
                 stage = 1; lightSinceDeep = 0; deepRun = 0; deepBad = 0;
                 LOG.println(F("[SLEEP] deep -> light"));
               }

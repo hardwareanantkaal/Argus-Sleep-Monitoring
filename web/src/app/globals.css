@@ -408,6 +408,7 @@ a.btn{text-decoration:none}
 .sess-score b{font-family:var(--display);font-size:38px;font-weight:800;color:var(--cyan);line-height:1}
 .sess-score span{font-size:13px;color:var(--muted)}
 .btn.tint-emerald{background:color-mix(in srgb,var(--emerald) 12%,transparent);color:var(--emerald);border-color:color-mix(in srgb,var(--emerald) 40%,transparent)}
+.btn.tint-rose{background:color-mix(in srgb,var(--rose) 12%,transparent);color:var(--rose);border-color:color-mix(in srgb,var(--rose) 40%,transparent)}
 @media (max-width:980px){.dash-tiles5{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:560px){.dash-tiles5{grid-template-columns:repeat(2,minmax(0,1fr))}.sess-score{align-items:flex-start;text-align:left}}
 

@@ -177,6 +177,27 @@ test('history needs history.view; the device card shows last night', async () =>
   assert.equal((await owner.c.get(`/devices/${d.id}/nights?from=2026-02-30`)).status, 400);
 });
 
+test('session ids in night detail; only the owner can delete a session', async () => {
+  const owner = await registered();
+  const fam = await registered();
+  const d = await insertDevice({ ownerId: owner.user.id });
+  await db.query('INSERT INTO device_shares (device_id, user_id) VALUES ($1, $2)', [d.id, fam.user.id]);
+  for (const p of ['history.view', 'settings.edit']) await db.query('INSERT INTO device_share_permissions VALUES ($1, $2, $3)', [d.id, fam.user.id, p]);
+  await db.query(
+    `INSERT INTO sleep_sessions (device_id, sid, started_at, ended_at, timezone, score, sleep_min, hyp, epoch_s, raw)
+     VALUES ($1, 1, '2026-10-20 17:00Z', '2026-10-21 01:00Z', 'Asia/Kolkata', 80, 400, 'LLDDL', 60, '{}')`, [d.id]);
+  const night = (await owner.c.get(`/devices/${d.id}/nights/2026-10-20`)).body;
+  const sid = night.sessions[0].id;
+  assert.ok(sid, 'session id in the night detail');
+  assert.equal((await fam.c.del(`/devices/${d.id}/sessions/${sid}`)).status, 403, 'a family member cannot delete');
+  assert.equal((await owner.c.del(`/devices/${d.id}/sessions/abc`)).status, 400);
+  assert.equal((await owner.c.del(`/devices/${d.id}/sessions/${sid}`)).status, 204);
+  assert.equal((await owner.c.del(`/devices/${d.id}/sessions/${sid}`)).status, 404, 'already gone');
+  assert.equal((await owner.c.get(`/devices/${d.id}/nights/2026-10-20`)).status, 404);
+  const { rows: [a] } = await db.query("SELECT action FROM audit_log WHERE action = 'device.session.delete' ORDER BY id DESC LIMIT 1");
+  assert.equal(a.action, 'device.session.delete');
+});
+
 test('a date with only naps has no main sleep (owner decision 4 Nov)', async () => {
   const { owner, d } = await nightsFixture();
   const r = await owner.c.get(`/devices/${d.id}/nights?from=2026-10-10&to=2026-10-14`);

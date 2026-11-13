@@ -188,7 +188,7 @@ function summarize(group) {
     wakeUps,
     exits: sumOf(group, 'exits'),
     oobMin: Math.round((sumOf(group, 'oob_min') || 0) + gapMin),
-    sessions: group.map((s) => ({ start: s.started_at, end: s.ended_at })),
+    sessions: group.map((s) => ({ id: s.id, start: s.started_at, end: s.ended_at })),
     epochS, hyp,
     hr: { avg: weighted(group, 'hr_avg'), min: minOf(group, 'hr_min'), max: maxOf(group, 'hr_max') },
     br: { avg: weighted(group, 'br_avg', 1), min: minOf(group, 'br_min'), max: maxOf(group, 'br_max') },

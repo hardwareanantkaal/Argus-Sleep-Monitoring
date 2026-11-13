@@ -270,7 +270,7 @@ export function nightsFor(deviceId: string, tz: string): NightDetail[] {
       stageMin: { deep: cnt.D * 5, light: cnt.L * 5, awake: cnt.A * 5, outOfBed: cnt.O * 5 },
       sessionCount: ses.length, naps,
       efficiencyPct: Math.round((total / span) * 100), wakeUps: wake, exits, oobMin: cnt.O * 5,
-      sessions: ses.map((s) => ({ start: iso(s.s), end: iso(s.e) })), epochS: 300, hyp,
+      sessions: ses.map((s, k) => ({ id: `${sleepDate.replace(/-/g, "")}${k + 1}`, start: iso(s.s), end: iso(s.e) })), epochS: 300, hyp,
       hr: { avg: hrAvg, min: hrAvg - 6 - Math.floor(r() * 3), max: hrAvg + 14 + Math.floor(r() * 10) },
       br: { avg: brAvg, min: brAvg - 3, max: brAvg + 4 + Math.floor(r() * 3) },
       turns: 9 + Math.floor(r() * 18), bigMvPct: 3 + Math.floor(r() * 6), smallMvPct: 14 + Math.floor(r() * 12),

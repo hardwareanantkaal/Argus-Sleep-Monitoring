@@ -298,6 +298,17 @@ on('GET', '/devices/([^/]+)/nights/(\\d{4}-\\d{2}-\\d{2})', (m) => {
   if (!n) fail(404, 'NOT_FOUND', 'No sleep recorded on that date'); // a nap-only date returns hasMainSleep: false
   return n;
 });
+// 4.3 Delete a session (owner only). The mock drops the session's whole night (enough for a demo).
+on('DELETE', '/devices/([^/]+)/sessions/(\\d+)', (m) => {
+  const u = me(); const d = device(u, m[1], 'history.view');
+  if (d.ownerId !== u.id) fail(403, 'FORBIDDEN', 'Only the owner can delete sleep history');
+  const all = nightsFor(d.id, d.tz!);
+  const k = all.findIndex((x) => (x.sessions || []).some((s) => s.id === m[2]));
+  if (k < 0) fail(404, 'NOT_FOUND', 'Session not found');
+  all.splice(k, 1);
+  audit(u, 'device.session.delete', 'device', d.serial);
+  return null;
+});
 
 /* ---------- 5. sharing ---------- */
 on('GET', '/devices/([^/]+)/shares', (m) => {
