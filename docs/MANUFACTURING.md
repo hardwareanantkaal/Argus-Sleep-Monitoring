@@ -26,13 +26,13 @@ Then press **Make default** in the *Factory image* column. The station picks tha
 
 Upload limit through Nginx is 8 MB per request: fine for 4 MB-flash boards (1.3 MB + 4 MB). For 8 or 16 MB flash, raise `client_max_body_size` in `deploy/nginx/gateway.conf` and `host-argus.conf`.
 
-## 2. Factory team: the station, step by step
+## 2. Factory team: the Manufacturing screen
 
-Menu **Station** (Manufacturing role). Close Arduino IDE and any serial monitor first.
+Menu **Manufacturing**. Everything for one board is on this one screen: **1 · Board and code**, **2 · Serial log**, **3 · Checks** and **4 · Register**. Close Arduino IDE and any serial monitor first.
 
-1. **Connect.** Plug the board in, press **Connect board** and pick the COM port. The station reads the chip and MAC and shows whether the board is new, was tested before, or is already registered. Type the bench name once (e.g. "Bench 2"); the PC remembers it.
-2. **Flash.** The default release is selected. Press **Erase and flash**. The image downloads once per release (sha256 checked) and is written from `0x0`, which also erases old Wi-Fi settings and data. An ESP32 4 MB image takes about 30–60 s. If the board already has the right firmware, **Skip, test only** goes straight to testing.
-3. **Test.** The board is reset and the serial monitor opens at 115200 baud. The checks tick by themselves from the firmware's own prints:
+1. **Board and code.** Plug the board in, press **Connect board** and pick the COM port. The screen reads the chip and MAC and shows whether the board is new, was tested before, or is already registered. Type the bench name once (e.g. "Bench 2"); the PC remembers it. The default release is selected: press **Erase and flash**. The image downloads once per release (sha256 checked) and is written from `0x0`, which also erases old Wi-Fi settings and data (about 30–60 s for 4 MB). **Skip, test only** tests without flashing.
+2. **Serial log.** After flashing, the board is reset and its output appears live at 115200 baud, with the live values (radar, presence, heart rate, heap…) under it. You can pause, clear, reset the board or send a line.
+3. **Checks** tick by themselves from the firmware's own prints:
 
    | Check | Pass when | Limit |
    |---|---|---|
@@ -43,8 +43,10 @@ Menu **Station** (Manufacturing role). Close Arduino IDE and any serial monitor 
    | Radar link | `[RADAR] link up` or `radar:OK` | 60 s |
    | Presence | press **Start**, then sit or wave; `presence:1` appears | 30 s (can be skipped) |
 
-   A crash line (`Guru Meditation`, `Backtrace:`, brownout) fails the board. **Pass** unlocks when every check is green; **Fail** and **Abort** are always there. The last 16 KB of serial output is saved with the result. Unplugging the board during a test saves it as **aborted**.
-4. **Register.** After a pass: choose the hardware model and batch, press **Register and make sticker**. You get the serial, the claim code (shown only once) and the QR; **Print sticker** prints only the label. Then **Next board**.
+   A crash line (`Guru Meditation`, `Backtrace:`, brownout) fails the board. **Pass** unlocks when every check is green; **Fail** and **Abort** are always there. The last 16 KB of the serial log is saved with the result. Unplugging the board during a test saves it as **aborted**.
+4. **Register** unlocks as soon as **the code is flashed and at least one check has passed**; the test can keep running. Choose the hardware model and batch, press **Register and make sticker**: you get the serial, the claim code (shown only once) and the QR; **Print sticker** prints only the label. Finish the test with Pass or Fail, then press **Next board** (top right).
+
+A board without USB, or many at once: the link at the bottom of the Register card opens the old screen (type the MAC or upload a CSV).
 
 The **Factory log** shows every board: counts per day and per person, the failure reasons, and each board's checks and serial log.
 

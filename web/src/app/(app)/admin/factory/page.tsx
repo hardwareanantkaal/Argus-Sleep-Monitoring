@@ -64,7 +64,7 @@ function Inner() {
   return (
     <div className="wrap">
       <Head title="Factory log" sub="Every board flashed or tested on a bench, newest first. Read-only."
-        actions={can('factory.monitor') && <Link className="btn" href="/admin/station"><Icon name="bolt" /> Open the station</Link>} />
+        actions={can('factory.monitor') && <Link className="btn" href="/admin/station"><Icon name="bolt" /> Open Manufacturing</Link>} />
       {err && <p className="err" role="alert">{err}</p>}
       {s && <div className="tiles">
         <div className="card tile"><span className="label">Passed</span><div className="v" style={{ color: 'var(--ok)' }}>{s.pass}</div><span className="xs muted">{RANGES.find((r) => r[0] === range)?.[1]}</span></div>

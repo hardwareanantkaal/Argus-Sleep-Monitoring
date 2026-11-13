@@ -24,9 +24,11 @@ export const CUSTOMER_NAV: NavItem[] = [
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Dashboard', icon: 'grid' },
   { href: '/admin/devices', label: 'Devices', icon: 'chip', perm: 'devices.view' },
+  // Manufacturing = flash + serial log + register on one screen; it replaces Register in the menu for
+  // people who have it (the typed-MAC / CSV register screen is linked from there).
+  { href: '/admin/station', label: 'Manufacturing', icon: 'bolt', perm: 'factory.monitor' },
   { href: '/admin/register', label: 'Register', icon: 'usb', perm: 'devices.register' },
   { href: '/admin/customers', label: 'Customers', icon: 'users', perm: 'customers.view' },
-  { href: '/admin/station', label: 'Station', icon: 'bolt', perm: 'factory.monitor' },
   { href: '/admin/factory', label: 'Factory log', icon: 'list', perm: 'devices.view' },
   { href: '/admin/firmware', label: 'Firmware', icon: 'upload', perm: 'firmware.view' },
   { href: '/admin/team', label: 'Team', icon: 'shield', perm: 'team.manage' },
@@ -48,7 +50,9 @@ export const isStaff = (u: User) => u.kind === 'admin';
 export const homeFor = (u: User) => (isStaff(u) ? '/admin' : u.vendor ? '/vendor' : '/devices');
 
 function adminItems(u: User) {
-  return isStaff(u) ? ADMIN_NAV.filter((n) => !n.perm || u.permissions.includes(n.perm)) : [];
+  if (!isStaff(u)) return [];
+  const has = (p?: StaffPerm) => !p || u.permissions.includes(p);
+  return ADMIN_NAV.filter((n) => has(n.perm) && !(n.href === '/admin/register' && has('factory.monitor')));
 }
 
 /** The nav item that owns this path: the longest href that is a prefix of it. */

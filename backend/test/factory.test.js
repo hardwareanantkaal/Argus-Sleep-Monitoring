@@ -107,9 +107,12 @@ test('station: download image, bench run, pass, register, factory log', async ()
   assert.equal(r.body.history.previousRuns, 0);
   const runId = r.body.run.id;
 
-  // Registering before a pass is refused
+  // Registering before the code is flashed and a check passed is refused
   r = await c.post('/admin/devices', { mac, chip: 'ESP32', hwModel: 'ARG-S1 rev B', factoryRunId: runId });
-  assert.equal(r.body.error.code, 'RUN_NOT_PASSED');
+  assert.equal(r.body.error.code, 'RUN_NOT_READY');
+  r = await c.patch(`/admin/factory/runs/${runId}`, { flashed: true, checks: [{ id: 'boot', ok: false }] });
+  r = await c.post('/admin/devices', { mac, chip: 'ESP32', hwModel: 'ARG-S1 rev B', factoryRunId: runId });
+  assert.equal(r.body.error.code, 'RUN_NOT_READY');
 
   const checks = [{ id: 'boot', ok: true, value: `v${v}`, ms: 2100 }, { id: 'radar', ok: false, value: 'no link' }];
   r = await c.patch(`/admin/factory/runs/${runId}`, { flashed: true, flashMs: 41000, checks, result: 'pass' });
@@ -153,4 +156,22 @@ test('station: download image, bench run, pass, register, factory log', async ()
   assert.equal(r.status, 403);
   r = await sup.c.get('/admin/factory/runs');
   assert.equal(r.status, 200);
+});
+
+test('register while the test still runs: flashed + one passed check is enough', async () => {
+  const owner = await staff('Owner');
+  const app = appBin();
+  const up = await upload(owner.c, { version: `7.${uniq()}`, chipModel: 'ESP32', file: app, factoryFile: mergedBin(app) });
+  const { c } = await staff('Manufacturing');
+  const mac = randomMac();
+  let r = await c.post('/admin/factory/runs', { mac, chip: 'ESP32', releaseId: up.body.id });
+  const runId = r.body.run.id;
+  await c.patch(`/admin/factory/runs/${runId}`, { flashed: true, checks: [{ id: 'boot', ok: true, value: '2.1 s' }, { id: 'radar', ok: null }] });
+  r = await c.post('/admin/devices', { mac, chip: 'ESP32', hwModel: 'ARG-S1 rev B', factoryRunId: runId });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  // the run is still open and can be finished afterwards
+  r = await c.patch(`/admin/factory/runs/${runId}`, { result: 'fail', checks: [{ id: 'boot', ok: true }, { id: 'radar', ok: false }] });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.failReason, 'radar');
+  assert.ok(r.body.serial);
 });

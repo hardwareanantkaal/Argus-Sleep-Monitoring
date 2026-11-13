@@ -193,10 +193,16 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     let run = null;
     if (body.factoryRunId) {
       ({ rows: [run] } = await c.query(
-        "SELECT id, replace(mac::text, ':', '') AS mac, result, fw_version FROM factory_runs WHERE id = $1 FOR UPDATE", [body.factoryRunId]));
+        `SELECT id, replace(mac::text, ':', '') AS mac, result, fw_version, flashed,
+                EXISTS (SELECT 1 FROM jsonb_array_elements(checks) c WHERE c->>'ok' = 'true') AS any_ok
+           FROM factory_runs WHERE id = $1 FOR UPDATE`, [body.factoryRunId]));
       if (!run) throw E.notFound('Factory run not found');
       if (run.mac !== body.mac) throw E.invalid('RUN_MAC_MISMATCH', 'This bench run is for another board', 'factoryRunId');
-      if (run.result !== 'pass') throw E.invalid('RUN_NOT_PASSED', 'Only a board that passed the bench test can be registered from the station', 'factoryRunId');
+      // Owner rule (13 Nov 2026): the code must be flashed on the bench and at least one check must have passed.
+      // The test may still be running; it is finished (pass / fail) on its own afterwards.
+      if (!run.flashed || !run.any_ok) {
+        throw E.invalid('RUN_NOT_READY', 'Flash the code and wait until at least one check passes before registering', 'factoryRunId');
+      }
     }
     const serial = await claim.nextSerial(c);
     const { rows: [d] } = await c.query(

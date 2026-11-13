@@ -333,7 +333,7 @@ How to use it: [MANUFACTURING.md](MANUFACTURING.md).
 | 9.27 | PATCH | `/admin/factory/runs/:id` | the operator who started it | `{flashed?, flashMs?, checks?, result?, failReason?, logTail?, notes?}` → run. `checks` = the full list `[{id, ok, value?, ms?}]`. A `result` (`pass`/`fail`/`aborted`) finishes the run and writes the audit row `factory.run`. `pass` with a failed check → `422 CHECKS_FAILED`; a finished run → `409 RUN_FINISHED`. `logTail` keeps the last 16 KB. |
 | 9.28 | GET | `/admin/factory/runs?q&result&operatorId&station&releaseId&from&to&limit&cursor` | `factory.flash`, `factory.monitor` or `devices.view` | `q` = MAC (any format) or serial. → `{items, summary: {pass, fail, aborted, running, byOperator: [{operatorName, pass, fail}], byReason: [{reason, n}]}, nextCursor}`. The summary covers the whole filter. |
 | 9.29 | GET | `/admin/factory/runs/:id` | as 9.28 | → run with `checks`, `logTail`, `notes`. Helper: `GET /admin/factory/operators`. |
-| 8.4 (extra field) | POST | `/admin/devices` | `devices.register` | optional `factoryRunId`: the run must be for this MAC (`422 RUN_MAC_MISMATCH`) and have passed (`422 RUN_NOT_PASSED`); the run is then linked to the new device. |
+| 8.4 (extra field) | POST | `/admin/devices` | `devices.register` | optional `factoryRunId`: the run must be for this MAC (`422 RUN_MAC_MISMATCH`) and the code must be flashed with at least one check passed (`422 RUN_NOT_READY`). The test may still be running. The run is then linked to the new device. |
 
 **Bench checks** (web app `src/lib/checks.ts`, matched against what `firmware/sleeplamp` prints):
 

@@ -130,7 +130,7 @@ function Inner() {
             </table></div>
           )}</Async>
           <input ref={facInput} type="file" accept=".bin" hidden onChange={addFactory} />
-          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing station writes at 0x0 on new boards. <b>Make default</b> picks it for that chip.</p>
+          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing screen writes at 0x0 on new boards. <b>Make default</b> picks it for that chip.</p>
         </div>
         <Upload onDone={() => rel.reload()} />
       </div>
@@ -178,7 +178,7 @@ function Upload({ onDone }: { onDone(): void }) {
           {file ? <span className="hint">{file.name} · {bytes(file.size)}</span> : <span className="hint">Arduino: <span className="mono">sleeplamp.ino.bin</span> (used for OTA)</span>}</div>
         {chip === 'ESP8266' ? <p className="hint">ESP8266: one file is enough. Its .bin already holds the bootloader, so the station flashes the same file at 0x0.</p>
           : <div className="field"><label htmlFor="fw-fac">Factory image (optional, merged .bin)</label><input key={`f${key}`} className="inp" type="file" id="fw-fac" accept=".bin,application/octet-stream" disabled={!up} onChange={(e) => setFac(e.target.files?.[0] || null)} />
-            <span className="hint">Arduino: <span className="mono">sleeplamp.ino.merged.bin</span>. Needed to flash new boards on the Manufacturing station. Its app part must be the same build as the file above.</span></div>}
+            <span className="hint">Arduino: <span className="mono">sleeplamp.ino.merged.bin</span>. Needed to flash new boards on the Manufacturing screen. Its app part must be the same build as the file above.</span></div>}
         <div className="field"><label htmlFor="fw-v">Version</label><input className="inp mono" id="fw-v" placeholder="1.4.4" value={version} onChange={(e) => setVersion(e.target.value)} disabled={!up} /></div>
         <div className="field"><label htmlFor="fw-ch">Channel</label><select className="inp" id="fw-ch" value={channel} onChange={(e) => setChannel(e.target.value)} disabled={!up}><option>beta</option><option>stable</option></select></div>
         <div className="field"><label htmlFor="fw-n">What changed</label><textarea className="inp" id="fw-n" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!up} /></div>

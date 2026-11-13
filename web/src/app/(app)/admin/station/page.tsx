@@ -1,7 +1,9 @@
 'use client';
 
-// Manufacturing station (docs/MANUFACTURING.md, API.md §9b). One board at a time, plugged into this PC:
-// Connect (read chip + MAC) → Flash (factory image at 0x0) → Test (serial monitor + bench checks) → Register + sticker.
+// Manufacturing (docs/MANUFACTURING.md, API.md §9b): ONE screen for the factory person.
+//   Board + code (connect, flash)  ·  Serial log + bench checks  ·  Register + sticker
+// Register unlocks as soon as the code is flashed and at least one check has passed (owner, 13 Nov 2026);
+// the test can keep running and is finished with Pass / Fail afterwards.
 // The browser does all the USB work (Web Serial + esptool-js); the server stores images and results.
 
 import Link from 'next/link';
@@ -28,12 +30,12 @@ const store = {
 };
 const imageCache = new Map<number, Uint8Array>(); // releaseId -> image, kept for the next boards
 
-type Step = 'connect' | 'flash' | 'test' | 'register';
+// idle: no board · ready: board in bootloader, choose flash or test · testing: serial monitor running · done: run saved
+type Phase = 'idle' | 'ready' | 'testing' | 'done';
 interface BoardInfo { chip: string; desc: string; mac: string }
 interface Hist { runs: FactoryRun[]; serial: string | null }
-interface Last { mac: string; result: string; failReason?: string | null; serial?: string | null }
 
-export default function StationPage() {
+export default function ManufacturingPage() {
   return <RequireStaff perm="factory.monitor"><Inner /></RequireStaff>;
 }
 
@@ -51,7 +53,7 @@ function Inner() {
   const canFlash = can('factory.flash');
   const canRegister = can('devices.register');
 
-  const [step, setStep] = useState<Step>('connect');
+  const [phase, setPhase] = useState<Phase>('idle');
   const [bench, setBench] = useState('Bench 1');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -63,8 +65,9 @@ function Inner() {
   const [run, setRun] = useState<FactoryRun | null>(null);
   const [note, setNote] = useState('');
   const [paused, setPaused] = useState(false);
-  const [last, setLast] = useState<Last | null>(null);
   const [reg, setReg] = useState<(StickerData & { id: string }) | null>(null);
+  const [regBusy, setRegBusy] = useState(false);
+  const [regErr, setRegErr] = useState('');
   const [hw, setHw] = useState(HW_MODELS[0]);
   const [batch, setBatch] = useState('');
   const [today, setToday] = useState<FactoryRunList | null>(null);
@@ -110,21 +113,22 @@ function Inner() {
 
   // 4×/s while testing: apply the time limits and repaint
   useEffect(() => {
-    if (step !== 'test') return undefined;
+    if (phase !== 'testing') return undefined;
     const id = setInterval(() => { checker.current?.tick(sec()); setTick((x) => x + 1); }, 250);
     return () => clearInterval(id);
-  }, [step]);
+  }, [phase]);
   useEffect(() => { if (!paused && termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight; });
+
+  const logText = () => lines.current.map((l) => l[0]).join('\n') + (partial.current ? `\n${partial.current}` : '');
 
   const finish = useCallback(async (result: 'pass' | 'fail' | 'aborted', reason?: string) => {
     const r = runRef.current;
     if (!r || r.result !== 'running') return;
     const c = checker.current;
-    const all = lines.current.map((l) => l[0]).join('\n') + (partial.current ? `\n${partial.current}` : '');
     const body = {
       result,
       checks: c ? c.toList() : [],
-      logTail: all.slice(-LOG_TAIL),
+      logTail: logText().slice(-LOG_TAIL),
       ...(note.trim() ? { notes: note.trim() } : {}),
       ...(result !== 'pass' ? { failReason: reason || c?.firstFailed() || (result === 'aborted' ? 'aborted' : 'manual') } : {}),
     };
@@ -133,11 +137,11 @@ function Inner() {
       const saved = await patch<FactoryRun>(`/admin/factory/runs/${r.id}`, body);
       setRun(saved); runRef.current = saved;
       await mon.current?.close(); mon.current = null;
-      if (result === 'pass' && canRegister && !hist?.serial) setStep('register');
-      else resetAll({ mac: r.mac, result, failReason: saved.failReason, serial: hist?.serial });
+      setPhase('done');
+      loadToday();
     } catch (e) { setErr(errText(e)); } finally { setBusy(''); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note, canRegister, hist]);
+  }, [note, loadToday]);
 
   // Board unplugged during a run → saved as aborted
   useEffect(() => {
@@ -154,15 +158,18 @@ function Inner() {
   }, []);
   useEffect(() => () => { mon.current?.close(); if (conn.current) releaseBoard(conn.current); }, []);
 
-  function resetAll(lastInfo?: Last) {
-    setStep('connect'); setBoard(null); setHist(null); setFlash(null); setRun(null); setNote('');
-    setReg(null); setPaused(false); setErr(''); setLast(lastInfo || null);
+  async function nextBoard() {
+    if (runRef.current?.result === 'running') await finish('aborted', 'operator');
+    await mon.current?.close();
+    if (conn.current) await releaseBoard(conn.current);
+    setPhase('idle'); setBoard(null); setHist(null); setFlash(null); setRun(null); setNote('');
+    setReg(null); setRegErr(''); setPaused(false); setErr('');
     lines.current = []; partial.current = ''; checker.current = null; conn.current = null; mon.current = null;
     loadToday();
   }
 
   async function connect() {
-    setErr(''); setLast(null); setBusy('Reading the board: bootloader mode, chip and MAC…');
+    setErr(''); setBusy('Reading the board: bootloader mode, chip and MAC…');
     store.set('bench', bench);
     try {
       const b = await connectBoard(() => {});
@@ -172,7 +179,7 @@ function Inner() {
       setHist(h ? { runs: h.items, serial: h.items.find((r) => r.serial)?.serial || null } : null);
       const mine = releases.filter((r) => r.chipModel === b.chip);
       setRelId((mine.find((r) => r.isDefault) || mine[0])?.id ?? null);
-      setStep('flash');
+      setPhase('ready');
     } catch (e) {
       if (conn.current) await releaseBoard(conn.current);
       conn.current = null;
@@ -201,7 +208,7 @@ function Inner() {
     t0.current = performance.now();
     await m.reset();
     addLine('--- board reset, watching serial output at 115200 baud ---', 'a');
-    setStep('test');
+    setPhase('testing');
   }
 
   async function doFlash() {
@@ -233,10 +240,14 @@ function Inner() {
     } catch (e) {
       setFlash(null);
       const msg = errText(e);
-      if (r) await patch(`/admin/factory/runs/${r.id}`, { result: 'fail', failReason: 'flash', notes: msg.slice(0, 500), logTail: flog.join('\n') }).catch(() => {});
+      if (r) {
+        const saved = await patch<FactoryRun>(`/admin/factory/runs/${r.id}`, { result: 'fail', failReason: 'flash', notes: msg.slice(0, 500), logTail: flog.join('\n') }).catch(() => null);
+        if (saved) { setRun(saved); runRef.current = saved; }
+      }
       if (conn.current) await releaseBoard(conn.current);
-      resetAll({ mac: board.mac, result: 'fail', failReason: 'flash' });
-      setErr(`Flash failed: ${msg}. Unplug and reconnect the board, then try again.`);
+      conn.current = null;
+      setPhase('done');
+      setErr(`Flash failed: ${msg}. Unplug and reconnect the board, then press Next board and try again.`);
     }
   }
 
@@ -249,187 +260,184 @@ function Inner() {
     } catch (e) { setErr(errText(e)); }
   }
 
+  const c = checker.current;
+  const anyPassed = !!c && c.toList().some((x) => x.ok === true);
+  const flashed = !!run?.flashed;
+  const registered = reg?.serial || hist?.serial || null;
+  const canReg = canRegister && flashed && anyPassed && !registered;
+
   async function register(e: React.FormEvent) {
     e.preventDefault();
-    if (!board || !run) return;
+    if (!board || !run || !canReg) return;
     store.set('hwModel', hw); store.set('batch', batch);
-    setBusy('Registering…'); setErr('');
+    setRegBusy(true); setRegErr('');
     try {
+      // Save the checks so far: the server checks "flashed + at least one passed" on the run itself.
+      if (run.result === 'running' && c) await patch(`/admin/factory/runs/${run.id}`, { checks: c.toList() });
       const r = await post<RegisterResult>('/admin/devices', {
         mac: board.mac, chip: board.chip, hwModel: hw, batch: batch.trim() || undefined,
         fwOnBoard: run.fwVersion || undefined, factoryRunId: run.id,
       });
       setReg({ id: r.device.id, serial: r.serial, claimCode: r.claimCode, qrPayload: r.qrPayload, qrPngBase64: r.qrPngBase64, mac: macUpper(board.mac) });
-    } catch (ex) { setErr(errText(ex)); } finally { setBusy(''); }
+      loadToday();
+    } catch (ex) { setRegErr(errText(ex)); } finally { setRegBusy(false); }
   }
 
   if (!serialSupported()) {
-    return <div className="wrap"><Head title="Manufacturing station" />
+    return <div className="wrap"><Head title="Manufacturing" />
       <div className="card lock"><Icon name="usb" size={30} /><h2>Use Chrome or Edge on a PC</h2>
         <p>This browser can&apos;t talk to USB serial ports (Web Serial). Open this page in Chrome or Edge on the bench PC.</p></div></div>;
   }
 
-  const c = checker.current;
   const ck = c?.ck;
   const vals = c?.vals || {};
-  const stepNo = { connect: 1, flash: 2, test: 3, register: 4 }[step];
-  const st = (n: number, l: string) => <span className={`s ${stepNo === n ? 'on' : stepNo > n ? 'done' : ''}`}><b>{stepNo > n ? <Icon name="check" size={14} /> : n}</b>{l}</span>;
-  const boardRow = board && (
-    <div className="row small">
-      <span className="pill acc"><Icon name="chip" size={14} /> <span className="mono">{board.chip}</span></span>
-      <span className="pill"><span className="mono">{macUpper(board.mac)}</span></span>
-      {hist && (hist.serial ? <span className="pill warn">Registered as {hist.serial}</span>
-        : hist.runs.length ? <span className="pill warn">Tested {hist.runs.length}× before, last {hist.runs[0].result.toUpperCase()}{hist.runs[0].failReason ? ` (${hist.runs[0].failReason})` : ''}</span>
-          : <span className="pill ok">New board</span>)}
-    </div>
-  );
-  const todayCard = (
-    <div className="card">
-      <div className="ch"><div className="t"><h2>{bench || 'This bench'} today</h2>
-        {today && <span className="xs muted">{today.summary.pass} passed · {today.summary.fail} failed</span>}</div>
-        {can('devices.view') && <Link className="link small" href="/admin/factory">Factory log</Link>}</div>
-      {today?.items.length ? today.items.map((r) => (
-        <div key={r.id} className="between" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-          <span className="stack" style={{ gap: 0 }}><span className="mono small">{macUpper(r.mac)}</span>
-            <span className="xs muted">{ago(r.startedAt)} · {r.serial || 'not registered'}</span></span>
-          <ResultPill r={r} />
-        </div>)) : <p className="small muted">No boards yet today.</p>}
-    </div>
-  );
   const mine = board ? releases.filter((r) => r.chipModel === board.chip) : [];
+  const req = (ok: boolean, text: string) => <span className={`small ${ok ? '' : 'muted'}`} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+    <span style={{ color: ok ? 'var(--ok)' : 'var(--muted)', display: 'inline-flex' }}>{ok ? <Icon name="check" size={16} /> : '○'}</span>{text}</span>;
 
   return (
     <div className="wrap">
-      <Head title="Manufacturing station" sub="Flash, test and register new boards. One board at a time, plugged into this PC." />
-      <div className="stepper">{st(1, 'Connect')}{st(2, 'Flash')}{st(3, 'Test')}{st(4, 'Register')}</div>
+      <Head title="Manufacturing" sub="Flash the code, watch the serial log and register the board, all on this screen. One board at a time."
+        actions={phase !== 'idle' && <button className="btn ghost" onClick={nextBoard} disabled={!!busy || !!flash}><Icon name="usb" /> Next board</button>} />
       {err && <div className="banner" role="alert"><Icon name="alert" /><span>{err}</span></div>}
 
-      {step === 'connect' && (
-        <div className="g21"><div className="stack" style={{ gap: 18 }}>
-          {last && <div className={`banner ${last.result === 'fail' ? '' : 'ok'}`}><Icon name="info" />
-            <span>Last board <b className="mono">{macUpper(last.mac)}</b> saved as <b>{last.result.toUpperCase()}{last.failReason && last.result !== 'pass' ? ` (${last.failReason})` : ''}</b>{last.serial ? `, registered as ${last.serial}` : ''}. {last.result === 'fail' ? 'Put it in the repair tray.' : ''}</span></div>}
-          <div className="card stack" style={{ gap: 16 }}>
-            <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start', gap: 14 }}>
-              <div className="avatar" style={{ borderRadius: 12 }}><Icon name="usb" /></div>
-              <div className="stack" style={{ gap: 4 }}><h2>Connect the next board</h2>
-                <p className="small muted">Plug the board into this PC by USB, press Connect and pick its port. <b>Close Arduino IDE</b> or any other serial monitor first.</p></div>
-            </div>
-            <div className="field" style={{ maxWidth: 280 }}><label htmlFor="bench">This bench</label>
-              <input className="inp" id="bench" value={bench} onChange={(e) => setBench(e.target.value)} maxLength={40} />
-              <span className="hint">Saved on this PC. Shows in the Factory log.</span></div>
-            {busy && <div className="note"><span className="dot pulse" style={{ color: 'var(--live)', marginTop: 6 }} /><span>{busy}</span></div>}
-            <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={connect} disabled={!!busy}><Icon name="usb" /> Connect board</button>
-            <p className="xs muted">If it fails: hold <b>BOOT</b>, press <b>RESET</b>, let go of BOOT, then try again. Some boards need a USB driver (CP210x or CH340).</p>
-          </div></div>{todayCard}</div>
-      )}
-
-      {step === 'flash' && board && (
-        <div className="g21"><div className="card stack" style={{ gap: 16 }}>
-          <h2>Flash firmware</h2>{boardRow}
-          <p className="xs muted mono">{board.desc}</p>
-          {canFlash ? (mine.length ? <>
-            <div className="field"><label htmlFor="rel">Release</label>
-              <select className="inp mono" id="rel" value={relId ?? ''} onChange={(e) => setRelId(Number(e.target.value))} disabled={!!flash}>
-                {mine.map((r) => <option key={r.id} value={r.id}>{r.version} · {r.channel}{r.isDefault ? ' · factory default' : ''}</option>)}
-              </select>
-              <span className="hint">Only {board.chip} releases with a factory image. Admins add them on the Firmware screen.</span></div>
-            <div className="note"><Icon name="info" /><span>Writes the factory image from address 0x0: bootloader, partitions and app. Saved Wi-Fi and any old data on the board are erased.</span></div>
-          </> : <div className="banner warn"><Icon name="alert" /><span>No factory image for {board.chip} yet. Ask an admin to add one on the Firmware screen, or test only.</span></div>)
-            : <p className="xs muted">Flashing needs the factory.flash permission. You can still test.</p>}
-          {flash ? <div className="stack" style={{ gap: 8 }}>
+      {/* ---------- 1 · Board and code ---------- */}
+      <div className="card stack" style={{ gap: 14, marginBottom: 18 }}>
+        <div className="between"><h2>1 · Board and code</h2>{board && <span className="xs muted mono">{board.desc}</span>}</div>
+        {!board ? <>
+          <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
+            <div className="field" style={{ width: 200 }}><label htmlFor="bench">This bench</label>
+              <input className="inp" id="bench" value={bench} onChange={(e) => setBench(e.target.value)} maxLength={40} /></div>
+            <button className="btn" onClick={connect} disabled={!!busy}><Icon name="usb" /> {busy ? 'Reading…' : 'Connect board'}</button>
+          </div>
+          {busy && <div className="note"><span className="dot pulse" style={{ color: 'var(--live)', marginTop: 6 }} /><span>{busy}</span></div>}
+          <p className="xs muted">Plug the board in by USB and pick its port. Close Arduino IDE or any serial monitor first. If it fails: hold <b>BOOT</b>, press <b>RESET</b>, let go of BOOT, then try again.</p>
+        </> : <>
+          <div className="row small">
+            <span className="pill acc"><Icon name="chip" size={14} /> <span className="mono">{board.chip}</span></span>
+            <span className="pill"><span className="mono">{macUpper(board.mac)}</span></span>
+            {hist && (hist.serial ? <span className="pill warn">Already registered as {hist.serial}</span>
+              : hist.runs.length ? <span className="pill warn">Tested {hist.runs.length}× before, last {hist.runs[0].result.toUpperCase()}{hist.runs[0].failReason ? ` (${hist.runs[0].failReason})` : ''}</span>
+                : <span className="pill ok">New board</span>)}
+            {run?.flashed && <span className="pill ok"><Icon name="check" size={14} /> Flashed {run.fwVersion}{run.flashMs ? ` in ${Math.round(run.flashMs / 1000)} s` : ''}</span>}
+            {run && !run.flashed && phase !== 'ready' && <span className="pill">Not flashed (test only)</span>}
+          </div>
+          {phase === 'ready' && <>
+            {canFlash ? (mine.length ? <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
+              <div className="field" style={{ minWidth: 260 }}><label htmlFor="rel">Code to flash</label>
+                <select className="inp mono" id="rel" value={relId ?? ''} onChange={(e) => setRelId(Number(e.target.value))} disabled={!!flash}>
+                  {mine.map((r) => <option key={r.id} value={r.id}>{r.version} · {r.channel}{r.isDefault ? ' · default' : ''}</option>)}
+                </select></div>
+              {!flash && <button className="btn" onClick={doFlash}><Icon name="bolt" /> Erase and flash</button>}
+              {!flash && <button className="btn ghost" onClick={testOnly}>Skip, test only</button>}
+            </div> : <div className="row"><div className="banner warn" style={{ margin: 0 }}><Icon name="alert" /><span>No factory image for {board.chip} yet. An admin adds one on the Firmware screen.</span></div>
+              <button className="btn ghost" onClick={testOnly}>Test only</button></div>)
+              : <div className="row"><span className="xs muted">Flashing needs the factory.flash permission.</span><button className="btn ghost" onClick={testOnly}>Test only</button></div>}
+            {!flash && <p className="xs muted">Flashing writes the whole image from 0x0 (bootloader, partitions, app) and erases saved Wi-Fi and old data.</p>}
+          </>}
+          {flash && <div className="stack" style={{ gap: 8 }}>
             <div className="between small"><b>{flash.phase}</b><span className="num muted">{flash.pct}%</span></div>
             <div className="progress"><i style={{ width: `${flash.pct}%`, background: 'var(--accent)' }} /></div>
-            <p className="xs muted">Don&apos;t unplug the board.</p></div>
-            : <div className="row">
-              {canFlash && mine.length > 0 && <button className="btn" onClick={doFlash}><Icon name="bolt" /> Erase and flash</button>}
-              <button className="btn ghost" onClick={testOnly}>Skip, test only</button>
-              <button className="btn ghost" onClick={async () => { if (conn.current) await releaseBoard(conn.current); resetAll(); }}>Disconnect</button></div>}
-        </div>{todayCard}</div>
-      )}
+            <p className="xs muted">Don&apos;t unplug the board.</p></div>}
+        </>}
+      </div>
 
-      {step === 'test' && ck && c && board && (
-        <div className="g21"><div className="stack" style={{ gap: 18 }}>
+      <div className="g21">
+        {/* ---------- 2 · Serial log ---------- */}
+        <div className="stack" style={{ gap: 18 }}>
           <div className="card">
-            <div className="ch"><div className="t"><h2>Serial monitor</h2><span className="xs muted">115200 baud · {run?.flashed ? `flashed ${run.fwVersion}` : 'not flashed, test only'}</span></div>
-              <div className="row" style={{ gap: 6 }}>
+            <div className="ch"><div className="t"><h2>2 · Serial log</h2><span className="xs muted">115200 baud{run ? ` · ${run.flashed ? `flashed ${run.fwVersion}` : 'not flashed'}` : ''}</span></div>
+              {phase === 'testing' && <div className="row" style={{ gap: 6 }}>
                 {paused ? <span className="pill warn">Paused</span> : <span className="pill live"><span className="dot pulse" />Live</span>}
                 <button className="btn ghost sm" onClick={() => setPaused(!paused)}>{paused ? 'Resume' : 'Pause'}</button>
                 <button className="btn ghost sm" onClick={() => { lines.current = []; setTick((x) => x + 1); }}>Clear</button>
                 <button className="btn ghost sm" onClick={async () => { addLine('--- board reset by operator ---', 'a'); await mon.current?.reset(); }}>Reset board</button>
-              </div></div>
-            {boardRow}<div style={{ height: 12 }} />
+              </div>}</div>
             <div className="term big" ref={termRef} aria-label="Serial output">
-              {lines.current.map((l, i) => <div key={i} className={l[1]}>{l[0] || ' '}</div>)}
+              {lines.current.length ? lines.current.map((l, i) => <div key={i} className={l[1]}>{l[0] || ' '}</div>)
+                : <div className="m">{phase === 'idle' ? 'Connect a board to start.' : phase === 'ready' ? 'Flash the code (or test only) and the board’s output appears here.' : 'No output.'}</div>}
             </div>
-            <form className="sendrow" onSubmit={async (e) => { e.preventDefault(); if (!sendLine) return; addLine(`> ${sendLine}`, 'a'); const v = sendLine; setSendLine(''); await mon.current?.write(`${v}\n`); }}>
+            {phase === 'testing' && <form className="sendrow" onSubmit={async (e) => { e.preventDefault(); if (!sendLine) return; addLine(`> ${sendLine}`, 'a'); const v = sendLine; setSendLine(''); await mon.current?.write(`${v}\n`); }}>
               <input className="inp mono" value={sendLine} onChange={(e) => setSendLine(e.target.value)} placeholder="Send a line to the board" aria-label="Send a line to the board" />
-              <button className="btn ghost" type="submit">Send</button></form>
+              <button className="btn ghost" type="submit">Send</button></form>}
+            {c && <div className="stiles" style={{ marginTop: 14 }}>
+              {([['Radar', vals.radar ? <span style={{ color: vals.radar === 'OK' ? 'var(--ok)' : 'var(--warn)' }}>{vals.radar}</span> : '—'],
+                ['Presence', vals.pr === undefined ? '—' : vals.pr ? 'Yes' : 'No'],
+                ['Heart rate', vals.hr ? <>{vals.hr}<small className="xs muted"> bpm</small></> : '—'],
+                ['Breathing', vals.br ? <>{vals.br}<small className="xs muted"> /min</small></> : '—'],
+                ['Free heap', vals.heap ? <>{Math.round(vals.heap / 1024)}<small className="xs muted"> KB</small></> : '—'],
+                ['MQTT', vals.mqtt || '—']] as [string, React.ReactNode][]).map(([l, v]) => (
+                <div className="stile" key={l}><span className="xs muted">{l}</span><b>{v}</b></div>))}
+            </div>}
           </div>
-          <div className="card"><div className="ch"><div className="t"><h2>Live values</h2><span className="xs muted">Read from the telemetry print. Not saved.</span></div></div>
-            <div className="stiles">
-              {([['Radar', vals.radar ? <span style={{ color: vals.radar === 'OK' ? 'var(--ok)' : 'var(--warn)' }}>{vals.radar}</span> : '—', ''],
-                ['Presence', vals.pr === undefined ? '—' : vals.pr ? 'Yes' : 'No', ''],
-                ['Heart rate', vals.hr ? <>{vals.hr}<small className="xs muted"> bpm</small></> : '—', ''],
-                ['Breathing', vals.br ? <>{vals.br}<small className="xs muted"> /min</small></> : '—', ''],
-                ['Free heap', vals.heap ? <>{Math.round(vals.heap / 1024)}<small className="xs muted"> KB</small></> : '—', ''],
-                ['MQTT', vals.mqtt || '—', vals.mqtt && vals.mqtt !== 'up' && vals.mqtt !== 'connected' ? 'Expected: no Wi-Fi on the bench' : '']] as [string, React.ReactNode, string][]).map(([l, v, sub]) => (
-                <div className="stile" key={l}><span className="xs muted">{l}</span><b>{v}</b>{sub && <span className="xs muted">{sub}</span>}</div>))}
-            </div></div>
+          <div className="card">
+            <div className="ch"><div className="t"><h2>{bench || 'This bench'} today</h2>
+              {today && <span className="xs muted">{today.summary.pass} passed · {today.summary.fail} failed</span>}</div>
+              {can('devices.view') && <Link className="link small" href="/admin/factory">Factory log</Link>}</div>
+            {today?.items.length ? today.items.map((r) => (
+              <div key={r.id} className="between" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                <span className="stack" style={{ gap: 0 }}><span className="mono small">{macUpper(r.mac)}</span>
+                  <span className="xs muted">{ago(r.startedAt)} · {r.serial || 'not registered'}</span></span>
+                <ResultPill r={r} />
+              </div>)) : <p className="small muted">No boards yet today.</p>}
+          </div>
         </div>
-        <div className="stack" style={{ gap: 18 }}>
-          <div className="card"><h2 style={{ marginBottom: 6 }}>Bench checks</h2>
-            {CHECKS.map((k) => { const s = ck[k.id]; return (
-              <div key={k.id} className={`ck ${s.state === 'ok' ? 'ok' : s.state === 'bad' ? 'bad' : s.state === 'run' ? 'run' : ''}`}>
-                <span className="st">{s.state === 'ok' ? <Icon name="check" size={14} /> : s.state === 'bad' ? '✕' : s.state === 'run' ? <span className="dot pulse" /> : s.state === 'skip' ? '–' : ''}</span>
-                <span className="stack" style={{ gap: 0 }}><b className="small">{k.label}</b><span className="xs muted">{k.hint}</span></span>
-                {k.id === 'presence' && s.state === 'wait'
-                  ? <span className="row" style={{ gap: 4 }}>
-                    <button className="btn ghost sm" disabled={ck.radar.state !== 'ok'} title={ck.radar.state !== 'ok' ? 'Waits for the radar link' : ''} onClick={() => c.startPresence(sec())}>Start</button>
-                    <button className="btn ghost sm" onClick={() => c.skipPresence()}>Skip</button></span>
-                  : <span className="v">{s.value}</span>}
-              </div>); })}
-          </div>
-          <div className="card stack" style={{ gap: 12 }}>
-            <div className="field"><label htmlFor="note">Note (optional)</label>
-              <input className="inp" id="note" placeholder="e.g. radar cable loose" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></div>
-            {c.allPassed() ? <div className="banner ok"><Icon name="check" /><span>All checks passed.</span></div>
-              : c.firstFailed() && <div className="banner"><Icon name="alert" />
-                <span>Failed: {CHECKS.find((k) => k.id === c.firstFailed())?.label}. Mark it as Fail and put the board in the repair tray.</span></div>}
-            <div className="row">
-              <button className="btn" disabled={!c.allPassed() || !!busy} onClick={() => finish('pass')}><Icon name="check" /> Pass</button>
-              <button className="btn danger" disabled={!!busy} onClick={() => finish('fail')}>Fail</button>
-              <button className="btn ghost" disabled={!!busy} onClick={() => finish('aborted', 'operator')}>Abort</button>
-            </div>
-          </div>
-        </div></div>
-      )}
 
-      {step === 'register' && board && (
-        <div style={{ maxWidth: 720 }}>
-          {!reg ? <div className="card">
-            <div className="banner ok" style={{ marginBottom: 16 }}><Icon name="check" /><span>Passed all checks. Register it and print its sticker.</span></div>
-            <form className="form" onSubmit={register}>
-              <div className="fields2">
-                <div className="field"><label htmlFor="st-mac">MAC address</label><input className="inp mono" id="st-mac" value={macUpper(board.mac)} readOnly /></div>
-                <div className="field"><label htmlFor="st-fw">Firmware on board</label><input className="inp mono" id="st-fw" value={run?.fwVersion || 'unknown (not flashed)'} readOnly /></div>
-                <div className="field"><label htmlFor="st-hw">Hardware model</label>
-                  <select className="inp" id="st-hw" value={hw} onChange={(e) => setHw(e.target.value)}>{HW_MODELS.map((m) => <option key={m}>{m}</option>)}</select></div>
-                <div className="field"><label htmlFor="st-batch">Batch</label>
-                  <input className="inp" id="st-batch" value={batch} onChange={(e) => setBatch(e.target.value)} maxLength={40} placeholder="B-2026-11-A" /><span className="hint">Remembered for the next board.</span></div>
+        <div className="stack" style={{ gap: 18 }}>
+          {/* ---------- 3 · Checks ---------- */}
+          <div className="card"><div className="between" style={{ marginBottom: 6 }}><h2>3 · Checks</h2>{run && run.result !== 'running' && <ResultPill r={run} />}</div>
+            {CHECKS.map((k) => { const s = ck?.[k.id]; const state = s?.state || 'wait'; return (
+              <div key={k.id} className={`ck ${state === 'ok' ? 'ok' : state === 'bad' ? 'bad' : state === 'run' && phase === 'testing' ? 'run' : ''}`}>
+                <span className="st">{state === 'ok' ? <Icon name="check" size={14} /> : state === 'bad' ? '✕' : state === 'run' && phase === 'testing' ? <span className="dot pulse" /> : state === 'skip' ? '–' : ''}</span>
+                <span className="stack" style={{ gap: 0 }}><b className="small">{k.label}</b><span className="xs muted">{k.hint}</span></span>
+                {k.id === 'presence' && state === 'wait' && phase === 'testing' && c
+                  ? <span className="row" style={{ gap: 4 }}>
+                    <button className="btn ghost sm" disabled={ck?.radar.state !== 'ok'} title={ck?.radar.state !== 'ok' ? 'Waits for the radar link' : ''} onClick={() => c.startPresence(sec())}>Start</button>
+                    <button className="btn ghost sm" onClick={() => c.skipPresence()}>Skip</button></span>
+                  : <span className="v">{s?.value}</span>}
+              </div>); })}
+            {phase === 'testing' && c && <div className="stack" style={{ gap: 12, marginTop: 14 }}>
+              <div className="field"><label htmlFor="note">Note (optional)</label>
+                <input className="inp" id="note" placeholder="e.g. radar cable loose" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></div>
+              {c.firstFailed() && <div className="banner" style={{ margin: 0 }}><Icon name="alert" /><span>Failed: {CHECKS.find((k) => k.id === c.firstFailed())?.label}.</span></div>}
+              <div className="row">
+                <button className="btn" disabled={!c.allPassed() || !!busy} onClick={() => finish('pass')}><Icon name="check" /> Pass</button>
+                <button className="btn danger" disabled={!!busy} onClick={() => finish('fail')}>Fail</button>
+                <button className="btn ghost" disabled={!!busy} onClick={() => finish('aborted', 'operator')}>Abort</button>
               </div>
-              <div className="row"><button className="btn" type="submit" disabled={!!busy}>{busy || 'Register and make sticker'}</button>
-                <button className="btn ghost" type="button" onClick={() => resetAll({ mac: board.mac, result: 'pass' })}>Skip, next board</button></div>
-            </form></div>
-            : <div className="card stack" style={{ gap: 16 }}>
-              <div className="stack" style={{ gap: 4 }}><h2>Registered {reg.serial}</h2>
-                <p className="small muted">Print the sticker and put it on the back of the sensor. The claim code is shown only now.</p></div>
+            </div>}
+          </div>
+
+          {/* ---------- 4 · Register ---------- */}
+          <div className="card stack" style={{ gap: 12 }}>
+            <h2>4 · Register</h2>
+            {reg ? <>
+              <div className="banner ok" style={{ margin: 0 }}><Icon name="check" /><span>Registered <b>{reg.serial}</b>. The claim code is shown only now: print the sticker.</span></div>
               <div id="stk-station"><Sticker s={reg} /></div>
               <div className="row"><button className="btn" onClick={() => printStickers(['stk-station'])}>Print sticker</button>
-                <button className="btn ghost" onClick={() => resetAll({ mac: board.mac, result: 'pass', serial: reg.serial })}><Icon name="usb" /> Next board</button>
                 <Link className="btn ghost" href={`/admin/devices/${reg.id}`}>Open device</Link></div>
-            </div>}
+              {run?.result === 'running' && <p className="xs muted">The test is still running. Finish it with Pass or Fail, then press Next board.</p>}
+            </> : hist?.serial ? <p className="small muted">This board is already registered as <b>{hist.serial}</b>. Reprint its sticker from the device page.</p>
+              : !canRegister ? <p className="small muted">Registering needs the devices.register permission.</p> : <>
+                <div className="stack" style={{ gap: 6 }}>
+                  {req(flashed, 'Code flashed on this bench')}
+                  {req(anyPassed, 'At least one check passed')}
+                </div>
+                <form className="form" onSubmit={register}>
+                  <div className="fields2">
+                    <div className="field"><label htmlFor="st-hw">Hardware model</label>
+                      <select className="inp" id="st-hw" value={hw} onChange={(e) => setHw(e.target.value)}>{HW_MODELS.map((m) => <option key={m}>{m}</option>)}</select></div>
+                    <div className="field"><label htmlFor="st-batch">Batch</label>
+                      <input className="inp" id="st-batch" value={batch} onChange={(e) => setBatch(e.target.value)} maxLength={40} placeholder="B-2026-11-A" /></div>
+                  </div>
+                  {regErr && <p className="err" role="alert">{regErr}</p>}
+                  <button className="btn" type="submit" disabled={!canReg || regBusy}>{regBusy ? 'Registering…' : 'Register and make sticker'}</button>
+                </form>
+                <p className="xs muted">Board without USB, or many at once? <Link className="link" href="/admin/register">Type the MAC or upload a CSV</Link>.</p>
+              </>}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
