@@ -181,6 +181,7 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     batch: z.string().trim().max(40).nullable().optional(),
     manufacturedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable().optional(),
     fwOnBoard: z.string().trim().max(40).nullable().optional(),
+    factoryRunId: z.number().int().positive().optional(),   // the manufacturing station's bench run (§9b)
   }), req.body);
   const code = claim.newCode();
   const device = await db.tx(async (c) => {
@@ -188,6 +189,14 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     await c.query("SELECT pg_advisory_xact_lock(hashtext('argus.serial'))");
     if ((await c.query('SELECT 1 FROM devices WHERE mqtt_username = $1', [body.mac])).rowCount) {
       throw E.conflict('MAC_EXISTS', `A device with MAC ${macColons(body.mac)} is already registered`, 'mac');
+    }
+    let run = null;
+    if (body.factoryRunId) {
+      ({ rows: [run] } = await c.query(
+        "SELECT id, replace(mac::text, ':', '') AS mac, result, fw_version FROM factory_runs WHERE id = $1 FOR UPDATE", [body.factoryRunId]));
+      if (!run) throw E.notFound('Factory run not found');
+      if (run.mac !== body.mac) throw E.invalid('RUN_MAC_MISMATCH', 'This bench run is for another board', 'factoryRunId');
+      if (run.result !== 'pass') throw E.invalid('RUN_NOT_PASSED', 'Only a board that passed the bench test can be registered from the station', 'factoryRunId');
     }
     const serial = await claim.nextSerial(c);
     const { rows: [d] } = await c.query(
@@ -197,6 +206,7 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
       [serial, body.mac, body.mac, claim.hashCode(code), body.chip, body.hwModel, body.batch || null,
         body.manufacturedAt || null, body.fwOnBoard || null, req.user.id, claim.sealCode(code)]);
     await c.query('INSERT INTO device_settings (device_id) VALUES ($1)', [d.id]);
+    if (run) await c.query('UPDATE factory_runs SET device_id = $2 WHERE id = $1', [run.id, d.id]);
     await audit(req, { action: 'device.register', targetType: 'device', targetId: d.id, targetLabel: serial,
       detail: `MAC ${macColons(body.mac)} · ${body.chip}` }, c);
     return d;

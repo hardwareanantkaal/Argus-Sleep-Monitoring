@@ -306,6 +306,48 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 
 ---
 
+## 9b. Manufacturing station (added 13 Nov 2026, migration 010)
+
+How to use it: [MANUFACTURING.md](MANUFACTURING.md).
+
+**Who uses it:** staff with `factory.flash` and/or `factory.monitor` (Manufacturing and Developer by default; the Owner has every permission). The Factory log also opens with `devices.view`.
+
+**Where the work happens:** flashing and the serial monitor run **in the browser** on the PC the board is plugged into (Chrome or Edge, Web Serial + `esptool-js`). The backend never touches USB. It hands out the factory image, records each board's result and lists the results.
+
+**Factory image:** the full-flash image Arduino builds as `*.ino.merged.bin` (bootloader + partitions + `boot_app0` + app, padded to the flash size). It is written at `0x0`, so it also **erases NVS and LittleFS** (saved Wi-Fi, queued sessions): every board leaves the bench clean. The OTA `.bin` stays as before; the factory image is an extra file on the same release. **ESP8266:** its `.bin` already holds the bootloader, so the OTA `.bin` is also its factory image (no second file).
+
+### Firmware: factory image (screen: Firmware and OTA)
+| # | Method | Path | Needs | Body → Response |
+|---|---|---|---|---|
+| 9.2 (extra fields) | POST | `/admin/firmware` | `firmware.upload` | also takes `chipModel` (`ESP32`, `ESP32-S3`, `ESP32-C3`, `ESP32-S2`, `ESP32-C6`, `ESP8266`), optional `factoryFile` (max 16 MB) and `flashSize` (`2MB`/`4MB`/`8MB`/`16MB`, guessed from the file size when left out). Every release in 9.1 now has `factory: {fileSize, sha256, flashSize, isDefault, sameAsOta} \| null`. |
+| 9.3 (extra field) | PATCH | `/admin/firmware/:id` | `firmware.upload` | `{factoryDefault: true}` → this release becomes the one the station picks for its chip (one per chip). `422 NO_FACTORY_IMAGE` if it has none. |
+| 9.22 | PUT | `/admin/firmware/:id/factory-image` | `firmware.upload` | multipart `factoryFile`, `flashSize?` → release. Checks: size ≤ `flashSize`; byte `0xE9` at `0x1000` (ESP32, S2) or `0x0` (S3, C3, C6), else `422 NOT_FACTORY_IMAGE`; **the app at `0x10000` must be byte-for-byte the release's OTA `.bin`**, else `422 IMAGE_MISMATCH` (stops a 2.4.1 image being uploaded as 2.4.0). ESP8266 → `422 NOT_NEEDED`. |
+| 9.23 | DELETE | `/admin/firmware/:id/factory-image` | `firmware.upload` | → `204`. Also clears the factory default. |
+
+### Station and factory log (screens: Station, Factory log)
+| # | Method | Path | Needs | Body → Response |
+|---|---|---|---|---|
+| 9.24 | GET | `/admin/factory/releases?chip` | `factory.flash` | → `{items: [{id, version, channel, chipModel, notes, isDefault, factory: {fileSize, sha256, flashSize, address: 0, sameAsOta}}]}`. Only releases with a factory image, the default first. |
+| 9.25 | GET | `/admin/factory/releases/:id/image` | `factory.flash` | → the image (`application/octet-stream`, header `x-sha256`). The browser checks the sha256 before flashing and keeps the image in memory for the next boards. |
+| 9.26 | POST | `/admin/factory/runs` | `factory.flash` or `factory.monitor` | `{mac, chip, releaseId?, station?}` → `201 {run, history: {previousRuns, lastResult, lastReason, lastAt, device: {id, serial} \| null}}`. `releaseId` (going to flash) needs `factory.flash`; `422 CHIP_MISMATCH` when the board is another chip. A run on an already registered board is linked to it at once. |
+| 9.27 | PATCH | `/admin/factory/runs/:id` | the operator who started it | `{flashed?, flashMs?, checks?, result?, failReason?, logTail?, notes?}` → run. `checks` = the full list `[{id, ok, value?, ms?}]`. A `result` (`pass`/`fail`/`aborted`) finishes the run and writes the audit row `factory.run`. `pass` with a failed check → `422 CHECKS_FAILED`; a finished run → `409 RUN_FINISHED`. `logTail` keeps the last 16 KB. |
+| 9.28 | GET | `/admin/factory/runs?q&result&operatorId&station&releaseId&from&to&limit&cursor` | `factory.flash`, `factory.monitor` or `devices.view` | `q` = MAC (any format) or serial. → `{items, summary: {pass, fail, aborted, running, byOperator: [{operatorName, pass, fail}], byReason: [{reason, n}]}, nextCursor}`. The summary covers the whole filter. |
+| 9.29 | GET | `/admin/factory/runs/:id` | as 9.28 | → run with `checks`, `logTail`, `notes`. Helper: `GET /admin/factory/operators`. |
+| 8.4 (extra field) | POST | `/admin/devices` | `devices.register` | optional `factoryRunId`: the run must be for this MAC (`422 RUN_MAC_MISMATCH`) and have passed (`422 RUN_NOT_PASSED`); the run is then linked to the new device. |
+
+**Bench checks** (web app `src/lib/checks.ts`, matched against what `firmware/sleeplamp` prints):
+
+| id | Pass when | Limit |
+|---|---|---|
+| `boot` | `===== … v<ver> booting` appears; a crash line (`Guru Meditation`, `Backtrace:`, brownout) fails it | 10 s after reset |
+| `version` | `<ver>` equals the flashed release (skipped when not flashed) | — |
+| `mac` | `[Argus] deviceId: <id>` equals the MAC read over USB | 15 s |
+| `heap` | `heap:` in the telemetry line ≥ 40 000 | 25 s |
+| `radar` | `[RADAR] link up` or `radar:OK` | 60 s |
+| `presence` | operator presses Start and sits or waves; `presence:1` | 30 s, can be skipped |
+
+Wi-Fi and MQTT are not bench checks: a fresh board has no saved Wi-Fi and opens its hotspot, which is expected.
+
 ## 10. Socket.IO (live updates to the browser)
 
 - **Connect:** `io({ withCredentials: true, transports: ["websocket"] })`, same origin, through Nginx at `/socket.io`. The server reads the `argus_at` cookie from the handshake. If it fails: `TOKEN_EXPIRED`, `INVALID_TOKEN` or `USER_DISABLED`.
@@ -439,7 +481,9 @@ These are fields the old Firebase site showed. **Live only, never stored.**
 | Admin devices / detail | 8.2, 8.3, 8.5–8.12, socket `command:status` |
 | Register by USB | 8.4, 8.2 (`registeredFrom=today`) |
 | Customers / detail | 7.1–7.5 |
-| Firmware & OTA | 9.1–9.8, socket `rollout:progress` |
+| Firmware & OTA | 9.1–9.8, 9.22–9.23, socket `rollout:progress` |
+| Manufacturing station | 9.24–9.27, 8.4 (`factoryRunId`) |
+| Factory log | 9.28–9.29 |
 | Team & permissions | 9.10–9.18 |
 | Audit log | 9.19 |
 | Sleep rules | 9.20, 9.21 |

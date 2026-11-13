@@ -225,7 +225,7 @@ test('delete account releases owned devices and their sleep history', async () =
     { fullName: 'New', phone: p, country: 'IN', password: 'sleepwell24' })).status, 201);
 });
 
-test('create-admin makes an Owner with all 11 staff permissions', async () => {
+test('create-admin makes an Owner with all 14 staff permissions', async () => {
   const p = phone();
   await run('node', [path.join(__dirname, '../scripts/create-admin.js'), '--name', 'Test Owner', '--phone', p, '--country', 'IN'],
     { env: { ...process.env, ARGUS_ADMIN_PASSWORD: 'ownerpass123' } });
@@ -233,7 +233,7 @@ test('create-admin makes an Owner with all 11 staff permissions', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.user.kind, 'admin');
   assert.equal(r.body.user.role.name, 'Owner');
-  assert.equal(r.body.user.permissions.length, 11);
+  assert.equal(r.body.user.permissions.length, 14);
 });
 
 test('SMS OTP routes answer 501 NOT_ENABLED', async () => {

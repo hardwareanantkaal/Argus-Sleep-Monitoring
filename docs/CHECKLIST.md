@@ -51,6 +51,7 @@ Updated 4 Nov 2026. Live site: https://argus.ecobridgers.com
 | Device commands, events | [~] waits for step 7 |
 | Customers, team and roles, audit, sleep rules | [~] waits for step 8 |
 | Firmware and OTA | [~] waits for step 9 |
+| Manufacturing station (flash, bench test, register) + Factory log | [~] built 13 Nov; not tried on a real board yet ([MANUFACTURING.md](MANUFACTURING.md)) |
 
 ## 4. Server (Contabo, shared with Water Tank)
 - [x] Code in `/opt/argus`; secrets generated on the server only

@@ -3,17 +3,19 @@
 // Firmware & OTA (API.md 9.1–9.8). Upload .bin (firmware.upload), start / pause / resume / cancel / retry
 // rollouts (firmware.rollout), live progress from Socket.IO rollout:progress.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAdminSocket } from '@/components/admin';
 import { Icon } from '@/components/Icon';
 import { useAuth, useToast } from '@/components/Providers';
 import { RequireStaff } from '@/components/Shell';
 import { Async, Head, useApi } from '@/components/ui';
-import { del, errText, post } from '@/lib/api';
+import { del, errText, patch, post, put } from '@/lib/api';
 import { ago, bytes, day } from '@/lib/format';
 import type { FirmwareRelease, Rollout } from '@/lib/types';
 
 const MAX = 4 * 1024 * 1024;
+const FACTORY_MAX = 16 * 1024 * 1024;
+const CHIPS = ['ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-S2', 'ESP32-C6', 'ESP8266'];
 
 export default function FirmwarePage() {
   return <RequireStaff perm="firmware.view"><Inner /></RequireStaff>;
@@ -26,6 +28,20 @@ function Inner() {
   const ro = useApi<{ items: Rollout[] }>('/admin/ota/rollouts');
   const [newRollout, setNewRollout] = useState(false);
   const canRoll = can('firmware.rollout');
+  const up = can('firmware.upload');
+  const facInput = useRef<HTMLInputElement>(null);
+  const [facFor, setFacFor] = useState<FirmwareRelease | null>(null);
+
+  const relAct = async (fn: () => Promise<unknown>, ok: string) => {
+    try { await fn(); toast(ok); rel.reload(); } catch (e) { toast(errText(e)); }
+  };
+  const addFactory = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !facFor) return;
+    const fd = new FormData(); fd.append('factoryFile', file);
+    await relAct(() => put(`/admin/firmware/${facFor.id}/factory-image`, fd), `Factory image added to ${facFor.version}`);
+  };
 
   useAdminSocket(['rollouts'], {
     'rollout:progress': (m: { rolloutId: string; counts: Rollout['counts']; status?: Rollout['status'] }) =>
@@ -89,7 +105,7 @@ function Inner() {
         <div className="card"><h2 style={{ marginBottom: 12 }}>Versions</h2>
           <Async q={rel}>{(d) => (
             <div className="tbl"><table>
-              <thead><tr><th>Version</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>sha256</th><th>Notes</th>{can('firmware.upload') && <th />}</tr></thead>
+              <thead><tr><th>Version</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
               <tbody>{d.items.map((f) => (
                 <tr key={f.id}>
                   <td className="mono"><b>{f.version}</b></td>
@@ -97,9 +113,15 @@ function Inner() {
                   <td className="mono">{f.chipModel}</td>
                   <td className="muted">{day(f.createdAt)} · {f.uploadedBy}</td>
                   <td>{bytes(f.fileSize)}</td><td className="num">{f.deviceCount}</td>
+                  <td>{f.factory ? <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                    {f.factory.isDefault ? <span className="pill acc" title="The manufacturing station picks this one for new boards">Factory default</span>
+                      : <span className="pill">{f.factory.sameAsOta ? 'same .bin' : `${bytes(f.factory.fileSize)} · ${f.factory.flashSize}`}</span>}
+                    {up && !f.factory.isDefault && <button className="btn ghost sm" onClick={() => relAct(() => patch(`/admin/firmware/${f.id}`, { factoryDefault: true }), `${f.version} is now the factory default for ${f.chipModel}`)}>Make default</button>}
+                    {up && !f.factory.sameAsOta && <button className="btn ghost sm" onClick={() => { if (confirm(`Remove the factory image of ${f.version}? The OTA file stays.`)) relAct(() => del(`/admin/firmware/${f.id}/factory-image`), 'Factory image removed'); }}>Remove</button>}
+                  </div> : up && f.chipModel !== 'ESP8266' ? <button className="btn ghost sm" onClick={() => { setFacFor(f); facInput.current?.click(); }}><Icon name="upload" size={15} /> Add</button> : <span className="muted">—</span>}</td>
                   <td className="mono xs muted" title={f.sha256}>{f.sha256.slice(0, 12)}</td>
                   <td className="muted" style={{ whiteSpace: 'normal', minWidth: 200 }}>{f.notes}</td>
-                  {can('firmware.upload') && <td><button className="btn danger sm" onClick={async () => {
+                  {up && <td><button className="btn danger sm" onClick={async () => {
                     if (!confirm(`Delete firmware ${f.version}?`)) return;
                     try { await del(`/admin/firmware/${f.id}`); toast('Deleted'); rel.reload(); } catch (e) { toast(errText(e)); }
                   }}>Delete</button></td>}
@@ -107,6 +129,8 @@ function Inner() {
               ))}</tbody>
             </table></div>
           )}</Async>
+          <input ref={facInput} type="file" accept=".bin" hidden onChange={addFactory} />
+          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing station writes at 0x0 on new boards. <b>Make default</b> picks it for that chip.</p>
         </div>
         <Upload onDone={() => rel.reload()} />
       </div>
@@ -119,6 +143,8 @@ function Upload({ onDone }: { onDone(): void }) {
   const toast = useToast();
   const up = can('firmware.upload');
   const [file, setFile] = useState<File | null>(null);
+  const [fac, setFac] = useState<File | null>(null);
+  const [chip, setChip] = useState('ESP32');
   const [version, setVersion] = useState('');
   const [channel, setChannel] = useState('beta');
   const [notes, setNotes] = useState('');
@@ -134,18 +160,25 @@ function Upload({ onDone }: { onDone(): void }) {
     const first = new Uint8Array(await file.slice(0, 1).arrayBuffer())[0];
     if (first !== 0xe9) return setErr('This is not an ESP32 app image (it should start with byte 0xE9). Upload the app .bin, not the merged or bootloader file.');
     if (!/^\d+\.\d+\.\d+([-.][0-9A-Za-z.]+)?$/.test(version.trim())) return setErr('Enter a version like 1.4.4 or 1.4.4-beta');
+    if (fac && fac.size > FACTORY_MAX) return setErr(`The factory image is ${bytes(fac.size)}; the limit is 16 MB.`);
     const fd = new FormData();
     fd.append('file', file); fd.append('version', version.trim()); fd.append('channel', channel); fd.append('notes', notes.trim());
+    fd.append('chipModel', chip);
+    if (fac && chip !== 'ESP8266') fd.append('factoryFile', fac);
     setBusy(true);
-    try { await post('/admin/firmware', fd); toast(`Uploaded ${version.trim()}`); setFile(null); setVersion(''); setNotes(''); setKey((k) => k + 1); onDone(); }
+    try { await post('/admin/firmware', fd); toast(`Uploaded ${version.trim()}`); setFile(null); setFac(null); setVersion(''); setNotes(''); setKey((k) => k + 1); onDone(); }
     catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
   };
 
   return (
     <div className="card"><h2 style={{ marginBottom: 14 }}>Upload a build</h2>
       <form className="form" onSubmit={submit}>
+        <div className="field"><label htmlFor="fw-chip">Chip</label><select className="inp mono" id="fw-chip" value={chip} onChange={(e) => setChip(e.target.value)} disabled={!up}>{CHIPS.map((c) => <option key={c}>{c}</option>)}</select></div>
         <div className="field"><label htmlFor="fw-file">Firmware file (.bin, max 4 MB)</label><input key={key} className="inp" type="file" id="fw-file" accept=".bin,application/octet-stream" disabled={!up} onChange={(e) => setFile(e.target.files?.[0] || null)} />
-          {file && <span className="hint">{file.name} · {bytes(file.size)}</span>}</div>
+          {file ? <span className="hint">{file.name} · {bytes(file.size)}</span> : <span className="hint">Arduino: <span className="mono">sleeplamp.ino.bin</span> (used for OTA)</span>}</div>
+        {chip === 'ESP8266' ? <p className="hint">ESP8266: one file is enough. Its .bin already holds the bootloader, so the station flashes the same file at 0x0.</p>
+          : <div className="field"><label htmlFor="fw-fac">Factory image (optional, merged .bin)</label><input key={`f${key}`} className="inp" type="file" id="fw-fac" accept=".bin,application/octet-stream" disabled={!up} onChange={(e) => setFac(e.target.files?.[0] || null)} />
+            <span className="hint">Arduino: <span className="mono">sleeplamp.ino.merged.bin</span>. Needed to flash new boards on the Manufacturing station. Its app part must be the same build as the file above.</span></div>}
         <div className="field"><label htmlFor="fw-v">Version</label><input className="inp mono" id="fw-v" placeholder="1.4.4" value={version} onChange={(e) => setVersion(e.target.value)} disabled={!up} /></div>
         <div className="field"><label htmlFor="fw-ch">Channel</label><select className="inp" id="fw-ch" value={channel} onChange={(e) => setChannel(e.target.value)} disabled={!up}><option>beta</option><option>stable</option></select></div>
         <div className="field"><label htmlFor="fw-n">What changed</label><textarea className="inp" id="fw-n" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!up} /></div>

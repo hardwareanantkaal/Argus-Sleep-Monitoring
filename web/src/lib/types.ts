@@ -5,7 +5,8 @@ export type StaffPerm =
   | 'devices.view' | 'devices.command' | 'devices.register'
   | 'customers.view' | 'customers.edit'
   | 'firmware.view' | 'firmware.upload' | 'firmware.rollout'
-  | 'team.manage' | 'audit.view' | 'platform.settings' | 'vendors.manage';
+  | 'team.manage' | 'audit.view' | 'platform.settings' | 'vendors.manage'
+  | 'factory.flash' | 'factory.monitor';
 
 export interface User {
   id: string;
@@ -196,6 +197,26 @@ export interface CustomerDetail extends CustomerRow {
 export interface FirmwareRelease {
   id: string; version: string; channel: 'stable' | 'beta'; chipModel: string; fileSize: number; sha256: string;
   notes: string | null; uploadedBy: string; createdAt: string; deviceCount: number;
+  /** The image the manufacturing station writes at 0x0 (API.md §9b); null = none yet */
+  factory?: { fileSize: number; sha256: string; flashSize: string; isDefault: boolean; sameAsOta: boolean } | null;
+}
+
+// Manufacturing station (API.md §9b)
+export interface FactoryRelease {
+  id: number; version: string; channel: 'stable' | 'beta'; chipModel: string; notes: string | null; isDefault: boolean;
+  factory: { fileSize: number; sha256: string; flashSize: string; address: number; sameAsOta: boolean };
+}
+export type FactoryResult = 'running' | 'pass' | 'fail' | 'aborted';
+export interface FactoryRun {
+  id: number; mac: string; chip: string; releaseId: number | null; fwVersion: string | null; flashed: boolean; flashMs: number | null;
+  result: FactoryResult; failReason: string | null; station: string | null; operatorName: string; serial: string | null;
+  deviceId: string | null; startedAt: string; finishedAt: string | null;
+  checks?: { id: string; ok: boolean | null; value?: string; ms?: number }[]; notes?: string | null; logTail?: string | null;
+}
+export interface FactoryRunList {
+  items: FactoryRun[]; nextCursor: number | null;
+  summary: { pass: number; fail: number; aborted: number; running: number;
+    byOperator: { operatorName: string; pass: number; fail: number }[]; byReason: { reason: string; n: number }[] };
 }
 export interface Rollout {
   id: string; version: string; target: string; createdBy: string; createdAt: string;

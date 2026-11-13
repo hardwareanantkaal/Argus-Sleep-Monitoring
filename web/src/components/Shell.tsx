@@ -26,6 +26,8 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/devices', label: 'Devices', icon: 'chip', perm: 'devices.view' },
   { href: '/admin/register', label: 'Register', icon: 'usb', perm: 'devices.register' },
   { href: '/admin/customers', label: 'Customers', icon: 'users', perm: 'customers.view' },
+  { href: '/admin/station', label: 'Station', icon: 'bolt', perm: 'factory.monitor' },
+  { href: '/admin/factory', label: 'Factory log', icon: 'list', perm: 'devices.view' },
   { href: '/admin/firmware', label: 'Firmware', icon: 'upload', perm: 'firmware.view' },
   { href: '/admin/team', label: 'Team', icon: 'shield', perm: 'team.manage' },
   { href: '/admin/audit', label: 'Audit log', icon: 'list', perm: 'audit.view' },

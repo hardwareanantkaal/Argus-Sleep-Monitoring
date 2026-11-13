@@ -27,7 +27,7 @@ const AREAS: [Area, RegExp][] = [
   ['devices', /^\/devices/],
   ['admin-devices', /^\/admin\/(dashboard|devices)/],
   ['customers', /^\/admin\/customers/],
-  ['ota', /^\/admin\/(firmware|ota)/],
+  ['ota', /^\/admin\/(firmware|ota|factory)/],
   ['team', /^\/admin\/(team|roles)/],
   ['audit', /^\/admin\/audit/],
   ['platform', /^\/admin\/platform-settings/],

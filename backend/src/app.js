@@ -46,6 +46,7 @@ function createApp({ mqttConnected = () => false } = {}) {
   admin.use(requireUser);
   admin.use(require('./routes/admin/devices'));
   admin.use(require('./routes/admin/firmware'));
+  admin.use(require('./routes/admin/factory'));
   admin.use(require('./routes/admin/team'));
   admin.use(require('./routes/admin/customers'));
   admin.use(require('./routes/admin/vendors'));

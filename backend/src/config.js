@@ -55,6 +55,8 @@ module.exports = {
   otaDir: process.env.OTA_DIR || require('path').join(__dirname, '../../ota'),
   otaTokenTtlS: int('OTA_TOKEN_TTL_S', 600),
   otaMaxBytes: int('OTA_MAX_BYTES', 4 * 1024 * 1024),
+  // Factory image (merged .bin = the whole flash) for the manufacturing station
+  factoryMaxBytes: int('FACTORY_MAX_BYTES', 16 * 1024 * 1024),
   fwBaseUrl: (process.env.FW_BASE_URL || process.env.PUBLIC_BASE_URL || 'http://localhost:3100').replace(/\/+$/, ''),
   commandTtlS: int('COMMAND_TTL_S', 30),
 };
