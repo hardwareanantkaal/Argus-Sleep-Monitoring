@@ -48,9 +48,8 @@ function Inner() {
               <div className="field"><label htmlFor="ps-min">Hide sessions shorter than</label>
                 <div className="row" style={{ flexWrap: 'nowrap' }}><input className="inp num" id="ps-min" type="number" min={0} max={120} value={f.minSessionMin} onChange={(e) => setF({ ...f, minSessionMin: Number(e.target.value) })} style={{ maxWidth: 110 }} /><span className="muted">min</span></div>
                 <span className="hint">Short sessions are still stored, just not shown in history or trends. Default 25.</span></div>
-              <div className="field"><label htmlFor="ps-cut">New devices start a new night at</label>
-                <input className="inp" id="ps-cut" type="time" value={f.defaultSleepCutoff} onChange={(e) => setF({ ...f, defaultSleepCutoff: e.target.value })} style={{ maxWidth: 160 }} />
-                <span className="hint">In the device&apos;s own time zone. Only devices claimed from now on get this; customers can change it per device.</span></div>
+              {/* 13 Nov: "New devices start a new night at" removed from this screen (owner: not needed).
+                  The value (default 12:00) is still saved unchanged with the other rules. */}
             </div>
             {err && <p className="err" role="alert">{err}</p>}
             <button className="btn" type="submit" style={{ alignSelf: 'flex-start' }} disabled={busy}>{busy ? 'Saving…' : 'Save rules'}</button>
