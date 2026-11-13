@@ -258,6 +258,12 @@ on('POST', '/devices/([^/]+)/recalibrate', (m) => {
   audit(u, 'device.command.recalibrate', 'device', d.serial);
   return { commandId, status: d.online ? 'sent' : 'expired' };
 });
+// 3.8c End session (firmware 2.5.1): needs settings.edit; offline → expired.
+on('POST', '/devices/([^/]+)/end-session', (m) => {
+  const u = me(); const d = device(u, m[1], 'settings.edit');
+  audit(u, 'device.command.end_session', 'device', d.serial);
+  return { commandId: rid('c'), status: d.online ? 'sent' : 'expired' };
+});
 on('DELETE', '/devices/([^/]+)', (m, b) => {
   const u = me(); const d = device(u, m[1], 'owner');
   if ((b?.confirmName || '').trim() !== d.name) fail(422, 'CONFIRM_MISMATCH', 'Type the device name exactly to confirm', 'confirmName');

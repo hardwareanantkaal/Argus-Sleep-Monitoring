@@ -41,6 +41,7 @@ volatile bool           g_sensorReset = false;
 volatile bool           g_recalDone = false;
 volatile bool           radarOk = false;
 volatile bool           g_configMode = false;
+volatile bool           g_endSession = false;
 TeeLog                  LOG;
 SleepLive               live;
 SessSample              sessBuf[SESS_MAX];

@@ -49,6 +49,7 @@ static uint32_t startMs=0;                 // millis() at bed entry
 static int  hrSleep=0;                     // asleep (light) heart-rate baseline, slow EMA
 static int  hrSleepN=0;                    // light minutes that fed hrSleep
 static int  deepRun=0;                     // length of the current deep block
+static int  deepBad=0;                     // consecutive not-very-quiet minutes inside deep (2.4.1 hysteresis)
 static int  lightSinceDeep=0;              // light minutes since the last deep block ended
 static int  sleepRun=0;                    // asleep minutes since the latest onset
 // diagnostics only (sent in the session message, never used for staging):
@@ -70,7 +71,7 @@ static void resetSession() {
   sOn=false; stage=3; bedMin=deepMin=lightMin=awakeMin=0;
   quietRun=vQuietRun=oobRun=0; onset=-1; wakes=turns=0; hrBase=0;
   sesHR=sesBR=0; sesHRn=sesBRn=0; startTs=0; oobMin=exits=0; startMs=0;
-  hrSleep=hrSleepN=0; deepRun=0; lightSinceDeep=DEEP_REFRACT_EP; sleepRun=0;
+  hrSleep=hrSleepN=0; deepRun=0; deepBad=0; lightSinceDeep=DEEP_REFRACT_EP; sleepRun=0;
   mrSum=0; mrN=0; mrMin=100; mrQuiet=mrVQuiet=0; bedOff=0;
 }
 
@@ -222,28 +223,39 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
             bool hrUnknown = epHR == 0 || base == 0;
             if (stage == 1) {
               lightMin++; lightSinceDeep++;
-              if (epHR > 0) { hrSleep = hrSleep ? (hrSleep * 7 + epHR) / 8 : epHR; hrSleepN++; }
+              // 2.4.1: learn the light-sleep HR only from NOT-very-quiet minutes.
+              // Learning it during the very-quiet run that leads into deep made
+              // the baseline equal the current HR, so "HR below baseline" was
+              // almost never true and deep almost never started.
+              if (epHR > 0 && !vQuiet) { hrSleep = hrSleep ? (hrSleep * 7 + epHR) / 8 : epHR; hrSleepN++; }
+              bool hrHigh = epHR > 0 && base > 0 && epHR > base + 1;
               // deep entry: a long very-quiet run, some light sleep first,
               // a gap since the last deep block, and physiological evidence.
               bool evidence;
               if (deepPct >= DEEP_HARD_PCT && slept >= 60) evidence = false;
               else if (deepPct >= DEEP_TARGET_PCT && slept >= 60)
-                evidence = radarDeep && hrLow;              // over budget: need both
-              else if (slept >= 300)                        // late night: deep is rare
-                evidence = radarDeep && (hrLow || hrUnknown);
-              else
-                evidence = radarDeep || hrLow || (hrUnknown && vQuietRun >= DEEP_AFTER_EP * 2);
+                evidence = radarDeep || hrLow;              // over budget: radar OR heart says deep
+              else if (slept >= 300)                        // late night: deep is rarer
+                evidence = radarDeep || (hrLow && vQuietRun >= DEEP_AFTER_EP + 4);
+              else                                          // early night: a long still run is enough unless HR is up
+                evidence = radarDeep || hrLow || (!hrHigh && vQuietRun >= DEEP_AFTER_EP + 4);
               if (vQuietRun >= DEEP_AFTER_EP && sleepRun >= DEEP_FIRST_LIGHT &&
                   lightSinceDeep >= DEEP_REFRACT_EP && evidence) {
-                stage = 0; deepRun = 0;
+                stage = 0; deepRun = 0; deepBad = 0;
                 LOG.println(F("[SLEEP] deep"));
               }
+              (void)hrUnknown;
             } else {                            // deep
               deepMin++; deepRun++;
-              bool hrUp = epHR > 0 && base > 0 && epHR >= base;
-              if (!vQuiet || hrUp || deepRun >= DEEP_MAX_BLOCK ||
-                  (!radarDeep && ssVote[1] * 2 > nSamp && deepRun >= 10)) {
-                stage = 1; lightSinceDeep = 0; deepRun = 0;
+              // 2.4.1 FIX ("95% light"): deep used to end the first minute HR was
+              // >= the light-sleep baseline (true about half the time, HR wobbles)
+              // or the first minute that was not "very quiet". Now it needs HR
+              // CLEARLY up, real movement, or 2 not-very-quiet minutes in a row.
+              bool hrUp = epHR > 0 && base > 0 && epHR >= base + max(3, base / 20);
+              deepBad = vQuiet ? 0 : deepBad + 1;
+              if (!quiet || deepBad >= 2 || hrUp || deepRun >= DEEP_MAX_BLOCK ||
+                  (!radarDeep && ssVote[1] * 2 > nSamp && deepRun >= 20)) {
+                stage = 1; lightSinceDeep = 0; deepRun = 0; deepBad = 0;
                 LOG.println(F("[SLEEP] deep -> light"));
               }
             }
@@ -263,9 +275,28 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
         resetSession();
       }
     }
+    // 2.5.1 safety close: "presence" that never goes away (a fan, a curtain,
+    // someone else in the room) kept a session open for 14+ hours, so the
+    // night never reached the server. Close it after SESSION_MAX_MIN.
+    if (sOn && !repReady && bedMin >= SESSION_MAX_MIN) {
+      LOG.printf("[SLEEP] session open %d min, closing it (safety limit)\n", bedMin);
+      buildReport(outRep, oobRun); repReady = true;
+      resetSession();
+    }
     epStart = now; nSamp = 0; sumRange = 0; bursts = 0;
     presCnt = bedCnt = 0; sumHR = sumBR = 0; nHR = nBR = 0;
     memset(ssVote, 0, sizeof(ssVote));
+  }
+
+  // 2.5.1 "End session" from the panel (end_session command), like the
+  // original SleepLamp dashboard button: send what we have now.
+  if (g_endSession) {
+    g_endSession = false;
+    if (sOn && bedMin - oobRun >= 1) {
+      buildReport(outRep, oobRun); repReady = true;
+      LOG.printf("[SLEEP] session ended by the user (%d min in bed)\n", bedMin - oobRun);
+    } else if (sOn) LOG.println(F("[SLEEP] session ended by the user, under 1 min, discarded"));
+    resetSession();
   }
 
   outLive.active  = sOn;     outLive.stage    = stage;

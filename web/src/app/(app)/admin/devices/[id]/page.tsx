@@ -21,6 +21,7 @@ const CMDS: [CommandType, string][] = [
   ['ota_check', 'Check for a firmware update now'],
   ['logs', 'Upload the last log lines'],
   ['recalibrate', 'Recalibrate radar (about 11 s)'],
+  ['end_session', 'End the running sleep session now (fw 2.5.1+)'],
 ];
 const STATUS_PILL: Record<CommandRow['status'], [string, string]> = {
   queued: ['Queued', ''], sent: ['Sent', 'warn'], acked: ['Acked', 'ok'], done: ['Done', 'ok'], failed: ['Failed', 'bad'], expired: ['Expired', 'bad'],

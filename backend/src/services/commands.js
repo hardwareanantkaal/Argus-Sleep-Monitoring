@@ -10,7 +10,7 @@ const mqtt = require('./mqtt');
 const live = require('./live');
 const realtime = require('./realtime');
 
-const TTL_S = { config_mode: 30, recalibrate: 30, reboot: 24 * 3600, ota_check: 24 * 3600, logs: 24 * 3600 };
+const TTL_S = { config_mode: 30, recalibrate: 30, end_session: 30, reboot: 24 * 3600, ota_check: 24 * 3600, logs: 24 * 3600 };
 const LOG_MAX = 65536;
 
 const isOnline = (deviceId) => !!live.getStatus(deviceId)?.online;

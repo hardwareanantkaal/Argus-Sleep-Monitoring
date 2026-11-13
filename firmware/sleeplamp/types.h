@@ -86,6 +86,7 @@ extern volatile bool           g_sensorReset; // please reset the radar
 extern volatile bool           g_recalDone;   // sensor task -> MQTT: user reset finished, radar back up
 extern volatile bool           radarOk;       // sensor task -> world: radar link healthy
 extern volatile bool           g_configMode;  // set true -> device opens the AP setup hotspot
+extern volatile bool           g_endSession;  // MQTT -> sensor task: close the running session now
 extern SleepLive               live;          // engine -> world (guarded by mux)
 extern SessSample              sessBuf[SESS_MAX];
 extern int                     sessN, sessStart;

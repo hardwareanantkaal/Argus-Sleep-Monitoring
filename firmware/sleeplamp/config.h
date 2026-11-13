@@ -33,6 +33,7 @@
 #define SESSION_QUEUE_MAX 30               // keep at most this many un-acked sessions in flash
 #define HYP_EPOCH_S       60               // "epoch_s" in the session message (= HYP_BLOCK_MIN*60)
 #define SESSION_CKPT_MS   300000UL         // save the running session to flash this often (power-cut safety)
+#define SESSION_MAX_MIN   960              // close a session that has been open this long (16 h)
 
 // ---------------- time sync (NTP) ----------------
 // Timestamps sent to the server are always Unix UTC. The offset below is only
@@ -68,6 +69,6 @@
 // ---------------- misc ----------------
 // MUST match the version you type when uploading the .bin for OTA, or the
 // device reports the update as failed ("expected vX but running vY").
-#define FW_VERSION      "2.4.0"
+#define FW_VERSION      "2.5.1"
 #define SERIAL_PRINT_MS 2000
 #define LOG_RING_BYTES  8192      // recent log kept in RAM for the `logs` command

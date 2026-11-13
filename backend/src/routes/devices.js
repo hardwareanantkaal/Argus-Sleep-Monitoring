@@ -256,6 +256,15 @@ router.post('/:id/recalibrate', device('settings.edit'), async (req, res) => {
   res.status(202).json({ commandId: c.id, status: commands.apiStatus(c.status) });
 });
 
+// 3.8c "End session" = end_session command (firmware 2.5.1): the sensor closes
+// the running sleep session and sends it now. Expires after 30 s offline.
+router.post('/:id/end-session', device('settings.edit'), async (req, res) => {
+  const c = await commands.createNow(req.device.id, 'end_session', req.user.id);
+  await audit(req, { action: 'device.command.end_session', targetType: 'device', targetId: req.device.id,
+    targetLabel: req.device.serial_no, detail: commands.apiStatus(c.status) });
+  res.status(202).json({ commandId: c.id, status: commands.apiStatus(c.status) });
+});
+
 // 4.1 Nights (main sleeps) for the last `days` sleep dates, or from..to.
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
   .refine((v) => DateTime.fromISO(v).isValid, 'Not a real date');

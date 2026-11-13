@@ -92,7 +92,7 @@ export default function LivePage() {
 
           <Section title="Real-Time Live Telemetry" sub="Direct sensor stream">
             <LiveCards lv={lv} online={online} hr={hist.current.hr} br={hist.current.br} />
-            <LiveHypnogram lv={lv} tz={d.tz} stages={stages.current} />
+            <LiveHypnogram lv={lv} tz={d.tz} stages={stages.current} id={d.id} canEnd={d.myPermissions.includes('settings.edit')} />
           </Section>
 
           <Section title="Composite Telemetry & Diagnostics" sub={lv?.cmp && !lv.cmp.resp && !lv.cmp.hr ? "Collecting: the sensor updates these about every 10 minutes of sleep" : "The sensor's own rolling values, updated about every 10 minutes"}>
@@ -232,8 +232,19 @@ function LiveCards({ lv, online, hr: hrs, br: brs }: { lv: LiveValues | null; on
   );
 }
 
-function LiveHypnogram({ lv, tz, stages }: { lv: LiveValues | null; tz: string; stages: { first: number | null; mins: string[] } }) {
+function LiveHypnogram({ lv, tz, stages, id, canEnd }: { lv: LiveValues | null; tz: string; stages: { first: number | null; mins: string[] }; id: string; canEnd: boolean }) {
   const s = lv?.sess;
+  const toast = useToast();
+  const [ending, setEnding] = useState(false);
+  // "End session" (firmware 2.5.1+): the sensor closes the session now and sends it to History.
+  const endSession = async () => {
+    if (!confirm('End the current sleep session now? It is saved to History as it is.')) return;
+    setEnding(true);
+    try {
+      const r = await post<{ commandId: string; status: 'sent' | 'expired' }>(`/devices/${id}/end-session`);
+      toast(r.status === 'sent' ? 'Session ended. It appears in History in a few seconds.' : 'The sensor is offline, so the session can’t be ended now.');
+    } catch (e) { toast(errText(e)); } finally { setEnding(false); }
+  };
   const firstMin = firstLocalMin(stages.first, tz);
   const hyp = stages.mins.join('');
   return (
@@ -245,6 +256,7 @@ function LiveHypnogram({ lv, tz, stages }: { lv: LiveValues | null; tz: string; 
           ? <StageTimeline hyp={hyp} startMin={firstMin} epochMin={1} startIso={new Date((stages.first ?? 0) * 60000).toISOString()} tz={tz} label="Live sleep stages" />
           : <p className="sub">Building the chart… one block per minute.</p>}
         <span className="xs muted">Totals cover the whole session (from the sensor). The chart covers the time since this page opened.</span>
+        {canEnd && <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={endSession} disabled={ending}><Icon name="moon" size={15} /> {ending ? 'Ending…' : 'End session now'}</button>}
       </>}
     </div>
   );

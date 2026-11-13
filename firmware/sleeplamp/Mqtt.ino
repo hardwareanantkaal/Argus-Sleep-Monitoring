@@ -260,6 +260,8 @@ static void onCommand(const char* json) {
     mqttPublish("status", "online", 1, true);
   } else if (!strcmp(c, "recalibrate")) {             // MISSING API (API.md §11a)
     recalId = id; g_recalDone = false; g_sensorReset = true;  // acked in mqttLoop when done
+  } else if (!strcmp(c, "end_session")) {             // 2.5.1: close the running session now
+    g_endSession = true; cmdAck(id, true);
   } else if (!strcmp(c, "logs")) {
     sendLogs(id); cmdAck(id, true);
   } else {

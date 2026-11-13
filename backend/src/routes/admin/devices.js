@@ -302,7 +302,7 @@ router.delete('/devices/:id', requireStaff('devices.register'), async (req, res)
 
 // 8.8 Send a command. Offline sensors: queued (config_mode 30 s, others 24 h).
 router.post('/devices/:id/commands', requireStaff('devices.command'), async (req, res) => {
-  const body = parse(z.object({ type: z.enum(['reboot', 'config_mode', 'ota_check', 'logs', 'recalibrate']) }), req.body);
+  const body = parse(z.object({ type: z.enum(['reboot', 'config_mode', 'ota_check', 'logs', 'recalibrate', 'end_session']) }), req.body);
   const d = await loadDevice(req.params.id);
   const c = await commands.create(d.id, body.type, req.user.id);
   await audit(req, { action: `device.command.${body.type}`, targetType: 'device', targetId: d.id,
