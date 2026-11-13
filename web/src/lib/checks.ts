@@ -31,13 +31,17 @@ export interface CheckStatus { ok: boolean | null; state: CheckState; value: str
 export interface LiveVals { radar?: string; pr?: number; hr?: number; br?: number; heap?: number; mqtt?: string }
 export interface CheckResult { id: CheckId; ok: boolean | null; value?: string; ms?: number }
 
-/** expect.version: the flashed release, or null when the board was not flashed (test only). */
-export function createChecker(expect: { version: string | null; mac: string }) {
+/** expect.version: the release the board should run. `from` says where it comes from: 'flashed' (flashed on
+ *  this screen) or 'selected' (not flashed here: compared with the release chosen on the Flash tab).
+ *  null: nothing to compare with, so the version read from the banner is only shown. */
+export function createChecker(expect: { version: string | null; mac: string; from?: 'flashed' | 'selected' }) {
   const macId = (expect.mac || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
   const ck = Object.fromEntries(CHECKS.map((c) => [c.id, { ok: null, state: 'wait', value: '' }])) as Record<CheckId, CheckStatus>;
   ck.boot.state = 'run';
   ck.radar.state = 'run';
-  if (!expect.version) Object.assign(ck.version, { state: 'skip', value: 'not flashed' });
+  Object.assign(ck.version, { state: 'run', value: 'reading…' });
+  const versionHint = !expect.version ? 'Version the board reports'
+    : expect.from === 'selected' ? `Same as ${expect.version} (selected release)` : `Same as the flashed release (${expect.version})`;
   const vals: LiveVals = {};
   let presenceAt: number | null = null;
 
@@ -50,12 +54,17 @@ export function createChecker(expect: { version: string | null; mac: string }) {
   return {
     ck,
     vals,
+    versionHint,
     /** One serial line; t = seconds since the board was reset. */
     feed(line: string, t: number) {
       let m: RegExpMatchArray | null;
       if ((m = line.match(RE.banner))) {
         set('boot', true, `${t.toFixed(1)} s`, t);
-        if (expect.version) set('version', m[1] === expect.version, `v${m[1]}`, t);
+        if (expect.version && m[1] === expect.version) set('version', true, `v${m[1]}`, t);
+        // Flashed here and another version boots: fail. Not flashed here: only a warning, the board may run an older build.
+        else if (expect.version && expect.from !== 'selected') set('version', false, `v${m[1]}, expected v${expect.version}`, t);
+        else if (expect.version && ck.version.state === 'run') Object.assign(ck.version, { ok: null, state: 'skip', value: `v${m[1]} (not ${expect.version})` });
+        else if (ck.version.state === 'run') Object.assign(ck.version, { ok: null, state: 'skip', value: `v${m[1]}` });
         if (ck.mac.state === 'wait') ck.mac.state = 'run';
       }
       if ((m = line.match(RE.devId))) {
@@ -81,6 +90,7 @@ export function createChecker(expect: { version: string | null; mac: string }) {
     /** Call a few times a second: applies the time limits. */
     tick(t: number) {
       if (ck.boot.state === 'run' && t > LIMITS.bootS) set('boot', false, `no banner in ${LIMITS.bootS} s`, t);
+      if (ck.version.state === 'run' && t > LIMITS.bootS) set('version', false, 'no banner', t);
       if ((ck.mac.state === 'wait' || ck.mac.state === 'run') && t > LIMITS.macS) set('mac', false, 'no deviceId line', t);
       if (ck.heap.state === 'wait' && t > LIMITS.heapS) set('heap', false, 'no telemetry line', t);
       if (ck.radar.state === 'run' && t > LIMITS.radarS) set('radar', false, `no answer in ${LIMITS.radarS} s`, t);

@@ -157,11 +157,11 @@ function Inner() {
     conn.current = b; port.current = b.port; setLink('boot');
     return b;
   }
-  async function enterMonitor(flashedVersion: string | null) {   // plain serial monitor, board running its code
+  async function enterMonitor(expect: { version: string | null; from: 'flashed' | 'selected' }) {   // plain serial monitor, board running its code
     if (link === 'monitor' && mon.current) return;
     if (conn.current) { await leaveBootloader(conn.current); await releaseBoard(conn.current); conn.current = null; }
     lines.current = []; partial.current = '';
-    checker.current = createChecker({ version: flashedVersion, mac: board!.mac });
+    checker.current = createChecker({ ...expect, mac: board!.mac });
     const m = new Monitor(port.current, onSerialText);
     await m.open(115200);
     mon.current = m;
@@ -248,7 +248,10 @@ function Inner() {
     try {
       // Same board record as the flash just before; otherwise a new "test only" record
       if (!runRef.current || runRef.current.result !== 'running') await newRun(null);
-      await enterMonitor(runRef.current?.flashed ? runRef.current.fwVersion : null);
+      // Flashed on this screen: must boot that version. Otherwise compare with the release picked on the Flash tab.
+      const r = runRef.current;
+      await enterMonitor(r?.flashed && r.fwVersion ? { version: r.fwVersion, from: 'flashed' }
+        : { version: releases.find((x) => x.id === relId)?.version ?? null, from: 'selected' });
     } catch (e) { setErr(portHint(e)); } finally { setBusy(''); }
   }
 
@@ -370,7 +373,7 @@ function Inner() {
               {CHECKS.map((k) => { const s = ck[k.id]; return (
                 <div key={k.id} className={`ck ${s.state === 'ok' ? 'ok' : s.state === 'bad' ? 'bad' : s.state === 'run' ? 'run' : ''}`}>
                   <span className="st">{s.state === 'ok' ? <Icon name="check" size={14} /> : s.state === 'bad' ? '✕' : s.state === 'run' ? <span className="dot pulse" /> : s.state === 'skip' ? '–' : ''}</span>
-                  <span className="stack" style={{ gap: 0 }}><b className="small">{k.label}</b><span className="xs muted">{k.hint}</span></span>
+                  <span className="stack" style={{ gap: 0 }}><b className="small">{k.label}</b><span className="xs muted">{k.id === 'version' && c ? c.versionHint : k.hint}</span></span>
                   {k.id === 'presence' && s.state === 'wait'
                     ? <span className="row" style={{ gap: 4 }}>
                       <button className="btn ghost sm" disabled={ck.radar.state !== 'ok'} title={ck.radar.state !== 'ok' ? 'Waits for the radar link' : ''} onClick={() => c!.startPresence(sec())}>Start</button>

@@ -41,12 +41,23 @@ test('wrong version, wrong MAC, low heap and crash fail; time limits apply', () 
   assert.equal(c.firstFailed(), 'boot');
 });
 
-test('test only (not flashed) skips the version check; presence can be skipped', () => {
+test('test only (not flashed): version is shown, or compared with the selected release; presence can be skipped', () => {
   const c = createChecker({ version: null, mac: '348518a10f22' });
+  assert.equal(c.ck.version.state, 'run');
   BOOT.forEach((l, i) => c.feed(l, i));
   c.skipPresence();
   assert.equal(c.ck.version.state, 'skip');
+  assert.equal(c.ck.version.value, 'v2.4.0');
   assert.equal(c.allPassed(), true);
+  // Not flashed here but the board runs the selected release: pass
+  const s = createChecker({ version: '2.4.0', mac: '348518a10f22', from: 'selected' });
+  BOOT.forEach((l, i) => s.feed(l, i));
+  assert.equal(s.ck.version.state, 'ok');
+  // Not flashed here and an older build boots: a warning, not a failure
+  const o = createChecker({ version: '2.5.1', mac: '348518a10f22', from: 'selected' });
+  BOOT.forEach((l, i) => o.feed(l, i));
+  assert.equal(o.ck.version.state, 'skip');
+  assert.equal(o.ck.version.value, 'v2.4.0 (not 2.5.1)');
   const c2 = createChecker({ version: null, mac: '348518a10f22' });
   c2.tick(11);
   assert.equal(c2.ck.boot.state, 'bad');

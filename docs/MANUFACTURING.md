@@ -36,7 +36,7 @@ Menu **Manufacturing**. First press **Connect board** (top card) and pick the bo
   | Test | Pass when | Limit |
   |---|---|---|
   | Boots | `===== … vX.Y.Z booting` appears | 10 s |
-  | Firmware version | that version = the flashed release | — |
+  | Firmware version | the version in the banner = the release flashed on this screen. Not flashed here (or the board was replugged): compared with the release picked on the Flash tab, a different version is only a warning | 10 s |
   | Device ID | `[Argus] deviceId:` = the MAC read over USB | 15 s |
   | Free memory | `heap:` in the telemetry ≥ 40 000 | 25 s |
   | Radar link | `[RADAR] link up` or `radar:OK` | 60 s |
