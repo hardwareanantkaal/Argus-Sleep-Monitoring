@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AuthLayout, SupportCard, useNextParam } from '@/components/AuthLayout';
 import { useAuth } from '@/components/Providers';
-import { homeFor } from '@/components/Shell';
+import { landingFor } from '@/components/Shell';
 import { PhoneInput } from '@/components/ui';
 import { errText } from '@/lib/api';
 import { isLive } from '@/lib/config';
@@ -30,7 +30,7 @@ export default function LoginPage() {
   const [forgot, setForgot] = useState(false);
 
   // Already logged in (e.g. opened /login in a new tab): go on.
-  useEffect(() => { if (user && !busy) router.replace(next || homeFor(user)); }, [user, busy, next, router]);
+  useEffect(() => { if (user && !busy) router.replace(landingFor(user, next)); }, [user, busy, next, router]);
 
   const phone = toE164(code, local);
   const submit = async (e: React.FormEvent) => {
@@ -41,7 +41,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const u = await login(phone, pw);
-      router.replace(next || homeFor(u));
+      router.replace(landingFor(u, next));
     } catch (e2) {
       setErr(errText(e2));
       setBusy(false);

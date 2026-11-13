@@ -164,11 +164,22 @@ export function RequireStaff({ perm, children }: { perm?: StaffPerm; children: R
   return <>{children}</>;
 }
 
-/** Wrap a vendor screen: shows "No access" when the user is not on a vendor team. */
+/** Where to go after login: the `next` page, unless it is a vendor or staff
+ *  screen this account can't use (an old /vendor link or browser
+ *  autocomplete) — then the account's own home. */
+export const landingFor = (u: User, next?: string | null) => {
+  if (!next) return homeFor(u);
+  if (next.startsWith('/vendor') && !u.vendor) return homeFor(u);
+  if (next.startsWith('/admin') && !isStaff(u)) return homeFor(u);
+  return next;
+};
+
+/** Wrap a vendor screen: someone not on a vendor team is sent to their own home. */
 export function RequireVendor({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  if (!user) return null;
-  if (!user.vendor) return <div className="wrap"><LockedInline msg="This screen is for vendor teams. Ask your vendor owner for an invite link." home={homeFor(user)} /></div>;
+  const router = useRouter();
+  useEffect(() => { if (user && !user.vendor) router.replace(homeFor(user)); }, [user, router]);
+  if (!user || !user.vendor) return null;
   return <>{children}</>;
 }
 

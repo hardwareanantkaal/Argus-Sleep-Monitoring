@@ -10,7 +10,7 @@ import { AuthLayout, useNextParam } from '@/components/AuthLayout';
 import { ClaimFlow } from '@/components/ClaimFlow';
 import { Icon } from '@/components/Icon';
 import { useAuth } from '@/components/Providers';
-import { homeFor } from '@/components/Shell';
+import { landingFor } from '@/components/Shell';
 import { PhoneInput, PH } from '@/components/ui';
 import { errText } from '@/lib/api';
 import { COUNTRIES, toE164 } from '@/lib/format';
@@ -31,7 +31,7 @@ export default function SignupPage() {
   const [busy, setBusy] = useState(false);
 
   // Already logged in and not in the middle of sign-up: nothing to do here.
-  useEffect(() => { if (user && step === 1 && !busy) router.replace(next || homeFor(user)); }, [user, step, busy, next, router]);
+  useEffect(() => { if (user && step === 1 && !busy) router.replace(landingFor(user, next)); }, [user, step, busy, next, router]);
 
   // Phone code → country, until the person picks a country themselves.
   useEffect(() => {
