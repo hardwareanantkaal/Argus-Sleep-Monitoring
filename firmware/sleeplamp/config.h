@@ -54,13 +54,13 @@
 // `exit_s` (default 300 s), see DevSettings in types.h.
 #define SLEEP_EPOCH_SEC   60   // one staging decision per minute
 #define ONSET_QUIET_EP     3   // quiet minutes in bed -> counted as asleep
-#define DEEP_AFTER_EP      8   // very-quiet asleep minutes -> deep sleep candidate
+#define DEEP_AFTER_EP     10   // very-quiet asleep minutes -> deep sleep (reference value; 2.5.3, was 8)
 #define DEEP_MAX_BLOCK    60   // a deep block longer than this is ended (cycles ~90 min; 2.5.2: was 40)
 #define DEEP_MIN_BLOCK    10   // a deep block lasts at least this long unless real movement (2.5.2)
 #define DEEP_REFRACT_EP   20   // light minutes required between two deep blocks
 #define DEEP_FIRST_LIGHT  10   // light minutes after sleep onset before deep is allowed
 #define DEEP_TARGET_PCT   22   // above this deep share, deep needs radar AND HR evidence
-#define DEEP_HARD_PCT     30   // above this deep share, no new deep block
+#define DEEP_HARD_PCT     40   // above this deep share, no new deep block (2.5.3, was 30)
 #define QUIET_RANGE        8   // mean movement <= this = quiet minute
 #define WAKE_RANGE        14   // mean movement >= this while asleep = awakening
 #define BURST_RANGE       30   // single-sample movement spike
@@ -70,6 +70,6 @@
 // ---------------- misc ----------------
 // MUST match the version you type when uploading the .bin for OTA, or the
 // device reports the update as failed ("expected vX but running vY").
-#define FW_VERSION      "2.5.2"
+#define FW_VERSION      "2.5.3"
 #define SERIAL_PRINT_MS 2000
 #define LOG_RING_BYTES  8192      // recent log kept in RAM for the `logs` command

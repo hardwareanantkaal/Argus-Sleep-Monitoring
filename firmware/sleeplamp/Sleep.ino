@@ -228,30 +228,30 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
               // the baseline equal the current HR, so "HR below baseline" was
               // almost never true and deep almost never started.
               if (epHR > 0 && !vQuiet) { hrSleep = hrSleep ? (hrSleep * 7 + epHR) / 8 : epHR; hrSleepN++; }
-              bool hrHigh = epHR > 0 && base > 0 && epHR > base + 1;
-              // deep entry: a long very-quiet run, some light sleep first,
-              // a gap since the last deep block, and physiological evidence.
-              bool evidence;
-              if (deepPct >= DEEP_HARD_PCT && slept >= 60) evidence = false;
-              else if (deepPct >= DEEP_TARGET_PCT && slept >= 60)
-                evidence = radarDeep || hrLow;              // over budget: radar OR heart says deep
-              else if (slept >= 300)                        // late night: deep is rarer
-                evidence = radarDeep || (hrLow && vQuietRun >= DEEP_AFTER_EP + 4);
-              else                                          // early night: a long still run is enough unless HR is up
-                evidence = radarDeep || hrLow || (!hrHigh && vQuietRun >= DEEP_AFTER_EP + 4);
-              if (vQuietRun >= DEEP_AFTER_EP && sleepRun >= DEEP_FIRST_LIGHT &&
-                  lightSinceDeep >= DEEP_REFRACT_EP && evidence) {
+              // 2.5.3: deep entry = the REFERENCE SleepLamp rule (techiesms repo),
+              // which the owner found accurate: DEEP_AFTER_EP very-quiet minutes
+              // and HR below the AWAKE-in-bed baseline by max(3 bpm, 5%) (or no
+              // HR lock). The 5-Nov extra gates (10 light min first, 20 min
+              // between deep blocks, 22% budget, late-night rule) made deep rare
+              // and are gone. Kept on top of the reference: the radar's own
+              // "deep" vote, the light-sleep HR test, and a hard cap.
+              bool hrLowAwake = epHR > 0 && hrBase > 0 && epHR <= hrBase - max(3, hrBase / 20);
+              bool evidence = !(deepPct >= DEEP_HARD_PCT && slept >= 60) &&
+                              (hrLowAwake || hrUnknown || hrBase == 0 || radarDeep || hrLow);
+              if (vQuietRun >= DEEP_AFTER_EP && evidence) {
                 stage = 0; deepRun = 0; deepBad = 0;
                 LOG.println(F("[SLEEP] deep"));
               }
-              (void)hrUnknown;
+              (void)sleepRun; (void)lightSinceDeep;
             } else {                            // deep
               deepMin++; deepRun++;
               // 2.4.1 FIX ("95% light"): deep used to end the first minute HR was
               // >= the light-sleep baseline (true about half the time, HR wobbles)
               // or the first minute that was not "very quiet". Now it needs HR
               // CLEARLY up, real movement, or 2 not-very-quiet minutes in a row.
-              bool hrUp = epHR > 0 && base > 0 && epHR >= base + max(3, base / 20);
+              // 2.5.3: HR "up" = back to the AWAKE baseline minus 1, as in the
+              // reference (the light-sleep baseline + 3 if no awake baseline yet)
+              bool hrUp = epHR > 0 && (hrBase > 0 ? epHR >= hrBase - 1 : base > 0 && epHR >= base + max(3, base / 20));
               deepBad = vQuiet ? 0 : deepBad + 1;
               // 2.5.2: a deep block lasts at least DEEP_MIN_BLOCK minutes unless the
               // person really moves (!quiet) — no more 1-3 minute deep fragments.
