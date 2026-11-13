@@ -33,6 +33,7 @@ static void otaStatus(long rid, const char* s, const String& err = "") {
   if (err.length()) d["err"] = err;
   String out; serializeJson(d, out);
   mqttPublish("ota/status", out, 1, false);
+  LOG.printf("[OTA] -> ota/status %s\n", out.c_str());    // the exact response sent to the server
 }
 
 static bool otaFail(long rid, const String& why) {
@@ -42,6 +43,7 @@ static bool otaFail(long rid, const String& why) {
 }
 
 void otaOffer(const char* json) {
+  LOG.printf("[OTA] <- ota %s\n", json);                   // the exact request from the server
   JsonDocument d;
   if (deserializeJson(d, json)) { LOG.println("[OTA] bad offer JSON"); return; }
   OtaJob j;
