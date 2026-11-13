@@ -57,9 +57,43 @@ function Inner() {
   return (
     <div className="wrap">
       <Head title="Firmware and OTA" sub="Upload builds, then send them to devices over the air"
-        actions={canRoll && <button className="btn" onClick={() => setNewRollout(!newRollout)}><Icon name="upload" /> New OTA update</button>} />
-      {newRollout && rel.data && <NewRollout releases={rel.data.items} onDone={() => { setNewRollout(false); ro.reload(); }} onCancel={() => setNewRollout(false)} />}
+        actions={canRoll && <button className="btn" onClick={() => { setNewRollout(!newRollout); setTimeout(() => document.getElementById('ota')?.scrollIntoView({ behavior: 'smooth' }), 50); }}><Icon name="upload" /> New OTA update</button>} />
+      <div className="g21">
+        <div className="card"><h2 style={{ marginBottom: 12 }}>Versions</h2>
+          <Async q={rel}>{(d) => (
+            <div className="tbl"><table>
+              <thead><tr><th>Version</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
+              <tbody>{d.items.map((f) => (
+                <tr key={f.id}>
+                  <td className="mono"><b>{f.version}</b></td>
+                  <td>{f.channel === 'beta' ? <span className="pill warn">beta</span> : <span className="pill ok">stable</span>}</td>
+                  <td className="mono">{f.chipModel}</td>
+                  <td className="muted">{day(f.createdAt)} · {f.uploadedBy}</td>
+                  <td>{bytes(f.fileSize)}</td><td className="num">{f.deviceCount}</td>
+                  <td>{f.factory ? <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                    {f.factory.isDefault ? <span className="pill acc" title="The manufacturing station picks this one for new boards">Factory default</span>
+                      : <span className="pill">{f.factory.sameAsOta ? 'same .bin' : `${bytes(f.factory.fileSize)} · ${f.factory.flashSize}`}</span>}
+                    {up && !f.factory.isDefault && <button className="btn ghost sm" onClick={() => relAct(() => patch(`/admin/firmware/${f.id}`, { factoryDefault: true }), `${f.version} is now the factory default for ${f.chipModel}`)}>Make default</button>}
+                    {up && !f.factory.sameAsOta && <button className="btn ghost sm" onClick={() => { if (confirm(`Remove the factory image of ${f.version}? The OTA file stays.`)) relAct(() => del(`/admin/firmware/${f.id}/factory-image`), 'Factory image removed'); }}>Remove</button>}
+                  </div> : up && f.chipModel !== 'ESP8266' ? <button className="btn ghost sm" onClick={() => { setFacFor(f); facInput.current?.click(); }}><Icon name="upload" size={15} /> Add</button> : <span className="muted">—</span>}</td>
+                  <td className="mono xs muted" title={f.sha256}>{f.sha256.slice(0, 12)}</td>
+                  <td className="muted" style={{ whiteSpace: 'normal', minWidth: 200 }}>{f.notes}</td>
+                  {up && <td><button className="btn danger sm" onClick={async () => {
+                    if (!confirm(`Delete firmware ${f.version}?`)) return;
+                    try { await del(`/admin/firmware/${f.id}`); toast('Deleted'); rel.reload(); } catch (e) { toast(errText(e)); }
+                  }}>Delete</button></td>}
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}</Async>
+          <input ref={facInput} type="file" accept=".bin" hidden onChange={addFactory} />
+          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing screen writes at 0x0 on new boards. <b>Make default</b> picks it for that chip.</p>
+        </div>
+        <Upload onDone={() => rel.reload()} />
+      </div>
 
+      <div id="ota" />
+      {newRollout && rel.data && <NewRollout releases={rel.data.items} onDone={() => { setNewRollout(false); ro.reload(); }} onCancel={() => setNewRollout(false)} />}
       <div className="card"><div className="ch"><h2>OTA updates</h2></div>
         <Async q={ro}>{(d) => d.items.length ? (
           <div className="stack" style={{ gap: 18 }}>
@@ -99,40 +133,6 @@ function Inner() {
             })}
           </div>
         ) : <p className="small muted">No OTA updates yet.</p>}</Async>
-      </div>
-
-      <div className="g21">
-        <div className="card"><h2 style={{ marginBottom: 12 }}>Versions</h2>
-          <Async q={rel}>{(d) => (
-            <div className="tbl"><table>
-              <thead><tr><th>Version</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
-              <tbody>{d.items.map((f) => (
-                <tr key={f.id}>
-                  <td className="mono"><b>{f.version}</b></td>
-                  <td>{f.channel === 'beta' ? <span className="pill warn">beta</span> : <span className="pill ok">stable</span>}</td>
-                  <td className="mono">{f.chipModel}</td>
-                  <td className="muted">{day(f.createdAt)} · {f.uploadedBy}</td>
-                  <td>{bytes(f.fileSize)}</td><td className="num">{f.deviceCount}</td>
-                  <td>{f.factory ? <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
-                    {f.factory.isDefault ? <span className="pill acc" title="The manufacturing station picks this one for new boards">Factory default</span>
-                      : <span className="pill">{f.factory.sameAsOta ? 'same .bin' : `${bytes(f.factory.fileSize)} · ${f.factory.flashSize}`}</span>}
-                    {up && !f.factory.isDefault && <button className="btn ghost sm" onClick={() => relAct(() => patch(`/admin/firmware/${f.id}`, { factoryDefault: true }), `${f.version} is now the factory default for ${f.chipModel}`)}>Make default</button>}
-                    {up && !f.factory.sameAsOta && <button className="btn ghost sm" onClick={() => { if (confirm(`Remove the factory image of ${f.version}? The OTA file stays.`)) relAct(() => del(`/admin/firmware/${f.id}/factory-image`), 'Factory image removed'); }}>Remove</button>}
-                  </div> : up && f.chipModel !== 'ESP8266' ? <button className="btn ghost sm" onClick={() => { setFacFor(f); facInput.current?.click(); }}><Icon name="upload" size={15} /> Add</button> : <span className="muted">—</span>}</td>
-                  <td className="mono xs muted" title={f.sha256}>{f.sha256.slice(0, 12)}</td>
-                  <td className="muted" style={{ whiteSpace: 'normal', minWidth: 200 }}>{f.notes}</td>
-                  {up && <td><button className="btn danger sm" onClick={async () => {
-                    if (!confirm(`Delete firmware ${f.version}?`)) return;
-                    try { await del(`/admin/firmware/${f.id}`); toast('Deleted'); rel.reload(); } catch (e) { toast(errText(e)); }
-                  }}>Delete</button></td>}
-                </tr>
-              ))}</tbody>
-            </table></div>
-          )}</Async>
-          <input ref={facInput} type="file" accept=".bin" hidden onChange={addFactory} />
-          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing screen writes at 0x0 on new boards. <b>Make default</b> picks it for that chip.</p>
-        </div>
-        <Upload onDone={() => rel.reload()} />
       </div>
     </div>
   );
