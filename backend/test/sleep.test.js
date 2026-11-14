@@ -219,3 +219,23 @@ test('last night on the card skips a nap-only day', async () => {
   const card = (await owner.c.get('/devices')).body.items.find((x) => x.id === d.id);
   assert.equal(card.lastNight, null, 'a 1-hour nap is not "last night"');
 });
+
+test('sleep architecture: onset, merged and fewer deep periods (14 Nov)', () => {
+  const { refineHyp } = require('../src/services/sleep')._internal;
+  const periods = (h) => (h.match(/D+/g) || []).length;
+  // like the night of 13-14 Nov: a restless start (light with awake blips),
+  // then a 12-minute deep block every ~35 minutes for 8 h (13 deep blocks)
+  const start = 'A' + 'L'.repeat(8) + 'AA' + 'L'.repeat(6) + 'A' + 'L'.repeat(10) + 'AAA';
+  let night = start;
+  for (let k = 0; k < 13; k++) night += 'L'.repeat(23) + 'D'.repeat(12);
+  const out = refineHyp(night, 60);
+  assert.equal(out.length, night.length, 'same length');
+  assert.ok(!/[DL]/.test(out.slice(0, start.length)), 'the restless start is awake');
+  assert.ok(periods(night) === 13 && periods(out) <= 5, `deep periods ${periods(out)}`);
+  // two deep blocks 5 light minutes apart are one period
+  assert.equal(periods(refineHyp('L'.repeat(20) + 'D'.repeat(15) + 'LLLLL' + 'D'.repeat(15) + 'L'.repeat(20), 60)), 1);
+  // a 3-minute deep blip is noise
+  assert.equal(periods(refineHyp('L'.repeat(30) + 'DDD' + 'L'.repeat(30), 60)), 0);
+  // 5-minute data (old firmware) works the same way
+  assert.equal(refineHyp('AALLLLLDDDDLLL', 300), 'AALLLLLDDDDLLL');
+});

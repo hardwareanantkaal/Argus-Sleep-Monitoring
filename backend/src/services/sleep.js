@@ -153,6 +153,70 @@ const maxOf = (group, field) => {
   return v.length ? Math.max(...v) : null;
 };
 
+// ---- server-side sleep-architecture rules (14 Nov) --------------------
+// The device stages minute by minute and can't see the whole night. Applied
+// when a night is READ (the stored hyp is never changed, so this can be tuned
+// or switched off and every past night follows):
+//  1. Sleep onset = the first minute asleep that starts ONSET_MIN minutes of
+//     settled sleep (at most ONSET_AWAKE awake minutes in that window, none
+//     out of bed). Light or deep before it is "lying still but awake" -> Awake.
+//  2. Deep blocks less than MERGE_GAP light minutes apart are one deep period.
+//  3. Deep shorter than DEEP_MIN is noise -> Light.
+//  4. One deep period per ~90 min sleep cycle (the longest), and after the
+//     first LATE_MIN minutes of sleep only deep of LATE_DEEP_MIN or more.
+//     Real nights have about 3-5 deep periods, mostly in the first half.
+const ARCH = { ONSET_MIN: 30, ONSET_AWAKE: 2, MERGE_GAP: 8, DEEP_MIN: 5, CYCLE_MIN: 90, LATE_MIN: 270, LATE_DEEP_MIN: 15 };
+
+function refineHyp(hyp, epochS) {
+  const em = epochS / 60;
+  const n = (min) => Math.max(1, Math.round(min / em));
+  const a = [...(hyp || '')];
+  const asleep = (c) => c === 'D' || c === 'L';
+  // 1. sleep onset
+  let onset = -1;
+  const win = n(ARCH.ONSET_MIN);
+  for (let i = 0; i < a.length && onset < 0; i++) {
+    if (!asleep(a[i])) continue;
+    const w = a.slice(i, i + win);
+    const awake = w.filter((c) => c === 'A').length;
+    // settled: enough window left (or the night ends asleep), few awake minutes, no bed exit
+    if (!w.includes('O') && awake * em <= ARCH.ONSET_AWAKE && (w.length === win || i + w.length === a.length)) onset = i;
+  }
+  for (let i = 0; i < (onset < 0 ? a.length : onset); i++) if (asleep(a[i])) a[i] = 'A';
+  if (onset < 0) return a.join('');
+  const deepRuns = () => {
+    const out = [];
+    for (let i = 0; i < a.length;) {
+      if (a[i] !== 'D') { i++; continue; }
+      let j = i;
+      while (j < a.length && a[j] === 'D') j++;
+      out.push({ i, j });
+      i = j;
+    }
+    return out;
+  };
+  // 2. merge deep blocks separated by a short stretch of light only
+  let runs = deepRuns();
+  for (let k = 1; k < runs.length; k++) {
+    const gap = a.slice(runs[k - 1].j, runs[k].i);
+    if (gap.length <= n(ARCH.MERGE_GAP) && gap.every((c) => c === 'L')) for (let x = runs[k - 1].j; x < runs[k].i; x++) a[x] = 'D';
+  }
+  // 3 + 4. noise, one deep period per cycle, late-night minimum
+  runs = deepRuns();
+  const toLight = (r) => { for (let x = r.i; x < r.j; x++) a[x] = 'L'; };
+  const best = new Map();
+  for (const r of runs) {
+    const len = r.j - r.i;
+    const late = r.i - onset >= n(ARCH.LATE_MIN);
+    if (len < n(ARCH.DEEP_MIN) || (late && len < n(ARCH.LATE_DEEP_MIN))) { toLight(r); continue; }
+    const c = Math.floor((r.i - onset) / n(ARCH.CYCLE_MIN));
+    const b = best.get(c);
+    if (!b) best.set(c, r);
+    else if (len > b.j - b.i) { toLight(b); best.set(c, r); } else toLight(r);
+  }
+  return a.join('');
+}
+
 // One group -> the night fields of API.md §4 (calculation table).
 function summarize(group) {
   // Firmware 2.4.0 sends 1-minute steps (epoch_s 60), older firmware 5-minute
@@ -169,11 +233,17 @@ function summarize(group) {
     }
     hyp += fit(s);
   });
+  const asleepIn = (h) => [...h].filter((x) => x === 'D' || x === 'L').length;
+  const rawAsleep = asleepIn(hyp);
+  hyp = refineHyp(hyp, epochS);
   const count = (ch) => [...hyp].filter((x) => x === ch).length;
   const toMin = (n) => Math.round((n * epochS) / 60);
   const start = group[0].started_at;
   const end = group[group.length - 1].ended_at;
-  const totalSleepMin = sumOf(group, 'sleep_min') ?? toMin(count('D') + count('L'));
+  // The device's own sleep minutes, minus what the onset rule turned into Awake
+  const devSleep = sumOf(group, 'sleep_min');
+  const totalSleepMin = devSleep != null
+    ? Math.max(0, devSleep - toMin(rawAsleep - asleepIn(hyp))) : toMin(count('D') + count('L'));
   // wake-ups = runs of A after the first D/L
   const firstSleep = hyp.search(/[DL]/);
   const wakeUps = firstSleep < 0 ? 0 : (hyp.slice(firstSleep).match(/A+/g) || []).length;
@@ -290,5 +360,5 @@ async function lastNight(deviceId) {
 
 module.exports = {
   start, onSession, validate, nights, nightCard, nightDetail, averages, localToday, lastNight, rules,
-  _internal: { sleepDateOf, mergeGroups, summarize },
+  _internal: { sleepDateOf, mergeGroups, summarize, refineHyp, ARCH },
 };
