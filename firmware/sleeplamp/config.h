@@ -70,6 +70,6 @@
 // ---------------- misc ----------------
 // MUST match the version you type when uploading the .bin for OTA, or the
 // device reports the update as failed ("expected vX but running vY").
-#define FW_VERSION      "2.5.3"
+#define FW_VERSION      "2.5.4"
 #define SERIAL_PRINT_MS 2000
 #define LOG_RING_BYTES  8192      // recent log kept in RAM for the `logs` command

@@ -172,7 +172,13 @@ void sleepFeed(const SensorData& s, SleepLive& outLive,
       }
     } else {
       bedMin++;
-      if (!present) {                           // out of bed / out of zone
+      // 2.5.4: "up and about" also counts as out of bed: the radar still sees
+      // someone, but says "not in bed" AND they move a lot. On 13-14 Nov the
+      // night never ended because presence never dropped after getting up
+      // (room in the radar's view). A still sleeper (flag drops, no movement)
+      // is not affected; it needs exit_s minutes of this in a row to end.
+      bool upAbout = present && !inbed && (meanRange >= WAKE_RANGE || burstPct >= 13);
+      if (!present || upAbout) {                // out of bed / out of zone / up and about
         if (oobRun == 0) exits++;
         oobRun++; awakeMin++; oobMin++;
         if (stage == 0) lightSinceDeep = 0;
