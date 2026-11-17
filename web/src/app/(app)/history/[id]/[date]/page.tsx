@@ -140,6 +140,7 @@ export default function NightPage() {
           </div>
 
           <div className="dash-tiles5">
+            <Tile l="Asleep time" v={short(n.totalSleepMin)} s={`${n.totalSleepMin} total sleep minutes`} />
             <Tile l="In bed time" v={short(n.inBedMin)} s={`${n.inBedMin} total time in bed`} />
             <Tile l="Deep rest ratio" v={`${pct(sm.deep)}%`} s={`${short(sm.deep)} deep`} />
             <Tile l="Light rest ratio" v={`${pct(sm.light)}%`} s={`${short(sm.light)} light`} />
