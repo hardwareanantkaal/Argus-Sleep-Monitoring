@@ -129,7 +129,7 @@ function Inner() {
                   </div>
                   <div className="row" style={{ gap: 6 }}>
                     <Link className="btn ghost sm" href={`/vendor/access?device=${d.id}`}>Access</Link>
-                    <Link className="btn ghost sm" href={`/history/${d.id}`}>Sleep</Link>
+                    <Link className="btn ghost sm" href={`/history/${d.id}`}>History</Link>
                     <Link className="btn sm" href={`/devices/${d.id}`}>Live</Link>
                   </div>
                 </div>

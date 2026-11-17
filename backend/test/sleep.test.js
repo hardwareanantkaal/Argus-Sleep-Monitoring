@@ -40,11 +40,16 @@ test('a session is stored once and always acked (re-sends too)', async () => {
   const s = await sensor(d.mac);
   assert.deepEqual(await s.send(session({ sid: 128 })), { sid: 128 });
   assert.deepEqual(await s.send(session({ sid: 128 })), { sid: 128 }, 'duplicate still acked');
-  const { rows } = await db.query('SELECT sid, timezone, score, hr_min, hyp, raw FROM sleep_sessions WHERE device_id = $1', [d.id]);
+  const { rows } = await db.query('SELECT sid, timezone, score, hr_min, hyp, stages, raw FROM sleep_sessions WHERE device_id = $1', [d.id]);
   assert.equal(rows.length, 1);
   assert.deepEqual([rows[0].sid, rows[0].timezone, rows[0].score, rows[0].hr_min, rows[0].hyp],
-    [128, 'America/New_York', 82, 52, 'AALLLDDDLLDDDLLALL']);
+    [128, 'America/New_York', 82, 52, ''], 'no per-minute letters stored (17 Nov)');
+  // only the stage changes: AALLLDDDLLDDDLLALL
+  assert.deepEqual(rows[0].stages, { n: 18, ev: [[0, 'A'], [2, 'L'], [5, 'D'], [8, 'L'], [10, 'D'], [13, 'L'], [15, 'A'], [16, 'L']] });
   assert.equal(rows[0].raw.sid, 128, 'raw message kept');
+  assert.equal(rows[0].raw.hyp, undefined, 'without the per-minute letters');
+  const { toEvents, fromEvents } = require('../src/services/sleep')._internal;
+  assert.equal(fromEvents(toEvents('AALLLDDDLLDDDLLALL')), 'AALLLDDDLLDDDLLALL', 'lossless');
 });
 
 test('a broken session is rejected but still acked, with the reason', async () => {

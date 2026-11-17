@@ -49,6 +49,23 @@ function validate(m) {
   };
 }
 
+// Stage EVENTS (migration 012): only the stage changes are stored, never one
+// letter per minute. {n: epochs in the session, ev: [[offset, stage], ...]};
+// each stage lasts until the next event (or n).
+function toEvents(hyp) {
+  const ev = [];
+  for (let i = 0; i < hyp.length; i++) if (i === 0 || hyp[i] !== hyp[i - 1]) ev.push([i, hyp[i]]);
+  return { n: hyp.length, ev };
+}
+function fromEvents(st) {
+  if (!st || !Array.isArray(st.ev)) return '';
+  let out = '';
+  st.ev.forEach(([i, ch], k) => { out += ch.repeat(Math.max(0, (k + 1 < st.ev.length ? st.ev[k + 1][0] : st.n) - i)); });
+  return out;
+}
+// A stored session's hypnogram: from its events, or the old per-minute text
+const hypOf = (s) => (s.stages ? fromEvents(s.stages) : s.hyp || '');
+
 const ack = (mac, body) => mqtt.publish(mac, 'session/ack', body, { qos: 1 })
   .catch((err) => log.warn({ err: err.message, mac }, 'session ack not sent'));
 
@@ -79,15 +96,18 @@ async function onSession(mac, payload) {
     return ack(mac, { sid, ok: 0, err: v.err });
   }
   const r = v.row;
+  // Only the stage changes are stored (owner, 17 Nov): events in `stages`,
+  // `hyp` stays '' and the per-minute letters are left out of `raw` too.
+  const { hyp: _perMinute, ...rawNoHyp } = m;
   const ins = await db.query(
     `INSERT INTO sleep_sessions (device_id, sid, started_at, ended_at, timezone, score, sleep_min, wake_min, light_pct,
        deep_pct, oob_min, exits, turns, big_mv_pct, small_mv_pct, apnea, struggles, hr_avg, hr_min, hr_max,
-       br_avg, br_min, br_max, epoch_s, hyp, fw_version, raw)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+       br_avg, br_min, br_max, epoch_s, hyp, stages, fw_version, raw)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,'',$25,$26,$27)
      ON CONFLICT (device_id, started_at) DO NOTHING`,
     [dev.id, sid, r.started_at, r.ended_at, dev.timezone, r.score, r.sleep_min, r.wake_min, r.light_pct, r.deep_pct,
       r.oob_min, r.exits, r.turns, r.big_mv_pct, r.small_mv_pct, r.apnea, r.struggles, r.hr_avg, r.hr_min, r.hr_max,
-      r.br_avg, r.br_min, r.br_max, r.epoch_s, r.hyp, r.fw_version, JSON.stringify(m)]);
+      r.br_avg, r.br_min, r.br_max, r.epoch_s, JSON.stringify(toEvents(r.hyp)), r.fw_version, JSON.stringify(rawNoHyp)]);
   if (ins.rowCount) {
     await db.query(`INSERT INTO device_events (device_id, type, message, data) VALUES ($1, 'session_received', $2, $3)`,
       [dev.id, `${Math.round((m.end - m.start) / 60)} min`, JSON.stringify({ sid })]);
@@ -222,7 +242,7 @@ function summarize(group) {
   // Firmware 2.4.0 sends 1-minute steps (epoch_s 60), older firmware 5-minute
   // steps. A night joining both uses the finer step; coarse letters are repeated.
   const epochS = Math.min(...group.map((s) => s.epoch_s || 300));
-  const fit = (s) => (s.hyp || '').replace(/./g, (ch) => ch.repeat(Math.max(1, Math.round((s.epoch_s || 300) / epochS))));
+  const fit = (s) => hypOf(s).replace(/./g, (ch) => ch.repeat(Math.max(1, Math.round((s.epoch_s || 300) / epochS))));
   let hyp = '';
   let gapMin = 0;
   group.forEach((s, i) => {
@@ -360,5 +380,5 @@ async function lastNight(deviceId) {
 
 module.exports = {
   start, onSession, validate, nights, nightCard, nightDetail, averages, localToday, lastNight, rules,
-  _internal: { sleepDateOf, mergeGroups, summarize, refineHyp, ARCH },
+  _internal: { sleepDateOf, mergeGroups, summarize, refineHyp, ARCH, toEvents, fromEvents },
 };

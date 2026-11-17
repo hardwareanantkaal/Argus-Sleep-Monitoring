@@ -59,7 +59,7 @@ export default function DevicesPage() {
                     </> : <span className="xs muted">{canHist ? 'No nights yet' : ''}</span>}
                   </div>
                   <div className="row" style={{ gap: 6 }}>
-                    {canHist && <Link className="btn ghost sm" href={`/history/${d.id}`}>Sleep</Link>}
+                    {canHist && <Link className="btn ghost sm" href={`/history/${d.id}`}>History</Link>}
                     {canLive ? <Link className="btn sm" href={`/devices/${d.id}`}>Live</Link> : <Link className="btn ghost sm" href={`/devices/${d.id}`}>Open</Link>}
                   </div>
                 </div>
