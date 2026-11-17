@@ -18,7 +18,6 @@ import { isMain, type DeviceDetail, type MainNight, type NightDetail, type Night
 const mins = (a: string, b: string) => Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
 const short = (m: number) => (m < 60 ? `${Math.round(m)}m` : dur(m));
 const ZERO = { avg: 0, min: 0, max: 0 };
-const STAGE_WORD: Record<string, string> = { D: 'Deep', L: 'Light', A: 'Awake', O: 'Out of bed' };
 
 /** A main night with every detail field filled in, so the screen never trips on a stray null. */
 function full(n: MainNight) {
@@ -29,25 +28,14 @@ function full(n: MainNight) {
   };
 }
 
-/** CSV made in the browser. `changes`: one row per stage change (start, end, stage, minutes);
- *  otherwise one row per epoch (local time, UTC time, stage). */
-function downloadCsv(hyp: string, startIso: string, epochS: number, tz: string, name: string, changes = true) {
+/** CSV made in the browser: one row per stage change (start, end, stage, minutes). */
+function downloadCsv(hyp: string, startIso: string, epochS: number, tz: string, name: string) {
   const t0 = Date.parse(startIso);
   const local = (ms: number) => new Date(ms).toLocaleString('sv-SE', { timeZone: tz, hour12: false });
-  const rows: string[] = [];
-  if (changes) {
-    rows.push('start_local,end_local,stage,minutes');
-    for (const c of stageChanges(hyp, epochS / 60)) {
-      const s = t0 + c.startMin * 60000;
-      rows.push(`${local(s)},${local(s + c.minutes * 60000)},${c.stage},${c.minutes}`);
-    }
-  } else {
-    rows.push('local_time,utc_time,stage,minutes');
-    for (let i = 0; i < hyp.length; i++) {
-      const ms = t0 + i * epochS * 1000;
-      rows.push(`${local(ms)},${new Date(ms).toISOString()},${STAGE_WORD[hyp[i]] || hyp[i]},${epochS / 60}`);
-    }
-    name += '-per-minute';
+  const rows: string[] = ['start_local,end_local,stage,minutes'];
+  for (const c of stageChanges(hyp, epochS / 60)) {
+    const s = t0 + c.startMin * 60000;
+    rows.push(`${local(s)},${local(s + c.minutes * 60000)},${c.stage},${c.minutes}`);
   }
   const url = URL.createObjectURL(new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }));
   const a = document.createElement('a');
@@ -142,7 +130,6 @@ export default function NightPage() {
                 <div className="row" style={{ gap: 10 }}>
                   <h1>Session: {n.sleepDate}{nSess > 1 ? ` · ${nSess} joined` : ''}</h1>
                   <button className="btn sm tint-emerald" onClick={() => downloadCsv(n.hyp, n.start, n.epochS, tz, `${devName || 'argus'}-${n.sleepDate}`)} title="One row per stage change"><Icon name="upload" size={15} /> Download CSV</button>
-                  <button className="btn sm ghost" onClick={() => downloadCsv(n.hyp, n.start, n.epochS, tz, `${devName || 'argus'}-${n.sleepDate}`, false)} title="One row per minute">Per-minute CSV</button>
                   {canDelete && n.sessions.every((s) => s.id) && <button className="btn sm tint-rose" disabled={!!deleting}
                     onClick={() => deleteSession(n.sessions.map((s) => s.id!), `${when(n.start)} → ${timeIn(n.end, tz)}`, n.naps.length === 0)}><Icon name="trash" size={15} /> {deleting ? 'Deleting…' : 'Delete session'}</button>}
                 </div>
