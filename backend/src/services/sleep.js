@@ -259,8 +259,13 @@ function summarize(group) {
   const start = group[0].started_at;
   const end = group[group.length - 1].ended_at;
   // One source for every sleep number on the page (17 Nov): the stage events.
-  // The device's own minute counter is used only when a session has no stages.
-  const totalSleepMin = hyp ? toMin(count('D') + count('L')) : sumOf(group, 'sleep_min');
+  // A session without stages falls back to the device's sleep minutes and
+  // its start-end length.
+  const noStages = group.filter((s) => !hypOf(s));
+  const totalSleepMin = toMin(count('D') + count('L')) + (sumOf(noStages, 'sleep_min') || 0);
+  // In bed = deep + light + awake (owner, 17 Nov); out-of-bed minutes are not in bed
+  const inBedMin = toMin(count('D') + count('L') + count('A'))
+    + Math.round(noStages.reduce((a, s) => a + minutes(s.started_at, s.ended_at), 0));
   // wake-ups = runs of A after the first D/L
   const firstSleep = hyp.search(/[DL]/);
   const wakeUps = firstSleep < 0 ? 0 : (hyp.slice(firstSleep).match(/A+/g) || []).length;
@@ -268,10 +273,11 @@ function summarize(group) {
     start, end,
     score: weighted(group, 'score'),
     totalSleepMin,
-    inBedMin: Math.round(group.reduce((a, s) => a + minutes(s.started_at, s.ended_at), 0)),
+    // In bed = deep + light + awake from the stage events (owner, 17 Nov); out-of-bed minutes are not in bed
+    inBedMin,
     stageMin: { deep: toMin(count('D')), light: toMin(count('L')), awake: toMin(count('A')), outOfBed: toMin(count('O')) },
     sessionCount: group.length,
-    efficiencyPct: Math.round((100 * totalSleepMin) / Math.max(1, minutes(start, end))),
+    efficiencyPct: Math.round((100 * totalSleepMin) / Math.max(1, inBedMin)),
     wakeUps,
     exits: sumOf(group, 'exits'),
     oobMin: Math.round((sumOf(group, 'oob_min') || 0) + gapMin),

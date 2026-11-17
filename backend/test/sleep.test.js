@@ -137,7 +137,7 @@ test('night detail: joined hypnogram, wake-ups, efficiency, weighted HR', async 
   assert.equal(n.hyp.length, 42 + 4 + 48, 'session A + 4 gap letters + session B');
   assert.equal(n.hyp.slice(42, 46), 'OOOO');
   assert.equal(n.wakeUps, 1, 'the AA before first sleep does not count');
-  assert.equal(n.efficiencyPct, 89);        // 420 / 470 min from start to end
+  assert.equal(n.efficiencyPct, 93);        // 420 asleep / 450 in bed (deep + light + awake)
   assert.equal(n.oobMin, 20);               // the gap
   assert.deepEqual(n.hr, { avg: 57, min: 47, max: 75 }); // (60*210 + 54*240) / 450 = 56.8
   assert.deepEqual(n.sessions.length, 2);
@@ -190,7 +190,7 @@ test('session ids in night detail; only the owner can delete a session', async (
   for (const p of ['history.view', 'settings.edit']) await db.query('INSERT INTO device_share_permissions VALUES ($1, $2, $3)', [d.id, fam.user.id, p]);
   await db.query(
     `INSERT INTO sleep_sessions (device_id, sid, started_at, ended_at, timezone, score, sleep_min, hyp, epoch_s, raw)
-     VALUES ($1, 1, '2026-10-20 17:00Z', '2026-10-21 01:00Z', 'Asia/Kolkata', 80, 400, 'LLDDL', 60, '{}')`, [d.id]);
+     VALUES ($1, 1, '2026-10-20 17:00Z', '2026-10-21 01:00Z', 'Asia/Kolkata', 80, 400, repeat('L', 480), 60, '{}')`, [d.id]);
   const night = (await owner.c.get(`/devices/${d.id}/nights/2026-10-20`)).body;
   const sid = night.sessions[0].id;
   assert.ok(sid, 'session id in the night detail');
