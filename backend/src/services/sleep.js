@@ -253,17 +253,14 @@ function summarize(group) {
     }
     hyp += fit(s);
   });
-  const asleepIn = (h) => [...h].filter((x) => x === 'D' || x === 'L').length;
-  const rawAsleep = asleepIn(hyp);
   hyp = refineHyp(hyp, epochS);
   const count = (ch) => [...hyp].filter((x) => x === ch).length;
   const toMin = (n) => Math.round((n * epochS) / 60);
   const start = group[0].started_at;
   const end = group[group.length - 1].ended_at;
-  // The device's own sleep minutes, minus what the onset rule turned into Awake
-  const devSleep = sumOf(group, 'sleep_min');
-  const totalSleepMin = devSleep != null
-    ? Math.max(0, devSleep - toMin(rawAsleep - asleepIn(hyp))) : toMin(count('D') + count('L'));
+  // One source for every sleep number on the page (17 Nov): the stage events.
+  // The device's own minute counter is used only when a session has no stages.
+  const totalSleepMin = hyp ? toMin(count('D') + count('L')) : sumOf(group, 'sleep_min');
   // wake-ups = runs of A after the first D/L
   const firstSleep = hyp.search(/[DL]/);
   const wakeUps = firstSleep < 0 ? 0 : (hyp.slice(firstSleep).match(/A+/g) || []).length;

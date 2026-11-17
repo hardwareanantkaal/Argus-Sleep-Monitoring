@@ -124,7 +124,7 @@ test('nights: merge < 30 min, hide < 25 min, noon cut-off, main sleep vs naps', 
   assert.equal(n10.start, '2026-10-10T17:10:00.000Z');
   assert.equal(n10.end, '2026-10-11T01:00:00.000Z');
   assert.equal(n10.inBedMin, 450);          // 210 + 240
-  assert.equal(n10.totalSleepMin, 370);     // 170 + 200
+  assert.equal(n10.totalSleepMin, 420);     // from the stages: (40 + 44) epochs x 5 min (17 Nov: one source)
   assert.equal(n10.score, 75);              // (80*210 + 70*240) / 450 = 74.7
   assert.deepEqual(n10.stageMin, { deep: 200, light: 220, awake: 30, outOfBed: 20 }); // gap = 4 x 5-min 'O'
   assert.deepEqual(n10.naps, [{ start: '2026-10-10T09:30:00.000Z', end: '2026-10-10T10:20:00.000Z' }]);
@@ -137,11 +137,11 @@ test('night detail: joined hypnogram, wake-ups, efficiency, weighted HR', async 
   assert.equal(n.hyp.length, 42 + 4 + 48, 'session A + 4 gap letters + session B');
   assert.equal(n.hyp.slice(42, 46), 'OOOO');
   assert.equal(n.wakeUps, 1, 'the AA before first sleep does not count');
-  assert.equal(n.efficiencyPct, 79);        // 370 / 470 min from start to end
+  assert.equal(n.efficiencyPct, 89);        // 420 / 470 min from start to end
   assert.equal(n.oobMin, 20);               // the gap
   assert.deepEqual(n.hr, { avg: 57, min: 47, max: 75 }); // (60*210 + 54*240) / 450 = 56.8
   assert.deepEqual(n.sessions.length, 2);
-  assert.equal(n.naps[0].totalSleepMin, 40);
+  assert.equal(n.naps[0].totalSleepMin, 50);  // from its stages: 10 light epochs x 5 min
   assert.equal((await owner.c.get(`/devices/${d.id}/nights/2026-10-11`)).status, 404);
 });
 
