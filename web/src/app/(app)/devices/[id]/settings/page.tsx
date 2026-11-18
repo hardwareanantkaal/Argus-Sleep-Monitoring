@@ -13,6 +13,7 @@ import { del, errText, patch, post } from '@/lib/api';
 import { placeName, TIMEZONES, uptime } from '@/lib/format';
 import { getSocket } from '@/lib/socket';
 import { Placement } from '@/components/Placement';
+import { HowTo, RECAL_DONE, RECAL_STEPS, WIFI_DONE, WIFI_STEPS } from '@/components/HowTo';
 import type { DeviceDetail, SensorSettings } from '@/lib/types';
 
 export default function SettingsPage() {
@@ -198,6 +199,10 @@ function WifiFirmware({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail
         <button className="btn ghost" onClick={recalibrate} disabled={recal === 'running'}><Icon name="activity" /> {recal === 'running' ? 'Recalibrating…' : 'Recalibrate sensor'}</button>
         {recal === 'done' && <span className="pill ok">Recalibrated ✓</span>}
         {recal === 'failed' && <span className="pill bad">Didn’t recalibrate</span>}
+      </div>
+      <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+        <HowTo label="How to change the Wi-Fi network" steps={WIFI_STEPS} done={WIFI_DONE} />
+        <HowTo label="How to recalibrate" steps={RECAL_STEPS} done={RECAL_DONE} />
       </div>
       {placing && <Placement id={d.id} online={d.status.online} />}
     </div>

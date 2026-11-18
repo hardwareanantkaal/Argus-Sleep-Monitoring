@@ -12,6 +12,7 @@ import { StageTiles, StageTimeline } from '@/components/StageTimeline';
 import { Icon } from '@/components/Icon';
 import { firstLocalMin, pushStage } from '@/components/LiveTelemetry';
 import { Placement } from '@/components/Placement';
+import { HowTo, PLACE_DONE, PLACE_STEPS, WIFI_DONE, WIFI_STEPS } from '@/components/HowTo';
 import { useTheme, useToast } from '@/components/Providers';
 import { Async, Head, Legend, TzTag, useApi } from '@/components/ui';
 import { whenLocal } from '@/components/vendor';
@@ -388,7 +389,7 @@ function Controls({ d, online }: { d: DeviceDetail; online: boolean }) {
     try {
       const r = await post<{ commandId: string; status: 'sent' | 'expired' }>(`/devices/${d.id}/wifi-setup`);
       if (r.status === 'sent') { setSent(true); toast('Config Mode started. Connect your phone to the sensor’s setup network.'); }
-      else toast('The sensor is offline, so it can’t be switched. Press its button 5 times to open setup.');
+      else toast('The sensor is offline, so it can’t be switched. Unplug and plug it in 5 times quickly to open setup.');
     } catch (e) { toast(errText(e)); } finally { setBusy(false); }
   };
   return <>
@@ -403,6 +404,10 @@ function Controls({ d, online }: { d: DeviceDetail; online: boolean }) {
         <span className="dctl-tx"><b>Config Mode (Wi-Fi setup)</b><span>{!canEdit ? 'Needs “Change settings” permission' : !online ? 'Unavailable: turn the sensor on first' : sent ? 'Sent. The sensor opens its setup network and goes offline' : 'Open the sensor’s Wi-Fi setup portal'}</span></span>
         <span className="dctl-btn">{busy ? 'Sending…' : sent ? 'Sent' : 'Start config'}</span>
       </button>
+    </div>
+    <div className="dash-grid2">
+      <HowTo label="How to check placement" steps={PLACE_STEPS} done={PLACE_DONE} />
+      <HowTo label="How to set up Wi-Fi (Config Mode)" steps={WIFI_STEPS} done={WIFI_DONE} />
     </div>
     {placing && online && <div className="dcard"><Placement id={d.id} online={online} /></div>}
   </>;

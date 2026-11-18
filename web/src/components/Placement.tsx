@@ -6,6 +6,7 @@
 // soon as the live data confirms it, in whatever order the data arrives.
 
 import { useEffect, useState } from 'react';
+import { HowTo, RECAL_DONE, RECAL_STEPS } from './HowTo';
 import { Icon } from './Icon';
 import { useToast } from './Providers';
 import { errText, post } from '@/lib/api';
@@ -93,6 +94,7 @@ export function Placement({ id, online }: { id: string; online: boolean }) {
         {recal === 'done' && <span className="pill ok">Recalibrated ✓</span>}
         {recal === 'failed' && <span className="pill bad">Didn’t recalibrate</span>}
       </div>
+      <HowTo label="How to recalibrate" steps={RECAL_STEPS} done={RECAL_DONE} />
     </div>
   );
 }

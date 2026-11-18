@@ -168,10 +168,11 @@ svg text{fill:var(--muted);font-family:var(--body);font-size:11px}
 svg .grid{stroke:var(--line);stroke-width:1}
 .chartbox{overflow-x:auto}
 .chartbox svg{display:block;width:100%;min-width:480px;height:auto}
-.night{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.6fr) auto;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.night{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.6fr) auto auto;align-items:center;gap:16px;padding:13px 10px;margin:0 -10px;border-radius:10px;transition:background .15s;border-bottom:1px solid var(--line);cursor:pointer}
 .night:last-child{border-bottom:0}
-.night:hover .nd{color:var(--accent)}
-@media (max-width:640px){.night{grid-template-columns:minmax(0,1fr) auto}.night .nb{grid-column:1/-1;order:3}.night .nt{display:none}}
+.night:hover,.night:focus-visible{background:var(--panel-2)} .night:hover .nd{color:var(--accent)} .night .go{color:var(--muted);display:flex;align-items:center;gap:4px;font-size:12px} .night:hover .go{color:var(--accent)}
+.nrow{padding:10px!important;margin:0 -10px;border-radius:10px;transition:background .15s} .nrow:hover{background:var(--panel-2)}
+@media (max-width:640px){.night{grid-template-columns:minmax(0,1fr) auto auto}.night .nb{grid-column:1/-1;order:3}.night .nt{display:none}.night .go span{display:none}}
 .score{position:relative;width:46px;height:46px;flex:none}
 .score svg{width:100%;height:100%;transform:rotate(-90deg)}
 .score b{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--display);font-size:14px;font-weight:600}
@@ -423,3 +424,10 @@ a.btn{text-decoration:none}
 .term .g{color:var(--ok)} .term .w{color:var(--warn)} .term .r{color:var(--bad)} .term .m{color:var(--muted)} .term .a{color:var(--accent)}
 .sendrow{display:flex;gap:8px;margin-top:10px}.sendrow .inp{flex:1;min-width:0}
 .runrow td{background:var(--panel-2)}
+/* "How to" info boxes (18 Nov feedback) */
+.howto{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.howto-btn{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:4px 2px;color:var(--accent);font:inherit;font-size:13px;cursor:pointer}
+.howto-btn:hover{text-decoration:underline}
+.howto-box{width:100%;padding:12px 14px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line);font-size:13px;line-height:1.55}
+.howto-box ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.howto-done{margin:10px 0 0;display:flex;align-items:center;gap:6px;color:var(--ok)}
