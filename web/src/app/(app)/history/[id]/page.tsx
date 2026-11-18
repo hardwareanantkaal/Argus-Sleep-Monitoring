@@ -71,20 +71,27 @@ export default function HistoryPage() {
             <div className="card tile"><span className="label">Avg deep sleep</span><div className="v">{avgDeep != null ? <>{avgDeep}<small>%</small></> : '—'}</div></div>
             <div className="card tile"><span className="label">Avg efficiency</span><div className="v">{avgEff != null ? <>{avgEff}<small>%</small></> : '—'}</div></div>
           </div>
-          {rev.length > 0 && <div className="stack" style={{ gap: 16 }}>
+          {rev.length > 0 && (
             <div className="card">
-              <div className="ch"><div className="t"><h2>Sleep score</h2><span className="xs muted">Per night · darker bar = last night</span></div></div>
+              <div className="ch"><div className="t"><h2>Hours asleep</h2><span className="xs muted">Deep + light, per night · hover or tap a bar for details</span></div></div>
               <div className="chartbox">
-                <BarChart vals={rev.map((n) => n.score ?? 0)} labels={labels} maxV={100} ticks={[0, 25, 50, 75, 100]} fmt={(v) => `${v}`} col="var(--accent)" hi={rev.length - 1} />
+                <BarChart vals={rev.map((n) => (n.totalSleepMin ?? 0) / 60)} labels={labels} maxV={10} ticks={[0, 2, 4, 6, 8, 10]} fmt={(v) => `${v}h`} col="var(--st-light)" hi={rev.length - 1}
+                  tip={(i) => {
+                    const n = rev[i], m = n.stageMin;
+                    return <>
+                      <b>{sleepDateLabel(n.sleepDate)}</b>
+                      <span className="r"><span>Bed</span><span>{timeIn(n.start, tz)} → {timeIn(n.end, tz)}</span></span>
+                      <span className="r"><span>Total sleep</span><span>{dur(n.totalSleepMin)}</span></span>
+                      {m && <span className="r"><span>Deep</span><span>{dur(m.deep)}</span></span>}
+                      {m && <span className="r"><span>Light</span><span>{dur(m.light)}</span></span>}
+                      {m && <span className="r"><span>Awake</span><span>{dur(m.awake)}</span></span>}
+                      {eff(n) != null && <span className="r"><span>Efficiency</span><span>{eff(n)}%</span></span>}
+                      <span className="r"><span>Score</span><span>{n.score ?? '—'}</span></span>
+                    </>;
+                  }} />
               </div>
             </div>
-            <div className="card">
-              <div className="ch"><div className="t"><h2>Hours asleep</h2><span className="xs muted">Deep + light, per night</span></div></div>
-              <div className="chartbox">
-                <BarChart vals={rev.map((n) => (n.totalSleepMin ?? 0) / 60)} labels={labels} maxV={10} ticks={[0, 2, 4, 6, 8, 10]} fmt={(v) => `${v}h`} col="var(--st-light)" hi={rev.length - 1} />
-              </div>
-            </div>
-          </div>}
+          )}
           <div className="card">
             <div className="ch"><h2>Nights</h2><Legend /></div>
             {N.map((n) => !isMain(n) ? (

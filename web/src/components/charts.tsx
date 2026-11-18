@@ -1,5 +1,8 @@
+'use client';
+
 // SVG charts ported from the mockup. No chart library.
 
+import { useState } from 'react';
 import { pad } from '@/lib/format';
 
 const hm = (m: number) => { m = ((m % 1440) + 1440) % 1440; return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; };
@@ -47,22 +50,33 @@ export function Hypnogram({ hyp, startMin, epochMin = 5, label = 'Sleep stages t
   );
 }
 
-export function BarChart({ vals, labels, maxV, ticks, fmt, col, hi }: { vals: number[]; labels: string[]; maxV: number; ticks: number[]; fmt(v: number): string; col: string; hi?: number }) {
+/** `tip(i)`: optional hover / tap details for bar i (18 Nov feedback). */
+export function BarChart({ vals, labels, maxV, ticks, fmt, col, hi, tip }: { vals: number[]; labels: string[]; maxV: number; ticks: number[]; fmt(v: number): string; col: string; hi?: number; tip?: (i: number) => React.ReactNode }) {
+  const [over, setOver] = useState<number | null>(null);
   const W = 680, H = 210, L = 40, R = 10, T = 12, B = 30, n = Math.max(1, vals.length), bw = (W - L - R) / n;
   const Y = (v: number) => T + (H - T - B) * (1 - Math.min(v, maxV) / maxV);
-  return (
+  const svg = (
     <svg viewBox={`0 0 ${W} ${H}`} role="img">
       {ticks.map((t) => <g key={t}><line className="grid" x1={L} x2={W - R} y1={Y(t)} y2={Y(t)} /><text x={L - 8} y={Y(t) + 4} textAnchor="end">{fmt(t)}</text></g>)}
       {vals.map((v, i) => {
         const x = L + i * bw + bw * 0.18;
         return (
-          <g key={i}>
-            <rect x={x.toFixed(1)} y={Y(v).toFixed(1)} width={(bw * 0.64).toFixed(1)} height={(Y(0) - Y(v)).toFixed(1)} rx={3} fill={col} opacity={i === hi ? 1 : 0.55} />
+          <g key={i} onMouseEnter={tip ? () => setOver(i) : undefined} onClick={tip ? () => setOver(over === i ? null : i) : undefined} style={tip ? { cursor: 'pointer' } : undefined}>
+            {tip && <rect x={(L + i * bw).toFixed(1)} y={T} width={bw.toFixed(1)} height={H - T - B} fill="transparent" />}
+            <rect x={x.toFixed(1)} y={Y(v).toFixed(1)} width={(bw * 0.64).toFixed(1)} height={(Y(0) - Y(v)).toFixed(1)} rx={3} fill={col} opacity={i === hi || i === over ? 1 : 0.55} />
             {labels[i] && <text x={(x + bw * 0.32).toFixed(1)} y={H - 10} textAnchor="middle">{labels[i]}</text>}
           </g>
         );
       })}
     </svg>
+  );
+  if (!tip) return svg;
+  const leftPct = over == null ? 0 : Math.min(85, Math.max(15, ((L + (over + 0.5) * bw) / W) * 100));
+  return (
+    <div className="bar-wrap" onMouseLeave={() => setOver(null)}>
+      {svg}
+      {over != null && <div className="bar-tip" style={{ left: `${leftPct}%` }}>{tip(over)}</div>}
+    </div>
   );
 }
 
