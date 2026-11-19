@@ -9,6 +9,8 @@
 //                    (only after the person was in bed during this window)
 //   no_movement      in bed with no movement (mv 0)          for durationS
 //   device_offline   offline                                  for durationS
+//   fall             Fall Detection device (013): opens on a FALL event and
+//                    closes on RECOVERED. No rule needed, always on.
 // An alert opens once the condition has lasted durationS and closes when it
 // is no longer true. At most one open alert per device and type (DB index).
 const { DateTime } = require('luxon');
@@ -17,7 +19,7 @@ const log = require('../logger');
 const live = require('./live');
 const realtime = require('./realtime');
 
-const SEVERITY = { breath_low: 'critical', hr_out_of_range: 'critical', out_of_bed: 'warning', no_movement: 'warning', device_offline: 'warning' };
+const SEVERITY = { breath_low: 'critical', hr_out_of_range: 'critical', out_of_bed: 'warning', no_movement: 'warning', device_offline: 'warning', fall: 'critical' };
 const RULES_TTL_MS = 30_000;
 
 const ruleCache = new Map();     // deviceId -> {at, rules: Map(type -> rule), tz, name}
@@ -64,24 +66,28 @@ function texts(type, rule, value) {
     case 'out_of_bed': return [`Out of bed for ${Math.round(rule.duration_s / 60)} min`,
       `Rule: out of bed more than ${Math.round(rule.duration_s / 60)} min between ${rule.window_from?.slice(0, 5)} and ${rule.window_to?.slice(0, 5)}`];
     case 'no_movement': return [`No movement for ${Math.round(rule.duration_s / 3600)} h`, `Rule: in bed with no movement for ${Math.round(rule.duration_s / 60)} min`];
+    case 'fall': return [`Fall detected${value != null ? `: dropped ${Math.round(value)} cm` : ''}`,
+      'The radar saw a person fall. This alert ends when they get up.'];
     default: return ['Device offline', `No data for more than ${Math.round(rule.duration_s / 60)} min. Check power and Wi-Fi.`];
   }
 }
 
-async function open(deviceId, serial, type, rule, value) {
+// `at`: when it started, if not now (a fall event carries the device's time).
+async function open(deviceId, serial, type, rule, value, at = null) {
   const [title, detail] = texts(type, rule, value);
   const { rows: [a] } = await db.query(
-    `INSERT INTO alerts (device_id, type, severity, title, detail, value) VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO alerts (device_id, type, severity, title, detail, value, started_at) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()))
      ON CONFLICT (device_id, type) WHERE ended_at IS NULL DO NOTHING RETURNING id, started_at`,
-    [deviceId, type, SEVERITY[type], title, detail, value ?? null]);
+    [deviceId, type, SEVERITY[type], title, detail, value ?? null, at]);
   if (!a) return; // already open
   const payload = { alertId: a.id, deviceId, serial, type, severity: SEVERITY[type], title, at: a.started_at };
   for (const u of await recipients(deviceId)) realtime.emitToUser(u, 'alert:new', payload);
 }
 
-async function close(deviceId, type) {
+async function close(deviceId, type, at = null) {
   const { rows } = await db.query(
-    'UPDATE alerts SET ended_at = now() WHERE device_id = $1 AND type = $2 AND ended_at IS NULL RETURNING id, ended_at', [deviceId, type]);
+    `UPDATE alerts SET ended_at = GREATEST(started_at, COALESCE($3, now())) WHERE device_id = $1 AND type = $2 AND ended_at IS NULL
+     RETURNING id, ended_at`, [deviceId, type, at]);
   if (!rows[0]) return;
   for (const u of await recipients(deviceId)) {
     realtime.emitToUser(u, 'alert:ended', { alertId: rows[0].id, deviceId, endedAt: rows[0].ended_at });
@@ -143,9 +149,18 @@ async function onStatus(d, online) {
   }, (rule.duration_s || 900) * 1000).unref());
 }
 
+// Fall Detection (013). `dropCm` is the height drop in cm (alerts.value, shown in the title);
+// `at` is the event time from the device.
+async function fallStarted(d, dropCm, at) {
+  const r = await rulesFor(d.deviceId);
+  if (!r.owned) return;
+  await open(d.deviceId, d.serial, 'fall', {}, dropCm, at);
+}
+const fallEnded = (d, at) => close(d.deviceId, 'fall', at);
+
 function start() {
   live.onLive((d, s) => onLive(d, s));
   live.onPresence((d, online) => onStatus(d, online));
 }
 
-module.exports = { start, forget, SEVERITY };
+module.exports = { start, forget, SEVERITY, fallStarted, fallEnded };

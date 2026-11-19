@@ -13,6 +13,7 @@ const commands = require('./services/commands');
 const ota = require('./services/ota');
 const alerts = require('./services/alerts');
 const vendors = require('./services/vendors');
+const fall = require('./services/fall');
 
 async function main() {
   if (!(await db.ping())) {
@@ -34,6 +35,7 @@ async function main() {
   ota.start();
   alerts.start();
   vendors.start();
+  fall.start();
   deviceViews.setLastNight(sleep.lastNight);
   server.listen(config.port, () => {
     log.info({ port: config.port }, 'argus backend listening');

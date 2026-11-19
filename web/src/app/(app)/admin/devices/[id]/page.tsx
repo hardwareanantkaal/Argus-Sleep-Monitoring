@@ -80,6 +80,7 @@ function Inner() {
           {d.isDisabled && <div className="banner"><Icon name="alert" /><span>Disabled{d.disabledReason ? `: ${d.disabledReason}` : ''}. The broker refuses its MQTT login.</span></div>}
           <div className="g3">
             <div className="card"><h2 style={{ marginBottom: 12 }}>Hardware</h2><dl className="kv">
+              <dt>Product</dt><dd>{d.product === 'fall' ? 'Fall detector' : 'Sleep monitor'}</dd>
               <dt>MAC</dt><dd className="mono">{d.hardware.mac}</dd>
               <dt>Chip</dt><dd className="mono">{d.hardware.chip}</dd>
               <dt>Radar</dt><dd>{d.hardware.radar}</dd>

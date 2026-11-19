@@ -17,6 +17,7 @@ const sleep = require('../services/sleep');
 const settingsSync = require('../services/settingsSync');
 const commands = require('../services/commands');
 const alerts = require('../services/alerts');
+const fall = require('../services/fall');
 const { DateTime } = require('luxon');
 const { E, ApiError } = require('../errors');
 
@@ -66,7 +67,7 @@ async function findClaimable(req, code, serial, vendor, asVendor, q = db, lock =
   const key = req.user.id;
   limits.claim.check(key);
   const { rows: [d] } = await q.query(
-    `SELECT d.id, d.serial_no, d.hw_model, d.created_at, d.owner_id, d.vendor_id, d.claimed_at, d.claim_stage,
+    `SELECT d.id, d.serial_no, d.hw_model, d.product, d.created_at, d.owner_id, d.vendor_id, d.claimed_at, d.claim_stage,
             d.is_disabled, d.mqtt_username, v.name AS vendor_name
        FROM devices d LEFT JOIN vendors v ON v.id = d.vendor_id
       WHERE d.claim_code_hash = $1 ${lock ? 'FOR UPDATE OF d' : ''}`, [claim.hashCode(code)]);
@@ -103,7 +104,7 @@ router.post('/claim/check', async (req, res) => {
   const vendor = await vendorOf(req.user.id);
   const d = await findClaimable(req, codeFrom(body), body.serial, vendor, body.asVendor);
   res.json({
-    serial: d.serial_no, hwModel: d.hw_model, registeredAt: d.created_at,
+    serial: d.serial_no, product: d.product, hwModel: d.hw_model, registeredAt: d.created_at,
     stage: d.claim_stage, result: d.result,
     soldBy: d.claim_stage === 'vendor_stock' ? { id: d.vendor_id, name: d.vendor_name } : null,
   });
@@ -117,6 +118,9 @@ const DEFAULT_RULES = [
   ['no_movement', false, null, null, 10800, null, null],
   ['device_offline', true, null, null, 900, null, null],
 ];
+// Fall Detection devices (013) send no sleep values, so only the offline rule
+// applies; the fall alert itself needs no rule.
+const FALL_RULE_TYPES = new Set(['device_offline']);
 
 // 3.3
 router.post('/claim', async (req, res) => {
@@ -167,6 +171,7 @@ router.post('/claim', async (req, res) => {
     }
     await c.query('INSERT INTO device_settings (device_id) VALUES ($1) ON CONFLICT (device_id) DO NOTHING', [d.id]);
     for (const [type, enabled, low, high, dur, from, to] of DEFAULT_RULES) {
+      if (d.product === 'fall' && !FALL_RULE_TYPES.has(type)) continue;
       await c.query(
         `INSERT INTO alert_rules (device_id, type, is_enabled, low_value, high_value, duration_s, window_from, window_to)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`, [d.id, type, enabled, low, high, dur, from, to]);
@@ -294,6 +299,17 @@ router.get('/:id/nights/:sleepDate', device('history.view'), async (req, res) =>
   const [n] = await sleep.nights(req.device.id, date, date);
   if (!n) throw E.notFound('No sleep recorded for that night');
   res.json(sleep.nightDetail(n));
+});
+
+// 4b.1 Fall events of a Fall Detection device (013), newest first.
+router.get('/:id/falls', device('history.view'), async (req, res) => {
+  if (req.device.product !== 'fall') throw E.notFound('This device is not a fall detector');
+  const q = parse(z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(30),
+    cursor: z.coerce.number().int().positive().optional(),
+  }), req.query);
+  res.json({ device: { tz: req.device.timezone, place: req.device.place },
+    ...(await fall.list(req.device.id, { limit: q.limit, cursor: q.cursor ?? null })) });
 });
 
 // 4.3 Delete one stored session (13 Nov, "session management" like the old

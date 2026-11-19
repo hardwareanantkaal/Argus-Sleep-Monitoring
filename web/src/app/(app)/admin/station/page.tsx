@@ -21,7 +21,9 @@ import type { FactoryRelease, FactoryRun, FactoryRunList, RegisterResult } from 
 
 const LOG_TAIL = 16384;
 const MAX_LINES = 1500;
-const HW_MODELS = ['ARG-S1 rev B', 'ARG-S1 rev A'];
+// ARG-S* = sleep monitor, ARG-F* = fall detector (013): the model picks the product.
+const HW_MODELS = ['ARG-S1 rev B', 'ARG-S1 rev A', 'ARG-F1 rev A'];
+const productOf = (hw: string) => (hw.startsWith('ARG-F') ? 'fall' : 'sleep');
 
 const store = {
   get: (k: string, d: string) => { try { return localStorage.getItem(`argus.${k}`) ?? d; } catch { return d; } },
@@ -268,7 +270,7 @@ function Inner() {
       // Link the bench record when the board was flashed and tested here (saves the tests so far first)
       if (tested && run?.result === 'running' && c) await patch(`/admin/factory/runs/${run.id}`, { checks: c.toList() });
       const r = await post<RegisterResult>('/admin/devices', {
-        mac: board.mac, chip: board.chip, hwModel: hw, batch: batch.trim() || undefined,
+        mac: board.mac, chip: board.chip, hwModel: hw, product: productOf(hw), batch: batch.trim() || undefined,
         fwOnBoard: run?.flashed ? run.fwVersion || undefined : undefined,
         ...(tested && run ? { factoryRunId: run.id } : {}),
       });
@@ -401,7 +403,7 @@ function Inner() {
               <p className="small muted">{tested ? 'Flashed and tested here: the test result is saved with the device.' : 'Not flashed and tested here. You can still register it.'}</p>
               <div className="fields2">
                 <div className="field"><label htmlFor="st-hw">Hardware model</label>
-                  <select className="inp" id="st-hw" value={hw} onChange={(e) => setHw(e.target.value)}>{HW_MODELS.map((m) => <option key={m}>{m}</option>)}</select></div>
+                  <select className="inp" id="st-hw" value={hw} onChange={(e) => setHw(e.target.value)}>{HW_MODELS.map((m) => <option key={m} value={m}>{m}{productOf(m) === 'fall' ? ' (fall detector)' : ''}</option>)}</select></div>
                 <div className="field"><label htmlFor="st-batch">Batch</label>
                   <input className="inp" id="st-batch" value={batch} onChange={(e) => setBatch(e.target.value)} maxLength={40} placeholder="B-2026-11-A" /></div>
               </div>

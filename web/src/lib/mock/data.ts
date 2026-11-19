@@ -3,7 +3,7 @@
 
 import type {
   AlertItem, AlertRule, DevicePerm, NightCard, NightDetail, SensorSettings, StaffPerm, AuditItem,
-  FirmwareRelease, Rollout, CommandRow, PlatformSettings, GrantPerm,
+  FirmwareRelease, Rollout, CommandRow, PlatformSettings, GrantPerm, FallEvent, Product,
 } from '../types';
 
 export const ALL_DEVICE_PERMS: DevicePerm[] = ['live.view', 'history.view', 'alerts.receive', 'settings.edit', 'sharing.manage'];
@@ -38,6 +38,8 @@ export interface MDevice {
   /** §15: a vendor device has vendorId set and no person owner */
   vendorId?: string | null; groupId?: string | null;
   base: { hr: number; br: number; bed: number; ss: number };
+  /** 013: 'fall' = fall detector; its stored data is `falls` (newest first) */
+  product?: Product; falls?: FallEvent[];
 }
 export interface MVendor { id: string; name: string; contactName: string | null; phone: string | null; email: string | null; status: 'active' | 'disabled'; createdAt: string }
 export interface MVendorMember { vendorId: string; userId: string; role: 'owner' | 'staff'; joinedAt: string }
@@ -127,6 +129,14 @@ db.devices = [
   dev('0030', { name: 'Room 4', room: 'Ward B', tz: 'Asia/Kolkata', place: 'Ahmedabad', ownerId: null, vendorId: 'v-sunrise', groupId: 'g-wardb', online: true, lastSeenAt: ago(0), fw: '1.4.3-beta', mac: '34:85:18:A1:17:F1', rssi: -66, uptimeS: 781000, base: { hr: 64, br: 13, bed: 1, ss: 0 } }),
   dev('0033', { name: 'Room 7', room: 'Ward C', tz: 'Asia/Kolkata', place: 'Ahmedabad', vendorId: 'v-sunrise', groupId: 'g-wardc', online: true, lastSeenAt: ago(0), mac: '34:85:18:A1:17:F9', rssi: -59, uptimeS: 402000, base: { hr: 70, br: 15, bed: 1, ss: 1 } }),
   dev('0034', { name: 'Room 9', room: null, tz: 'Asia/Kolkata', place: 'Ahmedabad', vendorId: 'v-sunrise', online: false, lastSeenAt: ago(180), mac: '34:85:18:A1:17:FE' }),
+  dev('0040', { name: 'Bathroom', room: 'Ground floor', tz: 'Asia/Kolkata', place: 'Surat', ownerId: 'u-priya', online: true, lastSeenAt: ago(0), fw: '0.1.0',
+    mac: '34:85:18:A1:19:40', hwModel: 'ARG-F1 rev A', rssi: -64, uptimeS: 86000, product: 'fall',
+    falls: [
+      { id: 'f-4', eid: 4, kind: 'recovered', at: ago(60 * 26 - 2), tid: 1, fallEid: 3 },
+      { id: 'f-3', eid: 3, kind: 'fall', at: ago(60 * 26), tid: 1, emaNow: 0.41, emaPeak: 1.66, dropM: 1.25, dropPct: 75, pos: [0.3, 2.6, 0.4], vel: [0.1, -0.2, -1.2], heightM: 0.41, presence: true, preset: 'MED', recoveredAt: ago(60 * 26 - 2), recoveryS: 115 },
+      { id: 'f-2', eid: 2, kind: 'recovered', at: daysAgo(3.2), tid: 2, fallEid: 1 },
+      { id: 'f-1', eid: 1, kind: 'fall', at: daysAgo(3.201), tid: 2, emaNow: 0.55, emaPeak: 1.58, dropM: 1.03, dropPct: 65, pos: null, vel: null, heightM: null, presence: true, preset: 'MED', recoveredAt: daysAgo(3.2), recoveryS: 86 },
+    ] }),
   dev('0031', { mac: '34:85:18:A1:18:02', registeredAt: ago(30 * 60), claimCode: 'K7P29XQM4HTR' }),
   dev('0032', { mac: '34:85:18:A1:18:0D', registeredAt: ago(29 * 60), claimCode: 'W3RT8MNB6KQZ' }),
 ];

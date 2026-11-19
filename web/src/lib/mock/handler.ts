@@ -105,13 +105,14 @@ function device(u: MUser, id: string, need?: DevicePerm | 'any' | 'owner'): MDev
 }
 export function liveSnapshot(d: MDevice) {
   if (!d.online) return null;
+  if (d.product === 'fall') return { product: 'fall' as const, pr: 1, radar: 1, preset: 'MED' as const, rssi: d.rssi ?? undefined, fw: d.fw, bed: 0, ss: 3, hr: 0, br: 0, at: nowIso() };
   return { pr: d.base.bed ? 1 : 0, bed: d.base.bed, ss: d.base.ss, hr: d.base.hr, br: d.base.br, at: nowIso() };
 }
 function card(u: MUser, d: MDevice): DeviceCard {
   const p = permsOn(u, d);
   const owner = db.users.find((x) => x.id === d.ownerId);
   // lastNight is never a nap-only day (API.md §4)
-  const n = p.includes('history.view') ? nightsFor(d.id, d.tz!).find((x) => x.hasMainSleep) : null;
+  const n = p.includes('history.view') && d.product !== 'fall' ? nightsFor(d.id, d.tz!).find((x) => x.hasMainSleep) : null;
   const access = accessOf(u, d) || 'share';
   const v = d.vendorId ? db.vendors.find((x) => x.id === d.vendorId) : null;
   const g = d.groupId ? db.groups.find((x) => x.id === d.groupId) : null;
@@ -119,7 +120,7 @@ function card(u: MUser, d: MDevice): DeviceCard {
     access, vendor: v ? { id: v.id, name: v.name } : null,
     group: access === 'vendor' && g ? { id: g.id, name: g.name } : null,
     accessEndsAt: access === 'grant' ? activeGrant(u, d)!.endsAt : undefined,
-    id: d.id, serial: d.serial, name: d.name || d.serial, room: d.room, tz: d.tz!, place: d.place,
+    id: d.id, serial: d.serial, product: d.product || 'sleep', name: d.name || d.serial, room: d.room, tz: d.tz!, place: d.place,
     isOwner: d.ownerId === u.id, sharedBy: d.ownerId === u.id || !owner ? null : { fullName: owner.fullName },
     myPermissions: p, status: { online: d.online, lastSeenAt: d.lastSeenAt },
     live: p.includes('live.view') ? liveSnapshot(d) : undefined,
@@ -140,7 +141,7 @@ function validTz(tz: string) { try { new Intl.DateTimeFormat('en', { timeZone: t
 function adminRow(d: MDevice): AdminDeviceRow {
   const o = db.users.find((x) => x.id === d.ownerId);
   const v = d.vendorId ? db.vendors.find((x) => x.id === d.vendorId) : null;
-  return { id: d.id, serial: d.serial, name: d.name, owner: o ? { id: o.id, fullName: o.fullName } : null, vendor: v ? { id: v.id, name: v.name } : null, online: d.online,
+  return { id: d.id, serial: d.serial, product: d.product || 'sleep', name: d.name, owner: o ? { id: o.id, fullName: o.fullName } : null, vendor: v ? { id: v.id, name: v.name } : null, online: d.online,
     tz: d.tz, fw: d.fw, chip: d.chip, lastSeenAt: d.lastSeenAt, createdAt: d.registeredAt };
 }
 function custRow(u: MUser): CustomerRow {
@@ -236,6 +237,12 @@ on('PATCH', '/devices/([^/]+)', (m, b) => {
   for (const k of ['name', 'room', 'tz', 'place', 'sleepCutoff', 'autoUpdate'] as const) if (b[k] !== undefined) (d as any)[k] = b[k];
   audit(u, 'device.update', 'device', d.serial);
   return detail(u, d);
+});
+// 013: fall events of a fall detector (newest first)
+on('GET', '/devices/([^/]+)/falls', (m) => {
+  const u = me(); const d = device(u, m[1], 'history.view');
+  if (d.product !== 'fall') fail(404, 'NOT_FOUND', 'This device is not a fall detector');
+  return { device: { tz: d.tz!, place: d.place }, items: d.falls || [], nextCursor: null };
 });
 on('GET', '/devices/([^/]+)/sensor-settings', (m) => { const u = me(); return device(u, m[1], 'settings.edit').sensor; });
 on('PATCH', '/devices/([^/]+)/sensor-settings', (m, b) => {
@@ -455,11 +462,12 @@ on('GET', '/admin/dashboard', () => {
 on('GET', '/admin/devices', (_m, _b, q) => {
   needStaff(me(), 'devices.view');
   const term = (q.get('q') || '').toLowerCase().replace(/[:\s-]/g, '');
-  const st = q.get('status'); const from = q.get('registeredFrom');
+  const st = q.get('status'); const from = q.get('registeredFrom'); const prod = q.get('product');
   const rows = db.devices.filter((d) => {
     const owner = db.users.find((x) => x.id === d.ownerId);
     const vn = db.vendors.find((v) => v.id === d.vendorId)?.name || '';
     const hay = (d.serial + d.mac + (d.name || '') + vn + (owner ? owner.fullName + owner.phone : '')).toLowerCase().replace(/[:\s-]/g, '');
+    if (prod && (d.product || 'sleep') !== prod) return false;
     const sOk = !st || (st === 'online' && d.online) || (st === 'offline' && !d.online && !!(d.ownerId || d.vendorId)) || (st === 'unclaimed' && !d.ownerId && !d.vendorId) || (st === 'disabled' && d.isDisabled);
     return (!term || hay.includes(term)) && sOk && (!q.get('tz') || d.tz === q.get('tz')) && (!from || d.registeredAt >= from);
   }).map(adminRow);
@@ -469,7 +477,7 @@ on('GET', '/admin/devices/([^/]+)', (m): AdminDeviceDetail => {
   needStaff(me(), 'devices.view');
   const d = db.devices.find((x) => x.id === m[1]); if (!d) fail(404, 'NOT_FOUND', 'Device not found');
   const o = db.users.find((x) => x.id === d!.ownerId);
-  return { id: d!.id, serial: d!.serial, name: d!.name,
+  return { id: d!.id, serial: d!.serial, product: d!.product || 'sleep', name: d!.name,
     hardware: { mac: d!.mac, chip: d!.chip, radar: 'Sensor', hwModel: d!.hwModel, batch: d!.batch, manufacturedAt: d!.manufacturedAt, fwAtRegister: '1.4.2', registeredAt: d!.registeredAt, registeredBy: d!.registeredBy },
     connection: { online: d!.online, lastSeenAt: d!.lastSeenAt, ip: d!.ip, wifiSsid: d!.wifiSsid, rssi: d!.rssi, uptimeS: d!.uptimeS, fw: d!.fw, radarOk: d!.online ? true : null },
     tz: d!.tz, place: d!.place, sleepCutoff: d!.sleepCutoff, isDisabled: d!.isDisabled, disabledReason: d!.disabledReason,
@@ -485,7 +493,7 @@ on('POST', '/admin/devices', (_m, b) => {
   const n = Math.max(...db.devices.map((d) => parseInt(d.serial.slice(-4), 10))) + 1;
   const serial = `ARG-24A${String(n).padStart(4, '0')}`;
   const code = newCode();
-  const d: MDevice = { ...db.devices[db.devices.length - 1], id: `d-${n}`, serial, mac, chip: b.chip, hwModel: b.hwModel, batch: b.batch || null, manufacturedAt: b.manufacturedAt || null,
+  const d: MDevice = { ...db.devices[db.devices.length - 1], id: `d-${n}`, serial, mac, chip: b.chip, hwModel: b.hwModel, product: b.product === 'fall' ? 'fall' : 'sleep', batch: b.batch || null, manufacturedAt: b.manufacturedAt || null,
     registeredAt: nowIso(), registeredBy: u.fullName, claimCode: code, ownerId: null, name: null, online: false, sensor: { ...db.devices[0].sensor } };
   db.devices.push(d);
   audit(u, 'device.register', 'device', serial, `MAC ${mac} · ${b.chip}`);
@@ -568,7 +576,7 @@ on('POST', '/admin/firmware', (_m, b) => {
   if (file!.size > 4 * 1024 * 1024) fail(400, 'VALIDATION', 'The file is larger than 4 MB', 'file');
   if (!version) fail(400, 'VALIDATION', 'Enter a version, e.g. 1.4.4', 'version');
   if (db.firmware.some((f) => f.version === version)) fail(409, 'VERSION_EXISTS', 'This version is already uploaded', 'version');
-  const rel = { id: rid('fw'), version, channel: (fd.get('channel') as 'beta' | 'stable') || 'beta', chipModel: 'ESP32-S3', fileSize: file!.size, sha256: '(computed by server)', notes: String(fd.get('notes') || '') || null, uploadedBy: u.fullName, createdAt: nowIso(), deviceCount: 0 };
+  const rel = { id: rid('fw'), version, channel: (fd.get('channel') as 'beta' | 'stable') || 'beta', chipModel: 'ESP32-S3', product: fd.get('product') === 'fall' ? 'fall' as const : 'sleep' as const, fileSize: file!.size, sha256: '(computed by server)', notes: String(fd.get('notes') || '') || null, uploadedBy: u.fullName, createdAt: nowIso(), deviceCount: 0 };
   db.firmware.unshift(rel);
   audit(u, 'firmware.upload', 'release', version);
   return rel;

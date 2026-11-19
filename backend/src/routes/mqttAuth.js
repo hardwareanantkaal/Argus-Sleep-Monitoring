@@ -19,17 +19,27 @@ const MAC_RE = /^[0-9a-f]{12}$/;
 const DEVICE_PUBLISH = new Set(['status', 'info', 'state', 'event', 'session', 'cmd/ack', 'logs', 'settings/ack', 'ota/status']);
 const DEVICE_SUBSCRIBE = new Set(['cmd', 'settings/set', 'ota', 'session/ack']);
 
-// Is this device allowed on the broker? Cached 10 s; forget() clears an entry
-// at once (e.g. when an admin disables the device).
-const cache = new Map(); // mac -> {ok, at}
-async function deviceAllowed(mac) {
+// Fall Detection product (migration 013, DEVICE-DATA.md §8): its own topics
+// under fall/<mac>/. It still uses the shared <p>/<mac>/ topics for device
+// info, commands, logs and OTA, but never the sleep data topics.
+const FALL_PREFIX = config.mqtt.fallPrefix;
+const FALL_PUBLISH = new Set(['status', 'alive', 'event']);
+const FALL_SUBSCRIBE = new Set();
+const FALL_SHARED_PUBLISH = new Set(['info', 'cmd/ack', 'logs', 'ota/status']);
+const FALL_SHARED_SUBSCRIBE = new Set(['cmd', 'ota']);
+
+// Is this device allowed on the broker, and which product is it? Cached 10 s;
+// forget() clears an entry at once (e.g. when an admin disables the device).
+const cache = new Map(); // mac -> {ok, product, at}
+async function deviceInfo(mac) {
   const hit = cache.get(mac);
-  if (hit && Date.now() - hit.at < 10_000) return hit.ok;
-  const row = await db.one('SELECT is_disabled FROM devices WHERE mqtt_username = $1', [mac]);
-  const ok = !!row && !row.is_disabled;
-  cache.set(mac, { ok, at: Date.now() });
-  return ok;
+  if (hit && Date.now() - hit.at < 10_000) return hit;
+  const row = await db.one('SELECT is_disabled, product FROM devices WHERE mqtt_username = $1', [mac]);
+  const v = { ok: !!row && !row.is_disabled, product: row?.product || null, at: Date.now() };
+  cache.set(mac, v);
+  return v;
 }
+const deviceAllowed = async (mac) => (await deviceInfo(mac)).ok;
 const forget = (mac) => cache.delete(mac);
 
 function isPrivate(addr = '') {
@@ -68,14 +78,26 @@ router.post('/acl', async (req, res) => {
   if (isBackend(username)) return res.status(200).end();
   if (!MAC_RE.test(username) || clientid !== username) return res.status(403).end();
 
+  if (/[+#]/.test(topic)) return res.status(403).end();
   const own = `${P}/${username}/`;
-  if (!topic.startsWith(own) || /[+#]/.test(topic)) return res.status(403).end();
-  const suffix = topic.slice(own.length);
-  const allowed = acc === 2 ? DEVICE_PUBLISH.has(suffix)
-    : acc === 1 || acc === 4 ? DEVICE_SUBSCRIBE.has(suffix)
-      : false;
-  if (allowed && !(await deviceAllowed(username))) return res.status(403).end();
+  const ownFall = `${FALL_PREFIX}/${username}/`;
+  const isFallTopic = topic.startsWith(ownFall);
+  if (!isFallTopic && !topic.startsWith(own)) return res.status(403).end();
+  const suffix = topic.slice((isFallTopic ? ownFall : own).length);
+  const write = acc === 2;
+  const read = acc === 1 || acc === 4;
+  if (!write && !read) return res.status(403).end();
+  const dev = await deviceInfo(username);
+  if (!dev.ok) return res.status(403).end();
+  let allowed;
+  if (dev.product === 'fall') {
+    allowed = isFallTopic
+      ? (write ? FALL_PUBLISH : FALL_SUBSCRIBE).has(suffix)
+      : (write ? FALL_SHARED_PUBLISH : FALL_SHARED_SUBSCRIBE).has(suffix);
+  } else {
+    allowed = !isFallTopic && (write ? DEVICE_PUBLISH : DEVICE_SUBSCRIBE).has(suffix);
+  }
   res.status(allowed ? 200 : 403).end();
 });
 
-module.exports = { router, forget, DEVICE_PUBLISH, DEVICE_SUBSCRIBE };
+module.exports = { router, forget, DEVICE_PUBLISH, DEVICE_SUBSCRIBE, FALL_PUBLISH };

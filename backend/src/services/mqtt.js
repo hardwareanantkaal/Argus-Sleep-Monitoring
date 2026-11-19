@@ -3,13 +3,17 @@
 // handler registered for its suffix:
 //   mqtt.on('state', (mac, payload, packet) => {...})     payload = Buffer
 //   mqtt.publish(mac, 'cmd', {id: 812, c: 'reboot'}, {qos: 1})
+// Fall Detection devices (013) publish under their own prefix:
+//   mqtt.onFall('event', (mac, payload, packet) => {...})  fall/<mac>/event
 const mqttLib = require('mqtt');
 const config = require('../config');
 const log = require('../logger');
-const { DEVICE_PUBLISH } = require('../routes/mqttAuth');
+const { DEVICE_PUBLISH, FALL_PUBLISH } = require('../routes/mqttAuth');
 
 const P = config.mqtt.topicPrefix;
+const FP = config.mqtt.fallPrefix;
 const handlers = new Map(); // suffix -> fn
+const fallHandlers = new Map(); // suffix -> fn (fall/<mac>/<suffix>)
 const connectListeners = [];
 let client = null;
 
@@ -18,21 +22,29 @@ function on(suffix, fn) {
   handlers.set(suffix, fn);
 }
 
+function onFall(suffix, fn) {
+  if (!FALL_PUBLISH.has(suffix)) throw new Error(`not a fall device topic: ${suffix}`);
+  fallHandlers.set(suffix, fn);
+}
+
 // Called after every (re)connect, e.g. to re-send pending settings.
 function onConnect(fn) { connectListeners.push(fn); }
 
 function topicFor(mac, suffix) { return `${P}/${mac}/${suffix}`; }
 
 // "argus/348518a10f22/cmd/ack" -> {mac, suffix: "cmd/ack"}
+// "fall/348518a10f22/event"    -> {mac, suffix: "event", fall: true}
 function parseTopic(topic) {
   const parts = topic.split('/');
-  if (parts.length < 3 || parts[0] !== P) return null;
-  return { mac: parts[1], suffix: parts.slice(2).join('/') };
+  if (parts.length < 3 || (parts[0] !== P && parts[0] !== FP)) return null;
+  const t = { mac: parts[1], suffix: parts.slice(2).join('/') };
+  if (parts[0] === FP) t.fall = true;
+  return t;
 }
 
 async function dispatch(topic, payload, packet) {
   const t = parseTopic(topic);
-  const fn = t && handlers.get(t.suffix);
+  const fn = t && (t.fall ? fallHandlers : handlers).get(t.suffix);
   if (!fn) {
     log.debug({ topic }, 'mqtt message with no handler');
     return;
@@ -58,7 +70,10 @@ function start() {
 
   client.on('connect', () => {
     log.info({ url: config.mqtt.url }, 'mqtt connected');
-    const topics = Object.fromEntries([...DEVICE_PUBLISH].map((s) => [`${P}/+/${s}`, { qos: 1 }]));
+    const topics = Object.fromEntries([
+      ...[...DEVICE_PUBLISH].map((s) => [`${P}/+/${s}`, { qos: 1 }]),
+      ...[...FALL_PUBLISH].map((s) => [`${FP}/+/${s}`, { qos: 1 }]),
+    ]);
     client.subscribe(topics, (err) => {
       if (err) log.error({ err }, 'mqtt subscribe failed');
     });
@@ -86,4 +101,4 @@ function stop() {
   return new Promise((resolve) => (client ? client.end(false, {}, resolve) : resolve()));
 }
 
-module.exports = { start, stop, on, onConnect, publish, isConnected, topicFor, parseTopic };
+module.exports = { start, stop, on, onFall, onConnect, publish, isConnected, topicFor, parseTopic };

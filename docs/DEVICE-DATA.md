@@ -212,3 +212,84 @@ While a sleep session is active the firmware does not install an update. It answ
 `argus/<d>/ota/status {"rid":7,"s":"deferred","err":"sleep session active"}` and does nothing else. The server
 keeps the update as `deferred` (not failed) and offers it again every 60 s while the device is online, so it
 installs after the person gets up (still only inside the rollout's install window).
+
+---
+
+## 8. Fall Detection device (added 19 Nov 2026, migration 013, owner approved)
+
+A second product: **ESP32-S3 + TI IWR6843AOP** radar (3D People Tracking firmware, `centermount1.cfg`).
+The ESP32-S3 parses the radar's TLVs and runs the fall algorithm itself (the TI Industrial Visualizer method:
+EMA-smoothed height, peak-to-now drop, `LOW` / `MED` / `HIGH` presets). The server never sees radar frames.
+
+- Same registration, QR claim, sharing, vendor and OTA flow as the sleep device. At registration the
+  product is set to **Fall detector** (`devices.product = 'fall'`, hardware model `ARG-F1 …`).
+- **Own topics:** prefix `fall` instead of `argus`: `fall/<d>/...`. `<d>` and the MQTT login are the same as
+  for the sleep device (MAC, 12 lowercase hex characters, any non-empty dummy password).
+- **Stored:** only FALL and RECOVERED events (`fall_events`). **Not stored:** the alive heartbeat.
+- **Still on the shared `argus/<d>/` topics:** `info` (publish), `cmd` / `cmd/ack`, `logs`, `ota` / `ota/status`.
+  A fall device may NOT publish `argus/<d>/state`, `event`, `session` or `settings/ack` (broker ACL refuses),
+  and a sleep device may not use `fall/<d>/...`.
+- **Hardware status:** the radar module is not available yet (the old one is damaged), so these messages
+  are the contract for the firmware. Fields marked *optional* may be left out if the hardware can't give them.
+
+### 8.1 Alive: `fall/<d>/alive` (device → server, QoS 0, **not stored**)
+
+Every **60 s**. Marks the device online and goes to the screen (Socket.IO `device:live`).
+
+```json
+{"fw":"0.1.0","up":36012,"rssi":-61,"radar":1,"pr":1,"preset":"MED"}
+```
+
+| Key | Meaning | Type |
+|---|---|---|
+| `fw` | firmware version | string |
+| `up` | uptime | s |
+| `rssi` | Wi-Fi signal | dBm |
+| `radar` | 1 = the IWR6843 is sending frames, 0 = no frames (radar lost) | 0 / 1 |
+| `pr` | room occupied (TLV 1021 presence) | 0 / 1, optional |
+| `preset` | fall sensitivity in use | `"LOW"`, `"MED"` or `"HIGH"` |
+
+Like the sleep device, a fall device sets the **last will** `fall/<d>/status = offline` (QoS 1, retained)
+and publishes `fall/<d>/status = online` (retained) on connect. If no message arrives for
+`FALL_STALE_S` (150 s, about 2.5 missed alive messages) the server marks it offline.
+
+### 8.2 Event: `fall/<d>/event` (device → server, QoS 1, **stored**)
+
+**FALL** (sent once when the fall is confirmed):
+
+```json
+{"eid":17,"t":"fall","ts":1763541000,"tid":1,"ema_now":0.42,"ema_peak":1.68,"drop_m":1.26,"drop_pct":75,
+ "pos":[0.35,2.80,0.40],"vel":[0.10,-0.20,-1.10],"h":0.42,"pr":1,"preset":"MED"}
+```
+
+**RECOVERED** (the same person got up):
+
+```json
+{"eid":18,"t":"recovered","ts":1763541095,"tid":1,"fall_eid":17}
+```
+
+| Key | Meaning | Required |
+|---|---|---|
+| `eid` | event counter, +1 for every event. **Keep it in NVS** (Preferences) so it survives a reboot: the server ignores an `eid` it already has (a resend after a lost PUBACK is stored once). | yes |
+| `t` | `"fall"` or `"recovered"` | yes |
+| `ts` | Unix time UTC (needs NTP; if the clock looks wrong the server uses the receive time) | yes |
+| `tid` | radar track id of the person (0–255) | yes |
+| `ema_now` | smoothed height now (m) | fall |
+| `ema_peak` | highest smoothed height in the look-back window (m) (`ema_past` in the Pi script) | fall |
+| `drop_m` | `ema_peak - ema_now` (m) | **fall, required** |
+| `drop_pct` | drop as % of `ema_peak` | fall |
+| `pos` | target position `[x, y, z]` (m), from TLV 1010 | optional |
+| `vel` | target velocity `[vx, vy, vz]` (m/s), from TLV 1010 | optional |
+| `h` | target height `maxZ - minZ` (m), from TLV 1012 | optional |
+| `pr` | room occupied flag at the time of the fall | optional |
+| `preset` | sensitivity preset in use | optional |
+| `fall_eid` | (recovered) the `eid` of the FALL it ends. If missing, the server closes the latest open fall of the same `tid`. | recovered |
+
+**What the server does:**
+- FALL → a row in `fall_events` and an in-app **`fall` alert** (critical, "Fall detected: dropped 126 cm").
+- RECOVERED → a row in `fall_events`; the FALL gets `recovered_at` and `recovery_s` (time to get up); the
+  alert closes when no fall of that device is still open.
+- If the device reboots while someone is down, no RECOVERED comes: the alert stays open until the next
+  RECOVERED for that track, so the firmware should not forget an unsent RECOVERED (keep it in NVS too).
+
+**Size:** a FALL is about 220 bytes, far under the 4 KB broker limit.

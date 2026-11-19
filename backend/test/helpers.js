@@ -80,14 +80,15 @@ function randomMac() {
 }
 
 // Insert a registered (unclaimed) device straight into the DB. Returns {id, mac, serial}.
-async function insertDevice({ disabled = false, ownerId = null } = {}) {
+// product: 'sleep' (default) or 'fall' (Fall Detection, migration 013).
+async function insertDevice({ disabled = false, ownerId = null, product = 'sleep' } = {}) {
   const mac = randomMac();
   const serial = `ARG-T${mac.slice(6).toUpperCase()}`;
   const { rows: [d] } = await db.query(
-    `INSERT INTO devices (serial_no, mac, mqtt_username, chip_model, hw_model, is_disabled, owner_id, claimed_at, claim_stage)
+    `INSERT INTO devices (serial_no, mac, mqtt_username, chip_model, hw_model, is_disabled, owner_id, claimed_at, claim_stage, product)
      VALUES ($1, $2::macaddr, $3, 'ESP32-S3', 'ARG-S1', $4, $5, CASE WHEN $5::uuid IS NULL THEN NULL ELSE now() END,
-             CASE WHEN $5::uuid IS NULL THEN 'factory' ELSE 'owned' END)
-     RETURNING id`, [serial, mac, mac, disabled, ownerId]);
+             CASE WHEN $5::uuid IS NULL THEN 'factory' ELSE 'owned' END, $6)
+     RETURNING id`, [serial, mac, mac, disabled, ownerId, product]);
   await db.query('INSERT INTO device_settings (device_id) VALUES ($1)', [d.id]);
   return { id: d.id, mac, serial };
 }

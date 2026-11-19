@@ -46,7 +46,8 @@ CREATE TYPE rollout_target   AS ENUM ('all', 'percent', 'serials', 'from_version
 CREATE TYPE rollout_status   AS ENUM ('running', 'paused', 'finished', 'cancelled');
 CREATE TYPE ota_status       AS ENUM ('pending', 'sent', 'downloading', 'success', 'failed', 'skipped', 'deferred');  -- deferred: 005
 CREATE TYPE alert_type       AS ENUM ('breath_low', 'hr_out_of_range', 'out_of_bed',
-                                      'no_movement', 'device_offline');
+                                      'no_movement', 'device_offline',
+                                      'fall');                 -- fall: 013 (Fall Detection product)
 CREATE TYPE delivery_channel AS ENUM ('push', 'sms');
 CREATE TYPE delivery_status  AS ENUM ('pending', 'sent', 'failed', 'skipped');
 
@@ -223,12 +224,14 @@ CREATE TABLE firmware_releases (
   version      TEXT        NOT NULL UNIQUE,         -- '1.4.3-beta'
   channel      fw_channel  NOT NULL DEFAULT 'beta',
   chip_model   TEXT        NOT NULL DEFAULT 'ESP32-S3',
+  product      TEXT        NOT NULL DEFAULT 'sleep',   -- 013: rollouts only reach devices of this product
   file_path    TEXT        NOT NULL,                -- on the server, e.g. /srv/ota/argus_1.4.3-beta.bin
   file_size    INTEGER     NOT NULL CHECK (file_size > 0),
   sha256       TEXT        NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   notes        TEXT,                                -- "What changed"
   uploaded_by  UUID        REFERENCES users(id) ON DELETE SET NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT firmware_releases_product CHECK (product IN ('sleep', 'fall'))
 );
 
 -- ---------------------------------------------------------------------
@@ -244,6 +247,7 @@ CREATE TABLE devices (
   claim_code_hash  TEXT,                            -- HMAC of the 12-char sticker claim code (D2). Kept in vendor stock, NULL once owned (008)
   claim_code_enc   BYTEA,                           -- the same code AES-256-GCM encrypted, for reprinting the sticker (006). NULL once owned
   chip_model       TEXT        NOT NULL,            -- 'ESP32-S3' (read over USB)
+  product          TEXT        NOT NULL DEFAULT 'sleep',  -- 'sleep' (C1001 sleep monitor) | 'fall' (IWR6843 fall detector), 013
   hw_model         TEXT        NOT NULL,            -- 'ARG-S1 rev B'
   batch            TEXT,                            -- 'B-2026-11-A'
   manufactured_at  DATE,
@@ -273,6 +277,7 @@ CREATE TABLE devices (
   CONSTRAINT devices_serial_format CHECK (serial_no ~ '^ARG-[0-9A-Z]{7}$'),
   CONSTRAINT devices_place_length CHECK (place IS NULL OR char_length(btrim(place)) BETWEEN 2 AND 60),
   CONSTRAINT devices_mqtt_username_format CHECK (mqtt_username ~ '^[0-9a-f]{12}$'),
+  CONSTRAINT devices_product CHECK (product IN ('sleep', 'fall')),
   CONSTRAINT devices_claim_stage CHECK (claim_stage IN ('factory', 'vendor_stock', 'vendor_use', 'owned')),
   CONSTRAINT devices_claim_consistent CHECK (      -- 008/009: the QR works twice (vendor stock, then customer)
        (claim_stage = 'factory'                       AND owner_id IS NULL     AND vendor_id IS NULL     AND claimed_at IS NULL)
@@ -280,6 +285,7 @@ CREATE TABLE devices (
     OR (claim_stage = 'owned'                         AND owner_id IS NOT NULL AND claimed_at IS NOT NULL)
   ));
 CREATE INDEX devices_owner_idx ON devices (owner_id);
+CREATE INDEX devices_product_idx ON devices (product);
 CREATE INDEX devices_claim_code_idx ON devices (claim_code_hash) WHERE claim_code_hash IS NOT NULL;
 CREATE INDEX devices_serial_trgm_idx ON devices USING gin (serial_no gin_trgm_ops);
 CREATE INDEX devices_name_trgm_idx   ON devices USING gin (name gin_trgm_ops);
@@ -873,7 +879,7 @@ ALTER TABLE firmware_releases
   ADD CONSTRAINT firmware_factory_default_needs_image CHECK (
         NOT factory_default OR factory_file_path IS NOT NULL);
 -- At most one default per chip model
-CREATE UNIQUE INDEX firmware_factory_default_uq ON firmware_releases (chip_model) WHERE factory_default;
+CREATE UNIQUE INDEX firmware_factory_default_uq ON firmware_releases (chip_model, product) WHERE factory_default;  -- product: 013
 
 -- 3. One row per board on the bench: flash, tests, result.
 --    Written by the browser station (Web Serial); nothing here comes from MQTT.
@@ -906,5 +912,39 @@ CREATE INDEX factory_runs_mac_idx      ON factory_runs (mac, started_at DESC);
 CREATE INDEX factory_runs_started_idx  ON factory_runs (started_at DESC);
 CREATE INDEX factory_runs_result_idx   ON factory_runs (result, started_at DESC);
 CREATE INDEX factory_runs_operator_idx ON factory_runs (operator_id, started_at DESC);
+
+-- ---------------------------------------------------------------------
+-- Fall Detection product (migration 013). Only FALL / RECOVERED events
+--     are stored; the "alive" heartbeat and radar frames are not.
+-- ---------------------------------------------------------------------
+CREATE TABLE fall_events (
+  id           BIGSERIAL PRIMARY KEY,
+  device_id    UUID        NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  eid          BIGINT      NOT NULL,             -- the device's event counter (kept in NVS); a resend has the same eid
+  kind         TEXT        NOT NULL,             -- 'fall' | 'recovered'
+  occurred_at  TIMESTAMPTZ NOT NULL,             -- device ts (NTP), or the receive time if the clock looks wrong
+  tid          SMALLINT    NOT NULL,             -- radar track id of the person
+  -- FALL only (NULL on 'recovered'):
+  ema_now      REAL,                             -- smoothed height now (m)
+  ema_peak     REAL,                             -- highest smoothed height in the look-back window (m)
+  drop_m       REAL,                             -- ema_peak - ema_now (m)
+  drop_pct     REAL,                             -- drop as % of ema_peak
+  pos_x        REAL, pos_y REAL, pos_z REAL,     -- target position (m), optional
+  vel_x        REAL, vel_y REAL, vel_z REAL,     -- target velocity (m/s), optional
+  height_m     REAL,                             -- target height maxZ - minZ (m), optional
+  presence     BOOLEAN,                          -- room occupied flag (TLV 1021), optional
+  preset       TEXT,                             -- sensitivity preset 'LOW' | 'MED' | 'HIGH'
+  -- RECOVERED: which FALL it ends. FALL: filled in when the RECOVERED arrives.
+  fall_eid     BIGINT,
+  recovered_at TIMESTAMPTZ,
+  recovery_s   INTEGER CHECK (recovery_s IS NULL OR recovery_s >= 0),
+  received_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT fall_events_kind CHECK (kind IN ('fall', 'recovered')),
+  CONSTRAINT fall_events_preset CHECK (preset IS NULL OR preset IN ('LOW', 'MED', 'HIGH')),
+  CONSTRAINT fall_events_eid UNIQUE (device_id, eid)
+);
+CREATE INDEX fall_events_device_time_idx ON fall_events (device_id, occurred_at DESC);
+-- Falls still waiting for a RECOVERED
+CREATE INDEX fall_events_open_idx ON fall_events (device_id) WHERE kind = 'fall' AND recovered_at IS NULL;
 
 COMMIT;

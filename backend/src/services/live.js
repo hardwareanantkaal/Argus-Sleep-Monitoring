@@ -35,9 +35,9 @@ function withLock(mac, fn) {
 async function entry(mac) {
   let d = devices.get(mac);
   if (d) return d;
-  const row = await db.one('SELECT id, serial_no FROM devices WHERE mqtt_username = $1', [mac]);
+  const row = await db.one('SELECT id, serial_no, product FROM devices WHERE mqtt_username = $1', [mac]);
   if (!row) return null;
-  d = { deviceId: row.id, serial: row.serial_no, online: false, lastSeenAt: null, live: null,
+  d = { deviceId: row.id, serial: row.serial_no, product: row.product, online: false, lastSeenAt: null, live: null,
     rssi: null, uptimeS: null, fw: null, dbWrittenAt: 0 };
   devices.set(mac, d);
   return d;
@@ -195,11 +195,13 @@ async function onEvent(mac, payload) {
 const eventListeners = [];
 const firmwareListeners = [];
 
-// Stale sweep: online devices silent for longer than DEVICE_STALE_S.
+// Stale sweep: online devices silent for longer than DEVICE_STALE_S
+// (FALL_STALE_S for fall detectors, which report once a minute).
 async function sweep(now = Date.now()) {
   for (const [mac, d] of devices) {
-    if (d.online && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() > config.deviceStaleS * 1000) {
-      await withLock(mac, () => setOnline(mac, d, false, `no message for ${config.deviceStaleS} s`));
+    const staleS = d.product === 'fall' ? config.fallStaleS : config.deviceStaleS;
+    if (d.online && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() > staleS * 1000) {
+      await withLock(mac, () => setOnline(mac, d, false, `no message for ${staleS} s`));
     }
   }
 }
@@ -229,7 +231,20 @@ const getStatus = (deviceId) => {
 const forget = (mac) => devices.delete(mac);
 
 module.exports = {
-  start, sweep, getLive, getStatus, forget, withLock, entry,
+  start, sweep, getLive, getStatus, forget, withLock, entry, seen, parseJson,
+  // Fall Detection (013): the alive message carries what `state` carries for
+  // the sleep device, so fall.js reuses this to keep live/online in one place.
+  setLive(d, liveValues) {
+    d.live = { ...liveValues, at: d.lastSeenAt };
+    realtime.emitLive(d.deviceId, { deviceId: d.deviceId, serial: d.serial, ...d.live });
+  },
+  // A firmware version from the device; tells the OTA listeners when it changed. Returns true on change.
+  noteFirmware(d, fw) {
+    if (typeof fw !== 'string' || fw.slice(0, 40) === d.fw) return false;
+    d.fw = fw.slice(0, 40);
+    firmwareListeners.forEach((fn) => Promise.resolve().then(() => fn(d, d.fw)).catch((err) => log.error({ err }, 'firmware listener failed')));
+    return true;
+  },
   onOnline: (fn) => onlineListeners.push(fn),
   onLive: (fn) => liveListeners.push(fn),
   onEvent: (fn) => eventListeners.push(fn),
@@ -239,4 +254,5 @@ module.exports = {
   onPresence: (fn) => presenceListeners.push(fn),
   // exposed for tests
   _handlers: { onStatus, onInfo, onState, onEvent },
+  HEARTBEAT_MS,
 };

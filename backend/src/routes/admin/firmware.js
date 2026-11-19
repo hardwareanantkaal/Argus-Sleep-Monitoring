@@ -60,7 +60,7 @@ function checkFactory(chip, merged, otaBin, flashSizeIn) {
 }
 
 const releaseView = (r) => ({
-  id: r.id, version: r.version, channel: r.channel, chipModel: r.chip_model, fileSize: r.file_size, sha256: r.sha256,
+  id: r.id, version: r.version, channel: r.channel, chipModel: r.chip_model, product: r.product, fileSize: r.file_size, sha256: r.sha256,
   notes: r.notes, uploadedBy: r.uploaded_by_name ?? null, createdAt: r.created_at, deviceCount: r.device_count ?? 0,
   // The image the manufacturing station writes at 0x0 (null = none uploaded yet)
   factory: r.factory_file_path ? {
@@ -88,6 +88,7 @@ router.post('/firmware', requireStaff('firmware.upload'), async (req, res) => {
     channel: z.enum(['beta', 'stable']).default('beta'),
     notes: z.string().trim().max(500).optional(),
     chipModel: z.string().trim().min(2).max(40).optional(),
+    product: z.enum(['sleep', 'fall']).default('sleep'),   // 013
     flashSize: z.enum(Object.keys(FLASH_SIZES)).optional(),
   }), req.body);
   const chip = body.chipModel || 'ESP32-S3';
@@ -114,12 +115,12 @@ router.post('/firmware', requireStaff('firmware.upload'), async (req, res) => {
     row = await db.tx(async (c) => {
       const { rows: [r] } = await c.query(
         `INSERT INTO firmware_releases (version, channel, chip_model, file_path, file_size, sha256, notes, uploaded_by,
-                                        factory_file_path, factory_file_size, factory_sha256, factory_flash_size)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+                                        factory_file_path, factory_file_size, factory_sha256, factory_flash_size, product)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
         [body.version, body.channel, chip, filePath, file.size, sha256, body.notes || null, req.user.id,
-          fac?.path || null, fac?.size || null, fac?.sha256 || null, fac?.flashSize || null]);
+          fac?.path || null, fac?.size || null, fac?.sha256 || null, fac?.flashSize || null, body.product]);
       await audit(req, { action: 'firmware.upload', targetType: 'firmware', targetId: r.id, targetLabel: body.version,
-        detail: `${(file.size / 1048576).toFixed(2)} MB · sha256 ${sha256.slice(0, 4)}…${sha256.slice(-4)}`
+        detail: `${body.product === 'fall' ? 'Fall detector · ' : ''}${(file.size / 1048576).toFixed(2)} MB · sha256 ${sha256.slice(0, 4)}…${sha256.slice(-4)}`
           + (merged ? ` · factory image ${fac.flashSize}` : '') }, c);
       return r;
     });
@@ -151,8 +152,8 @@ router.patch('/firmware/:id', requireStaff('firmware.upload'), async (req, res) 
     if (!cur) throw E.notFound('Release not found');
     if (body.factoryDefault) {
       if (!cur.factory_file_path) throw E.invalid('NO_FACTORY_IMAGE', 'Add a factory image to this release first', 'factoryDefault');
-      // One default per chip: clear the old one first (the unique index checks each row at once).
-      await c.query('UPDATE firmware_releases SET factory_default = false WHERE chip_model = $1 AND factory_default', [cur.chip_model]);
+      // One default per chip and product: clear the old one first (the unique index checks each row at once).
+      await c.query('UPDATE firmware_releases SET factory_default = false WHERE chip_model = $1 AND product = $2 AND factory_default', [cur.chip_model, cur.product]);
     }
     const { rows: [u] } = await c.query(
       `UPDATE firmware_releases SET channel = COALESCE($2, channel), notes = CASE WHEN $4 THEN $3 ELSE notes END,
@@ -241,13 +242,16 @@ router.post('/ota/rollouts', requireStaff('firmware.rollout'), async (req, res) 
   if (body.installWindow && body.installWindow.from === body.installWindow.to) {
     throw E.bad('VALIDATION', 'The install window needs two different times', 'installWindow');
   }
-  const release = await db.one('SELECT id, version FROM firmware_releases WHERE id = $1', [body.releaseId]);
+  const release = await db.one('SELECT id, version, product FROM firmware_releases WHERE id = $1', [body.releaseId]);
   if (!release) throw E.notFound('Release not found');
   if (body.target === 'serials') {
-    const { rows } = await db.query('SELECT serial_no FROM devices WHERE serial_no = ANY($1::text[])', [body.serials]);
-    const known = new Set(rows.map((r) => r.serial_no));
+    const { rows } = await db.query('SELECT serial_no, product FROM devices WHERE serial_no = ANY($1::text[])', [body.serials]);
+    const known = new Map(rows.map((r) => [r.serial_no, r.product]));
     const unknown = body.serials.filter((s) => !known.has(s));
     if (unknown.length) throw E.invalid('UNKNOWN_SERIAL', `Unknown serial(s): ${unknown.slice(0, 5).join(', ')}`, 'serials');
+    // 013: sleep firmware never goes to a fall detector, and the other way round
+    const other = body.serials.filter((s) => known.get(s) !== release.product);
+    if (other.length) throw E.invalid('WRONG_PRODUCT', `Not a ${release.product === 'fall' ? 'fall detector' : 'sleep monitor'}: ${other.slice(0, 5).join(', ')}`, 'serials');
   }
   const result = await db.tx(async (c) => {
     const r = await ota.create(c, {

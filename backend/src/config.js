@@ -46,9 +46,13 @@ module.exports = {
     password: required('MQTT_BACKEND_PASSWORD', 'dev-only-mqtt-password'),
     clientId: process.env.MQTT_CLIENT_ID || 'argus-backend',
     topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'argus',
+    // Fall Detection devices publish their own data under this prefix (013).
+    fallPrefix: process.env.MQTT_FALL_PREFIX || 'fall',
   },
 
   deviceStaleS: int('DEVICE_STALE_S', 30),   // firmware keepalive 15 s
+  // Fall detectors (013) send "alive" only every 60 s: offline after 2.5 missed messages.
+  fallStaleS: int('FALL_STALE_S', 150),
 
   // OTA: where uploaded .bin files live, how long a download link works, and
   // the address sensors use to fetch firmware (the gateway serves /fw/).

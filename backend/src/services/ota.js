@@ -161,9 +161,10 @@ async function onFirmware(d, fw) {
 // listed by serial; devices already on the version are skipped; a device
 // still open in an older rollout is moved over (old row -> skipped).
 async function create(c, { release, target, percent, serials, fromVersion, windowFrom, windowTo, notes, userId }) {
+  // 013: only devices of the release's product
   let sql = `SELECT d.id, s.fw_version FROM devices d LEFT JOIN device_state s ON s.device_id = d.id
-              WHERE NOT d.is_disabled AND COALESCE(s.fw_version, '') <> $1`;
-  const vals = [release.version];
+              WHERE NOT d.is_disabled AND COALESCE(s.fw_version, '') <> $1 AND d.product = $2`;
+  const vals = [release.version, release.product || 'sleep'];
   if (target === 'serials') {
     vals.push(serials);
     sql += ` AND d.serial_no = ANY($${vals.length}::text[])`;

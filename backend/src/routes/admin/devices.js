@@ -12,6 +12,7 @@ const realtime = require('../../services/realtime');
 const mqttAuth = require('../mqttAuth');
 const commands = require('../../services/commands');
 const settingsSync = require('../../services/settingsSync');
+const fall = require('../../services/fall');
 const { E } = require('../../errors');
 
 const router = express.Router();
@@ -78,6 +79,7 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
   const q = parse(z.object({
     q: z.string().trim().max(60).optional(),
     status: z.enum(['online', 'offline', 'unclaimed', 'disabled']).optional(),
+    product: z.enum(['sleep', 'fall']).optional(),
     fw: z.string().max(40).optional(),
     tz: z.string().max(60).optional(),
     registeredFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
@@ -99,6 +101,7 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
   if (q.status === 'offline') where.push('NOT COALESCE(s.is_online, false) AND d.claimed_at IS NOT NULL AND NOT d.is_disabled');
   if (q.status === 'unclaimed') where.push('d.claimed_at IS NULL');
   if (q.status === 'disabled') where.push('d.is_disabled');
+  if (q.product) add('d.product = ?', q.product);
   if (q.fw) add('s.fw_version = ?', q.fw);
   if (q.tz) add('d.timezone = ?', q.tz);
   if (q.registeredFrom) add('d.created_at >= ?::date', q.registeredFrom);
@@ -115,12 +118,12 @@ router.get('/devices', requireStaff('devices.view'), async (req, res) => {
   }
   pageVals.push(q.limit + 1);
   const rows = await db.many(
-    `SELECT d.id, d.serial_no, d.mqtt_username, d.name, d.owner_id, o.full_name AS owner_name, d.vendor_id, v.name AS vendor_name, d.timezone, d.claim_stage,
+    `SELECT d.id, d.serial_no, d.product, d.mqtt_username, d.name, d.owner_id, o.full_name AS owner_name, d.vendor_id, v.name AS vendor_name, d.timezone, d.claim_stage,
             d.chip_model, d.created_at, d.is_disabled, COALESCE(s.is_online, false) AS online, s.fw_version, s.last_seen_at
        ${from} ${pageWhere} ORDER BY d.created_at DESC, d.id DESC LIMIT $${pageVals.length}`, pageVals);
   const more = rows.length > q.limit;
   const items = rows.slice(0, q.limit).map((r) => ({
-    id: r.id, serial: r.serial_no, mac: macColons(r.mqtt_username), name: r.name,
+    id: r.id, serial: r.serial_no, product: r.product, mac: macColons(r.mqtt_username), name: r.name,
     owner: r.owner_id ? { id: r.owner_id, fullName: r.owner_name } : null,
     vendor: r.vendor_id ? { id: r.vendor_id, name: r.vendor_name } : null,
     stage: r.claim_stage,
@@ -145,8 +148,8 @@ router.get('/devices/:id', requireStaff('devices.view'), async (req, res) => {
       WHERE sh.device_id = $1 GROUP BY u.id, u.full_name, u.phone ORDER BY u.full_name`, [d.id]);
   const mem = live.getStatus(d.id);
   res.json({
-    id: d.id, serial: d.serial_no, name: d.name, room: d.room,
-    hardware: { mac: macColons(d.mqtt_username), chip: d.chip_model, radar: 'Sensor', hwModel: d.hw_model,
+    id: d.id, serial: d.serial_no, product: d.product, name: d.name, room: d.room,
+    hardware: { mac: macColons(d.mqtt_username), chip: d.chip_model, radar: d.product === 'fall' ? 'IWR6843AOP' : 'Sensor', hwModel: d.hw_model,
       batch: d.batch, manufacturedAt: d.manufactured_at, fwAtRegister: d.fw_at_register,
       registeredAt: d.created_at, registeredBy: regBy?.full_name || null },
     connection: { online: mem ? mem.online : !!s?.is_online, lastSeenAt: mem?.lastSeenAt || s?.last_seen_at || null,
@@ -178,6 +181,7 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     mac: z.string().transform(normMac).refine((m) => m.length === 12, 'MAC must be 6 bytes, e.g. 34:85:18:A1:0F:22'),
     chip: z.string().trim().min(2).max(40),
     hwModel: z.string().trim().min(1).max(60),
+    product: z.enum(['sleep', 'fall']).default('sleep'),   // 013: sleep monitor or fall detector
     batch: z.string().trim().max(40).nullable().optional(),
     manufacturedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable().optional(),
     fwOnBoard: z.string().trim().max(40).nullable().optional(),
@@ -207,18 +211,18 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     const serial = await claim.nextSerial(c);
     const { rows: [d] } = await c.query(
       `INSERT INTO devices (serial_no, mac, mqtt_username, claim_code_hash, claim_code_enc, chip_model, hw_model, batch,
-                            manufactured_at, fw_at_register, registered_by)
-       VALUES ($1, $2::macaddr, $3, $4, $11, $5, $6, $7, $8, $9, $10) RETURNING id, serial_no, created_at`,
+                            manufactured_at, fw_at_register, registered_by, product)
+       VALUES ($1, $2::macaddr, $3, $4, $11, $5, $6, $7, $8, $9, $10, $12) RETURNING id, serial_no, created_at`,
       [serial, body.mac, body.mac, claim.hashCode(code), body.chip, body.hwModel, body.batch || null,
-        body.manufacturedAt || null, body.fwOnBoard || null, req.user.id, claim.sealCode(code)]);
+        body.manufacturedAt || null, body.fwOnBoard || null, req.user.id, claim.sealCode(code), body.product]);
     await c.query('INSERT INTO device_settings (device_id) VALUES ($1)', [d.id]);
     if (run) await c.query('UPDATE factory_runs SET device_id = $2 WHERE id = $1', [run.id, d.id]);
     await audit(req, { action: 'device.register', targetType: 'device', targetId: d.id, targetLabel: serial,
-      detail: `MAC ${macColons(body.mac)} · ${body.chip}` }, c);
+      detail: `MAC ${macColons(body.mac)} · ${body.chip}${body.product === 'fall' ? ' · Fall Detection' : ''}` }, c);
     return d;
   });
   res.status(201).json({
-    device: { id: device.id, serial: device.serial_no, mac: macColons(body.mac), chip: body.chip, registeredAt: device.created_at },
+    device: { id: device.id, serial: device.serial_no, product: body.product, mac: macColons(body.mac), chip: body.chip, registeredAt: device.created_at },
     ...(await codeResponse(device.serial_no, code)),
   });
 });
@@ -354,6 +358,14 @@ router.get('/devices/:id/events', requireStaff('devices.view'), async (req, res)
     items: rows.slice(0, q.limit).map((r) => ({ id: r.id, type: r.type, severity: r.severity, detail: r.message, createdAt: r.occurred_at })),
     nextCursor: more ? String(rows[q.limit - 1].id) : null,
   });
+});
+
+// 8.13 Fall events of a Fall Detection device (013)
+router.get('/devices/:id/falls', requireStaff('devices.view'), async (req, res) => {
+  const q = parse(pageQuery, req.query);
+  const d = await loadDevice(req.params.id);
+  if (d.product !== 'fall') throw E.notFound('This device is not a fall detector');
+  res.json(await fall.list(d.id, { limit: q.limit, cursor: q.cursor ?? null }));
 });
 
 module.exports = router;

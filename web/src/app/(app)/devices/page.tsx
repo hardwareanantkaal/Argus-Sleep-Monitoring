@@ -8,7 +8,9 @@ import { Async, Head, ScoreRing, StatusPill, useApi } from '@/components/ui';
 import { ago, dur, presenceText } from '@/lib/format';
 import { whenLocal } from '@/components/vendor';
 import { useAccessChanged, useLive } from '@/lib/useLive';
-import type { DeviceCard } from '@/lib/types';
+import type { DeviceCard, LiveValues } from '@/lib/types';
+
+const isFall = (d: DeviceCard) => d.product === 'fall';
 
 export default function DevicesPage() {
   const q = useApi<{ items: DeviceCard[] }>('/devices');
@@ -26,8 +28,16 @@ export default function DevicesPage() {
     <div className="wrap">
       <Head title="My devices" sub={q.data ? `${items.length} sensor${items.length === 1 ? '' : 's'} · ${items.filter(online).length} online` : undefined} actions={addBtn} />
       <Async q={q}>{() => items.length ? (
+        // Two products (013): sleep monitors and fall detectors are listed apart.
+        <>{[['Sleep monitors', items.filter((d) => !isFall(d))], ['Fall detectors', items.filter(isFall)]].map(([title, group]) => {
+          const list = group as DeviceCard[];
+          if (!list.length) return null;
+          const both = items.some(isFall) && items.some((d) => !isFall(d));
+          return (
+        <section className="stack" key={title as string}>
+        {both && <h2 className="small muted" style={{ marginTop: 6 }}>{title as string}</h2>}
         <div className="dgrid">
-          {items.map((d) => {
+          {list.map((d) => {
             const on = online(d);
             const lv = live[d.id] || d.live;
             const canLive = d.myPermissions.includes('live.view');
@@ -42,7 +52,7 @@ export default function DevicesPage() {
                   </div>
                   <StatusPill online={on} />
                 </div>
-                {on && canLive && lv ? (
+                {isFall(d) ? <FallCardBody on={on} canLive={canLive} lv={lv} lastSeen={status[d.id]?.lastSeenAt ?? d.status.lastSeenAt} /> : on && canLive && lv ? (
                   <div className="vitals">
                     <div className="vital"><span>Heart</span><b>{lv.hr || '—'}<span> bpm</span></b></div>
                     <div className="vital"><span>Breath</span><b>{lv.br || '—'}<span> /min</span></b></div>
@@ -51,6 +61,12 @@ export default function DevicesPage() {
                 ) : !on ? (
                   <div className="note"><Icon name="off" /><span>Last seen {ago(status[d.id]?.lastSeenAt ?? d.status.lastSeenAt).toLowerCase()}. Check that it is plugged in and on Wi-Fi.</span></div>
                 ) : <div className="note"><Icon name="info" /><span>{canLive ? 'Waiting for the first reading…' : 'You can see sleep history for this sensor, not live values.'}</span></div>}
+                {isFall(d) ? (
+                  <div className="between">
+                    <span className="xs muted">Fall detector</span>
+                    <Link className="btn sm" href={`/devices/${d.id}`}>Open</Link>
+                  </div>
+                ) : (
                 <div className="between">
                   <div className="row" style={{ gap: 10 }}>
                     {canHist && d.lastNight && d.lastNight.totalSleepMin != null ? <>
@@ -63,10 +79,14 @@ export default function DevicesPage() {
                     {canLive ? <Link className="btn sm" href={`/devices/${d.id}`}>Live</Link> : <Link className="btn ghost sm" href={`/devices/${d.id}`}>Open</Link>}
                   </div>
                 </div>
+                )}
               </div>
             );
           })}
         </div>
+        </section>
+          );
+        })}</>
       ) : (
         <div className="card empty">
           <Icon name="bed" size={30} />
@@ -75,6 +95,18 @@ export default function DevicesPage() {
           {addBtn}
         </div>
       )}</Async>
+    </div>
+  );
+}
+
+/** Fall detector card: room occupied + radar health from the "alive" message (live only). */
+function FallCardBody({ on, canLive, lv, lastSeen }: { on: boolean; canLive: boolean; lv: LiveValues | null | undefined; lastSeen: string | null }) {
+  if (!on) return <div className="note"><Icon name="off" /><span>Last seen {ago(lastSeen).toLowerCase()}. Check that it is plugged in and on Wi-Fi.</span></div>;
+  if (!canLive || !lv) return <div className="note"><Icon name="info" /><span>{canLive ? 'Waiting for the first report…' : 'Open it to see falls.'}</span></div>;
+  return (
+    <div className="vitals">
+      <div className="vital"><span>Presence</span><b style={{ fontSize: 15, paddingBlock: 3 }}>{lv.pr == null ? '—' : lv.pr ? 'Yes' : 'No'}</b></div>
+      <div className="vital"><span>Radar</span><b style={{ fontSize: 15, paddingBlock: 3 }}>{lv.radar == null ? '—' : lv.radar ? 'OK' : 'Not responding'}</b></div>
     </div>
   );
 }

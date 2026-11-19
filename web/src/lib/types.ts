@@ -24,13 +24,28 @@ export interface User {
 export type VendorRole = 'owner' | 'staff';
 export interface VendorRef { id: string; name: string; role: VendorRole }
 
+/** Migration 013: the sleep monitor (C1001) or the fall detector (IWR6843AOP). Same claim/QR/OTA, different data. */
+export type Product = 'sleep' | 'fall';
+
 export interface LiveValues {
   pr: number; bed: number; ss: number; hr: number; br: number;
   bs?: number; mv?: number; mr?: number; dist?: number; rssi?: number; at: string;
   /* API.md §11a (firmware 2.0.0+), live only. sess/cmp/ngt are present only while a session runs. */
   up?: number; fw?: string; seq?: number; radar?: number;
   sess?: LiveSess; cmp?: LiveCmp; ngt?: LiveNgt;
+  /* Fall detector "alive" (DEVICE-DATA §8.1): product 'fall', pr = room occupied, radar 1/0, sensitivity preset */
+  product?: Product; preset?: FallPreset | null;
 }
+export type FallPreset = 'LOW' | 'MED' | 'HIGH';
+/** API.md §4b: one stored fall event. kind 'fall' has the measurements; 'recovered' points at its fall. */
+export interface FallEvent {
+  id: string; eid: number; kind: 'fall' | 'recovered'; at: string; tid: number;
+  emaNow?: number | null; emaPeak?: number | null; dropM?: number | null; dropPct?: number | null;
+  pos?: [number, number, number] | null; vel?: [number, number, number] | null; heightM?: number | null;
+  presence?: boolean | null; preset?: FallPreset | null; recoveredAt?: string | null; recoveryS?: number | null;
+  fallEid?: number | null;
+}
+export interface FallList { device?: { tz: string; place: string | null }; items: FallEvent[]; nextCursor: string | null }
 /** current session: st 0 deep / 1 light / 2 awake / 3 none; start = Unix UTC seconds; durations in minutes */
 export interface LiveSess { st: number; start: number; bed: number; slp: number; dp: number; lt: number; aw: number; on: number; wk: number; tn: number; sc: number }
 /** Sensor composite: dis 0–3, abn 0 none / 1 normal / 2 abnormal, rat 0–3, lg/mn = % */
@@ -41,6 +56,8 @@ export interface LiveNgt { sc: number; slp: number; wk: number; sh: number; dp: 
 export interface DeviceCard {
   id: string;
   serial: string;
+  /** missing on old responses = 'sleep' */
+  product?: Product;
   name: string;
   room: string | null;
   tz: string;
@@ -138,7 +155,7 @@ export interface InvitePreview {
   status?: 'invite_sent' | 'accepted' | 'cancelled' | 'expired';
 }
 
-export type AlertType = 'breath_low' | 'hr_out_of_range' | 'out_of_bed' | 'no_movement' | 'device_offline';
+export type AlertType = 'breath_low' | 'hr_out_of_range' | 'out_of_bed' | 'no_movement' | 'device_offline' | 'fall';
 export interface AlertItem {
   id: string; deviceId: string; deviceName: string; type: AlertType; severity: 'critical' | 'warning';
   title: string; detail: string; value: number | null; startedAt: string; endedAt: string | null;
@@ -159,12 +176,12 @@ export interface Dashboard {
   recentAudit?: AuditItem[];
 }
 export interface AdminDeviceRow {
-  id: string; serial: string; name: string | null; owner: { id: string; fullName: string } | null;
+  id: string; serial: string; product?: Product; name: string | null; owner: { id: string; fullName: string } | null;
   vendor?: { id: string; name: string } | null;
   online: boolean; tz: string | null; fw: string | null; chip: string; lastSeenAt: string | null; createdAt: string;
 }
 export interface AdminDeviceDetail {
-  id: string; serial: string; name: string | null;
+  id: string; serial: string; product?: Product; name: string | null;
   hardware: { mac: string; chip: string; radar: string; hwModel: string; batch: string | null; manufacturedAt: string | null;
     fwAtRegister: string | null; registeredAt: string; registeredBy: string };
   connection: { online: boolean; lastSeenAt: string | null; ip: string | null; wifiSsid: string | null; rssi: number | null;
@@ -196,6 +213,8 @@ export interface CustomerDetail extends CustomerRow {
 }
 export interface FirmwareRelease {
   id: string; version: string; channel: 'stable' | 'beta'; chipModel: string; fileSize: number; sha256: string;
+  /** 013: a rollout only reaches devices of this product (missing = 'sleep') */
+  product?: Product;
   notes: string | null; uploadedBy: string; createdAt: string; deviceCount: number;
   /** The image the manufacturing station writes at 0x0 (API.md §9b); null = none yet */
   factory?: { fileSize: number; sha256: string; flashSize: string; isDefault: boolean; sameAsOta: boolean } | null;
@@ -264,7 +283,7 @@ export interface VendorDetail extends Vendor {
 }
 /** API 3.2: what claiming this sticker will do */
 export interface ClaimCheck {
-  serial: string; hwModel: string; registeredAt: string;
+  serial: string; product?: Product; hwModel: string; registeredAt: string;
   stage?: 'factory' | 'vendor_stock'; result?: 'stock' | 'owner'; soldBy?: { id: string; name: string } | null;
 }
 export interface VendorGroup { id: string; name: string; deviceCount: number }

@@ -11,7 +11,7 @@ import { Async, Head, useApi } from '@/components/ui';
 import { errText, patch } from '@/lib/api';
 import { ago } from '@/lib/format';
 import type { AlertItem, DeviceCard, NotificationPrefs } from '@/lib/types';
-const ICON: Record<string, string> = { breath_low: 'wind', hr_out_of_range: 'heart', out_of_bed: 'person', no_movement: 'activity', device_offline: 'off' };
+const ICON: Record<string, string> = { breath_low: 'wind', hr_out_of_range: 'heart', out_of_bed: 'person', no_movement: 'activity', device_offline: 'off', fall: 'alert' };
 
 export default function AlertsPage() {
   const [tab, setTab] = useState<'recent' | 'settings'>('recent');

@@ -17,10 +17,13 @@ import { RequireStaff } from '@/components/Shell';
 import { Async, Head, useApi } from '@/components/ui';
 import { errText, post, qs } from '@/lib/api';
 import { timeIn, browserTz } from '@/lib/format';
-import type { AdminDeviceRow, List, RegisterResult } from '@/lib/types';
+import type { AdminDeviceRow, List, Product, RegisterResult } from '@/lib/types';
 
 const CHIPS = ['ESP32-S3', 'ESP32', 'ESP32-C3', 'ESP32-C6', 'ESP8266'];
-const HW_MODELS = ['ARG-S1 rev B', 'ARG-S1 rev A'];
+// Two products (013): sleep monitor (C1001) and fall detector (IWR6843AOP).
+const PRODUCTS: [Product, string][] = [['sleep', 'Sleep monitor'], ['fall', 'Fall detector']];
+const HW_BY_PRODUCT: Record<Product, string[]> = { sleep: ['ARG-S1 rev B', 'ARG-S1 rev A'], fall: ['ARG-F1 rev A'] };
+const HW_MODELS = HW_BY_PRODUCT.sleep;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** "3485 18a1 0f22", "34-85-18-A1-0F-22" → "34:85:18:A1:0F:22"; null if it isn't 12 hex digits. */
@@ -29,7 +32,7 @@ function normMac(s: string): string | null {
   return h.length === 12 ? h.match(/../g)!.join(':') : null;
 }
 
-interface Details { mac: string; chip: string; hwModel: string; batch: string; manufacturedAt: string; fwOnBoard: string }
+interface Details { mac: string; chip: string; product: Product; hwModel: string; batch: string; manufacturedAt: string; fwOnBoard: string }
 type Done = StickerData & { id: string };
 
 export default function RegisterPage() {
@@ -62,7 +65,7 @@ function Single({ usb, onDone }: { usb: boolean; onDone(): void }) {
   const [log, setLog] = useState('');
   const [readErr, setReadErr] = useState('');
   const [chipDesc, setChipDesc] = useState('');
-  const [f, setF] = useState<Details>({ mac: '', chip: 'ESP32-S3', hwModel: HW_MODELS[0], batch: '', manufacturedAt: todayIso(), fwOnBoard: '' });
+  const [f, setF] = useState<Details>({ mac: '', chip: 'ESP32-S3', product: 'sleep', hwModel: HW_MODELS[0], batch: '', manufacturedAt: todayIso(), fwOnBoard: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
@@ -84,7 +87,7 @@ function Single({ usb, onDone }: { usb: boolean; onDone(): void }) {
     setErr(''); setBusy(true);
     try {
       const r = await post<RegisterResult>('/admin/devices', {
-        mac, chip: f.chip, hwModel: f.hwModel, batch: f.batch.trim() || undefined,
+        mac, chip: f.chip, product: f.product, hwModel: f.hwModel, batch: f.batch.trim() || undefined,
         manufacturedAt: f.manufacturedAt || undefined, fwOnBoard: f.fwOnBoard.trim() || undefined,
       });
       setDone({ id: r.device.id, serial: r.serial, claimCode: r.claimCode, qrPayload: r.qrPayload, qrPngBase64: r.qrPngBase64, mac });
@@ -120,7 +123,8 @@ function Single({ usb, onDone }: { usb: boolean; onDone(): void }) {
             <div className="field"><label htmlFor="rg-chip">Chip</label>
               {usb ? <input className="inp mono" id="rg-chip" value={f.chip} readOnly />
                 : <select className="inp mono" id="rg-chip" value={f.chip} onChange={(e) => setF({ ...f, chip: e.target.value })}>{CHIPS.map((c) => <option key={c}>{c}</option>)}</select>}</div>
-            <div className="field"><label htmlFor="rg-hw">Hardware model</label><select className="inp" id="rg-hw" value={f.hwModel} onChange={(e) => setF({ ...f, hwModel: e.target.value })}>{HW_MODELS.map((h) => <option key={h}>{h}</option>)}</select></div>
+            <div className="field"><label htmlFor="rg-product">Product</label><select className="inp" id="rg-product" value={f.product} onChange={(e) => { const p = e.target.value as Product; setF({ ...f, product: p, hwModel: HW_BY_PRODUCT[p][0] }); }}>{PRODUCTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+            <div className="field"><label htmlFor="rg-hw">Hardware model</label><select className="inp" id="rg-hw" value={f.hwModel} onChange={(e) => setF({ ...f, hwModel: e.target.value })}>{HW_BY_PRODUCT[f.product].map((h) => <option key={h}>{h}</option>)}</select></div>
             <div className="field"><label htmlFor="rg-batch">Batch (optional)</label><input className="inp" id="rg-batch" value={f.batch} onChange={(e) => setF({ ...f, batch: e.target.value })} placeholder="B-2026-11-A" /></div>
             <div className="field"><label htmlFor="rg-date">Made on</label><input className="inp" type="date" id="rg-date" value={f.manufacturedAt} onChange={(e) => setF({ ...f, manufacturedAt: e.target.value })} /></div>
             <div className="field"><label htmlFor="rg-fw">Firmware on board (optional)</label><input className="inp mono" id="rg-fw" value={f.fwOnBoard} onChange={(e) => setF({ ...f, fwOnBoard: e.target.value })} placeholder="1.4.2" /><span className="hint">The bootloader can&apos;t report this; the sensor sends it once online.</span></div>

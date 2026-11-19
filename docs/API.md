@@ -189,6 +189,24 @@ Screens: **Sleep history** and **Night detail**. All of this is computed from `s
 | min / max | taken across the sessions |
 | counts (`exits`, `turns`, `apnea`, `struggles`) | summed |
 
+## 4b. Fall events (Fall Detection product, added 19 Nov 2026, migration 013)
+
+A device has `product`: `"sleep"` (the C1001 sleep monitor) or `"fall"` (the IWR6843AOP fall detector).
+It is in every device card and detail (3.1, 3.4), in claim check (3.2) and in the admin list and detail (8.2, 8.3).
+A fall device has no nights (`lastNight` is always `null`) and only the `device_offline` alert rule.
+Firmware releases have a `product` too (upload 9.2 takes `product`, default `"sleep"`): an OTA rollout only goes to
+devices of that product, and a serial list with another product's device is refused (`422 WRONG_PRODUCT`).
+
+| # | Method | Path | Needs | Body → Response |
+|---|---|---|---|---|
+| 4b.1 | GET | `/devices/:id/falls?limit&cursor` | `history.view` | → `{device: {tz, place}, items: [fallEvent], nextCursor}`, newest first. `404` for a sleep device. |
+
+**`fallEvent`:** `{id, eid, kind: "fall" | "recovered", at, tid}` plus
+- for `fall`: `emaNow, emaPeak, dropM, dropPct, pos: [x,y,z] | null, vel: [vx,vy,vz] | null, heightM, presence, preset, recoveredAt, recoveryS`
+- for `recovered`: `fallEid`
+
+Device messages: [DEVICE-DATA.md §8](DEVICE-DATA.md).
+
 ## 5. Sharing (family)
 
 Screen: **Share access**.
@@ -226,6 +244,7 @@ Screen: **Alerts** (kept for v1, C2). Rules belong to the device; how you're rea
 | `out_of_bed` | longer than 600 s, between 23:00 and 06:00 | warning |
 | `no_movement` | in bed with no movement for 10800 s; off by default | warning |
 | `device_offline` | 900 s | warning |
+| `fall` | no rule: opens on a FALL event, closes on RECOVERED (fall detectors only, 4b) | critical |
 
 **How alerts are checked and sent:**
 - The backend checks the rules on every live message. The sensor sends one every 5 s in bed, so a 30 s rule sees about 6 readings.
@@ -252,9 +271,9 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
 | 8.1 | GET | `/admin/dashboard` | any staff | → `{counts: {registered, online, offline, unclaimed, disabled, customers, registeredThisWeek, customersThisWeek, rolloutsRunning}, onlineHourly: [{hour, online}] (24), fwVersions: [{version, count}], recentAudit: [...5]}`. `recentAudit` is only included with `audit.view`. |
-| 8.2 | GET | `/admin/devices?q&status&fw&tz&registeredFrom&limit&cursor` | `devices.view` | `q` matches serial, MAC (with or without colons, 4+ hex digits), device name, or owner name or phone. `status` is `online`, `offline`, `unclaimed` or `disabled`. `registeredFrom` is `YYYY-MM-DD`. → `{items: [{id, serial, mac, name, owner: {id, fullName} \| null, online, isDisabled, tz, fw, chip, lastSeenAt, createdAt}], total, nextCursor}`, newest first. "Registered today" on the Register screen uses `registeredFrom`. |
+| 8.2 | GET | `/admin/devices?q&status&product&fw&tz&registeredFrom&limit&cursor` | `devices.view` | `q` matches serial, MAC (with or without colons, 4+ hex digits), device name, or owner name or phone. `status` is `online`, `offline`, `unclaimed` or `disabled`. `registeredFrom` is `YYYY-MM-DD`. → `{items: [{id, serial, mac, name, owner: {id, fullName} \| null, online, isDisabled, tz, fw, chip, lastSeenAt, createdAt}], total, nextCursor}`, newest first. "Registered today" on the Register screen uses `registeredFrom`. |
 | 8.3 | GET | `/admin/devices/:id` | `devices.view` | → `{hardware: {mac, chip, radar: "Sensor", hwModel, batch, manufacturedAt, fwAtRegister, registeredAt, registeredBy}, connection: {online, lastSeenAt, ip, wifiSsid, rssi, uptimeS, fw, radarOk}, tz, place, sleepCutoff, isDisabled, disabledReason, owner, shares[], claimCodeActive, stickerAvailable, sensorSettings}`. `stickerAvailable` = 8.6b can reprint the sticker. |
-| 8.4 | POST | `/admin/devices` | `devices.register` | `{mac, chip, hwModel, batch?, manufacturedAt?, fwOnBoard?}` → `201 {device: {id, serial, mac, chip, registeredAt}, serial, claimCode, qrPayload, qrPngBase64}`. `claimCode` = `XXXX-XXXX-XXXX`, `qrPayload` = `ARG1:<code without dashes>`; **both are shown only in this response** (only the HMAC is stored). `qrPngBase64` is optional for the UI (the web draws the QR itself). The serial is generated under an advisory lock so two registrations never get the same one: `ARG-<YY><letter><4 digits>`, e.g. `ARG-26A0001` (format still open, D8). The MQTT username is the MAC as 12 lowercase hex characters. Nothing is written to the board (MAC-only login). 409 `MAC_EXISTS`. Bulk registration = one call per CSV line (no bulk route in v1). The MAC and chip are read in the browser with Web Serial (esptool-js), as in Water Tank. |
+| 8.4 | POST | `/admin/devices` | `devices.register` | `{mac, chip, hwModel, product? ("sleep" default \| "fall"), batch?, manufacturedAt?, fwOnBoard?}` → `201 {device: {id, serial, mac, chip, registeredAt}, serial, claimCode, qrPayload, qrPngBase64}`. `claimCode` = `XXXX-XXXX-XXXX`, `qrPayload` = `ARG1:<code without dashes>`; **both are shown only in this response** (only the HMAC is stored). `qrPngBase64` is optional for the UI (the web draws the QR itself). The serial is generated under an advisory lock so two registrations never get the same one: `ARG-<YY><letter><4 digits>`, e.g. `ARG-26A0001` (format still open, D8). The MQTT username is the MAC as 12 lowercase hex characters. Nothing is written to the board (MAC-only login). 409 `MAC_EXISTS`. Bulk registration = one call per CSV line (no bulk route in v1). The MAC and chip are read in the browser with Web Serial (esptool-js), as in Water Tank. |
 | 8.5 | PATCH | `/admin/devices/:id` | `devices.command` | `{isDisabled, disabledReason?}` → `{id, serial, isDisabled, disabledReason}`. A reason is required when disabling (`400 VALIDATION`). Disabling refuses new MQTT logins at once; an already-connected sensor loses topic access within about 60 s (the broker's ACL cache). |
 | 8.6 | POST | `/admin/devices/:id/claim-code` | `devices.register` | → `{serial, claimCode, qrPayload, qrPngBase64}`. A new code; the old one stops working. For a lost sticker or a resold device. On a device that still has an owner the code only works after unclaim (claim gives `409 ALREADY_CLAIMED`). |
 | 8.6b | GET | `/admin/devices/:id/sticker` | `devices.register` | → `{serial, claimCode, qrPayload, qrPngBase64}`: reprint the **same** sticker. The code is stored AES-256-GCM encrypted (`devices.claim_code_enc`, key from `HASH_PEPPER` via HKDF, migration 006) next to its hash, and both are cleared on claim, so a used code is never shown again. `409 NO_ACTIVE_CODE` when the device is claimed or has no stored code (devices registered before 006: issue a new code with 8.6). Audited as `device.sticker.view`. |
@@ -263,6 +282,7 @@ Screens: **Dashboard**, **Devices**, **Device detail**, **Register by USB**.
 | 8.9 | GET | `/admin/devices/:id/commands?limit&cursor` | `devices.view` | → `{items: [{id, type, requestedBy, status, error, createdAt, sentAt, ackedAt}]}` |
 | 8.10 | GET | `/admin/devices/:id/logs` | `devices.view` | → `{items: [{id, createdAt, content}]}`. The last 5 uploads from the `logs` command. |
 | 8.11 | GET | `/admin/devices/:id/events?limit&cursor` | `devices.view` | → `{items: [{id, type, detail, createdAt}], nextCursor}`, newest first. |
+| 8.13 | GET | `/admin/devices/:id/falls?limit&cursor` | `devices.view` | → `{items: [fallEvent], nextCursor}` (4b). `404` for a sleep device. |
 | 8.12 | DELETE | `/admin/devices/:id` | `devices.register` | → `204`. Only for a device that was **never claimed** (e.g. a mistyped MAC); otherwise 409 `DEVICE_IN_USE`. |
 
 ## 9. Admin: firmware, team, audit, sleep rules
@@ -364,6 +384,7 @@ Wi-Fi and MQTT are not bench checks: a fresh board has no saved Wi-Fi and opens 
 | server → client | `command:status` | `{commandId, deviceId, serial, type, status, error}` | the sender, plus `admin:devices` |
 | server → client | `rollout:progress` | `{rolloutId, status, counts, deviceId, deviceStatus}` (`status` = the rollout's `running \| paused \| finished \| cancelled`; `deviceStatus` = that device's OTA status) | `admin:rollouts` |
 | server → client | `alert:new` | `{alertId, deviceId, serial, type, severity, title, at}` | users with `alerts.receive` on that device |
+| server → client | `device:fall` | `{deviceId, serial, event: fallEvent}` | the device room; a FALL or RECOVERED was stored (4b) |
 | server → client | `alert:ended` | `{alertId, deviceId, endedAt}` | the same users |
 | server → client | `access:changed` | `{deviceId, myPermissions[] \| null}` | the affected user, when a share is added, changed or removed, and when temporary access (§15.5) is extended, ended early or runs out (checked every 30 s) |
 | server → client | `auth:expired` | `{}` | see above |

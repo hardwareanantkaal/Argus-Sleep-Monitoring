@@ -12,6 +12,7 @@ import { StageTiles, StageTimeline } from '@/components/StageTimeline';
 import { Icon } from '@/components/Icon';
 import { firstLocalMin, pushStage } from '@/components/LiveTelemetry';
 import { Placement } from '@/components/Placement';
+import { FallDevice } from '@/components/FallDevice';
 import { HowTo, PLACE_DONE, PLACE_STEPS, WIFI_DONE, WIFI_STEPS } from '@/components/HowTo';
 import { useTheme, useToast } from '@/components/Providers';
 import { Async, Head, Legend, TzTag, useApi } from '@/components/ui';
@@ -72,10 +73,13 @@ export default function LivePage() {
       const sub = [d.room || d.serial, vendorTag, d.group?.name].filter(Boolean).join(' · ');
       const until = d.access === 'grant' && d.accessEndsAt ? <div className="note"><Icon name="clock" /><span>Access from {d.vendor?.name || 'the vendor'} until <b>{whenLocal(d.accessEndsAt)}</b>. It ends by itself after that.</span></div> : null;
       const links = <>
-        {perms.includes('history.view') && <Link className="btn ghost sm" href={`/history/${d.id}`}><Icon name="moon" size={16} /> History</Link>}
+        {d.product !== 'fall' && perms.includes('history.view') && <Link className="btn ghost sm" href={`/history/${d.id}`}><Icon name="moon" size={16} /> History</Link>}
         {!vendorDev && perms.includes('sharing.manage') && <Link className="btn ghost sm" href={`/devices/${d.id}/share`}><Icon name="share" size={16} /> Share</Link>}
         {perms.includes('settings.edit') && <Link className="btn ghost sm" href={`/devices/${d.id}/settings`}><Icon name="gear" size={16} /> Settings</Link>}
       </>;
+
+      // Fall Detection product (013): its own simple page (status + falls)
+      if (d.product === 'fall') return <FallDevice d={d} online={online} lastSeen={lastSeen} lv={lv} links={links} sub={sub} back={back} until={until} />;
 
       if (!canLive) return (
         <div className="wrap">

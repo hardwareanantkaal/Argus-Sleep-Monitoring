@@ -23,8 +23,9 @@ function Inner() {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [st, setSt] = useState('all');
+  const [prod, setProd] = useState('all');
   const dq = useDebounced(q);
-  const r = useApi<List<AdminDeviceRow>>(`/admin/devices${qs({ q: dq, status: st, limit: 50 })}`);
+  const r = useApi<List<AdminDeviceRow>>(`/admin/devices${qs({ q: dq, status: st, product: prod, limit: 50 })}`);
   useAdminSocket(['devices'], {
     'device:status': (m: { deviceId: string; online: boolean; lastSeenAt: string | null }) =>
       r.setData((x) => x && { ...x, items: x.items.map((d) => (d.id === m.deviceId ? { ...d, online: m.online, lastSeenAt: m.lastSeenAt } : d)) }),
@@ -41,14 +42,18 @@ function Inner() {
             <option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option>
             <option value="unclaimed">Not claimed</option><option value="disabled">Disabled</option>
           </select>
+          <select className="inp" value={prod} onChange={(e) => setProd(e.target.value)} aria-label="Product">
+            <option value="all">All products</option><option value="sleep">Sleep monitors</option><option value="fall">Fall detectors</option>
+          </select>
         </div>
         <Async q={r}>{(d) => (
           <div className="tbl"><table>
-            <thead><tr><th>Serial</th><th>Name</th><th>Owner</th><th>Status</th><th>Time zone</th><th>Firmware</th><th>Chip</th><th>Last seen</th></tr></thead>
+            <thead><tr><th>Serial</th><th>Product</th><th>Name</th><th>Owner</th><th>Status</th><th>Time zone</th><th>Firmware</th><th>Chip</th><th>Last seen</th></tr></thead>
             <tbody>
               {d.items.map((x) => (
                 <tr key={x.id} className="click" onClick={() => router.push(`/admin/devices/${x.id}`)}>
                   <td className="mono"><Link href={`/admin/devices/${x.id}`} style={{ color: 'inherit' }}>{x.serial}</Link></td>
+                  <td>{x.product === 'fall' ? <span className="pill warn">Fall</span> : <span className="pill">Sleep</span>}</td>
                   <td>{x.name || <span className="muted">—</span>}</td>
                   <td>{x.owner?.fullName || (x.vendor ? <>{x.vendor.name} <span className="pill acc">Vendor</span></> : <span className="muted">—</span>)}</td>
                   <td><AdminStatusPill d={x} /></td>
@@ -58,7 +63,7 @@ function Inner() {
                   <td className="muted">{x.online ? 'Now' : ago(x.lastSeenAt)}</td>
                 </tr>
               ))}
-              {!d.items.length && <tr><td colSpan={8} className="muted">No devices match.</td></tr>}
+              {!d.items.length && <tr><td colSpan={9} className="muted">No devices match.</td></tr>}
             </tbody>
           </table></div>
         )}</Async>

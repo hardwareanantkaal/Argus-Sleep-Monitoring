@@ -8,7 +8,7 @@ const db = require('../db');
 const live = require('./live');
 
 const BASE_SQL = `
-  SELECT d.id, d.serial_no, d.name, d.room, d.timezone, d.place, d.sleep_cutoff, d.auto_update,
+  SELECT d.id, d.serial_no, d.product, d.name, d.room, d.timezone, d.place, d.sleep_cutoff, d.auto_update,
          d.hw_model, d.owner_id, d.mqtt_username, d.vendor_id, d.group_id, d.claim_stage, d.claimed_at, d.stocked_at,
          o.full_name AS owner_name, o.phone AS owner_phone, o.country AS owner_country,
          v.name AS vendor_name, g.name AS group_name,
@@ -46,6 +46,7 @@ async function card(r, userId) {
   return {
     id: r.id,
     serial: r.serial_no,
+    product: r.product,            // 'sleep' | 'fall' (013)
     name: r.name || r.serial_no,   // vendor stock sensors have no name yet (009)
     room: r.room,
     tz: r.timezone,
@@ -66,7 +67,7 @@ async function card(r, userId) {
     myPermissions: perms,
     status: { online, lastSeenAt: mem?.lastSeenAt || r.last_seen_at },
     live: has('live.view') && online ? live.getLive(r.id) : null,
-    lastNight: has('history.view') ? await lastNightFn(r.id) : null,
+    lastNight: has('history.view') && r.product !== 'fall' ? await lastNightFn(r.id) : null,
   };
 }
 

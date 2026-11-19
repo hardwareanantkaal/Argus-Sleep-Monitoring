@@ -101,7 +101,7 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
     };
     return (
       <div className="card stack" style={{ gap: 14 }}>
-        <p className="small">Found <span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}.</p>
+        <p className="small">Found {found.product === 'fall' ? 'fall detector ' : ''}<span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}.</p>
         <div className="note"><Icon name="info" /><span>It goes into the <b>stock of {vendor.name}</b>. Keep the sticker on it: to sell it, the customer scans the same sticker and becomes the owner. To use it yourself, pick <b>Use here</b> on the Stock &amp; devices page.</span></div>
         {err && <p className="err" role="alert">{err}</p>}
         <div className="row"><button className="btn" onClick={addToStock} disabled={busy}>{busy ? 'Adding…' : 'Add to stock'}</button><button className="btn ghost" type="button" onClick={onBack}>Back</button></div>
@@ -114,7 +114,7 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
 
   return (
     <div className="card">
-      <p className="small" style={{ marginBottom: 14 }}>Found <span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}. It will appear under this name.</p>
+      <p className="small" style={{ marginBottom: 14 }}>Found {found.product === 'fall' ? 'fall detector ' : ''}<span className="mono">{found.serial}</span> · registered {day(found.registeredAt)}. It will appear under this name.</p>
       {soldBy && <div className="note" style={{ marginBottom: 14 }}><Icon name="tag" /><span>Sold by <b>{soldBy.name}</b>. You will be the owner and can share it with family. {soldBy.name} keeps only a record of the sale and can&apos;t see your data.</span></div>}
       <form className="form" onSubmit={submit}>
         <div className="field"><label htmlFor="cl-name">Name</label><input className="inp" id="cl-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Nani's room" /><span className="hint">Tip: use the person&apos;s name or the room.</span></div>

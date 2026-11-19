@@ -62,10 +62,11 @@ function Inner() {
         <div className="card"><h2 style={{ marginBottom: 12 }}>Versions</h2>
           <Async q={rel}>{(d) => (
             <div className="tbl"><table>
-              <thead><tr><th>Version</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
+              <thead><tr><th>Version</th><th>Product</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
               <tbody>{d.items.map((f) => (
                 <tr key={f.id}>
                   <td className="mono"><b>{f.version}</b></td>
+                  <td>{f.product === 'fall' ? <span className="pill warn">Fall</span> : <span className="pill">Sleep</span>}</td>
                   <td>{f.channel === 'beta' ? <span className="pill warn">beta</span> : <span className="pill ok">stable</span>}</td>
                   <td className="mono">{f.chipModel}</td>
                   <td className="muted">{day(f.createdAt)} · {f.uploadedBy}</td>
@@ -145,6 +146,7 @@ function Upload({ onDone }: { onDone(): void }) {
   const [file, setFile] = useState<File | null>(null);
   const [fac, setFac] = useState<File | null>(null);
   const [chip, setChip] = useState('ESP32');
+  const [product, setProduct] = useState<'sleep' | 'fall'>('sleep');
   const [version, setVersion] = useState('');
   const [channel, setChannel] = useState('beta');
   const [notes, setNotes] = useState('');
@@ -163,7 +165,7 @@ function Upload({ onDone }: { onDone(): void }) {
     if (fac && fac.size > FACTORY_MAX) return setErr(`The factory image is ${bytes(fac.size)}; the limit is 16 MB.`);
     const fd = new FormData();
     fd.append('file', file); fd.append('version', version.trim()); fd.append('channel', channel); fd.append('notes', notes.trim());
-    fd.append('chipModel', chip);
+    fd.append('chipModel', chip); fd.append('product', product);
     if (fac && chip !== 'ESP8266') fd.append('factoryFile', fac);
     setBusy(true);
     try { await post('/admin/firmware', fd); toast(`Uploaded ${version.trim()}`); setFile(null); setFac(null); setVersion(''); setNotes(''); setKey((k) => k + 1); onDone(); }
@@ -173,6 +175,8 @@ function Upload({ onDone }: { onDone(): void }) {
   return (
     <div className="card"><h2 style={{ marginBottom: 14 }}>Upload a build</h2>
       <form className="form" onSubmit={submit}>
+        <div className="field"><label htmlFor="fw-prod">Product</label><select className="inp" id="fw-prod" value={product} onChange={(e) => setProduct(e.target.value as 'sleep' | 'fall')} disabled={!up}><option value="sleep">Sleep monitor</option><option value="fall">Fall detector</option></select>
+          <span className="hint">An OTA update only goes to devices of this product.</span></div>
         <div className="field"><label htmlFor="fw-chip">Chip</label><select className="inp mono" id="fw-chip" value={chip} onChange={(e) => setChip(e.target.value)} disabled={!up}>{CHIPS.map((c) => <option key={c}>{c}</option>)}</select></div>
         <div className="field"><label htmlFor="fw-file">Firmware file (.bin, max 4 MB)</label><input key={key} className="inp" type="file" id="fw-file" accept=".bin,application/octet-stream" disabled={!up} onChange={(e) => setFile(e.target.files?.[0] || null)} />
           {file ? <span className="hint">{file.name} · {bytes(file.size)}</span> : <span className="hint">Arduino: <span className="mono">sleeplamp.ino.bin</span> (used for OTA)</span>}</div>
@@ -222,7 +226,7 @@ function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[
     <div className="card"><h2 style={{ marginBottom: 14 }}>New OTA update</h2>
       <form className="form" onSubmit={submit}>
         <div className="fields2">
-          <div className="field"><label htmlFor="ro-v">Version</label><select className="inp mono" id="ro-v" value={releaseId} onChange={(e) => setReleaseId(e.target.value)}>{releases.map((f) => <option key={f.id} value={f.id}>{f.version} ({f.channel})</option>)}</select></div>
+          <div className="field"><label htmlFor="ro-v">Version</label><select className="inp mono" id="ro-v" value={releaseId} onChange={(e) => setReleaseId(e.target.value)}>{releases.map((f) => <option key={f.id} value={f.id}>{f.version} ({f.product === 'fall' ? 'fall detector, ' : ''}{f.channel})</option>)}</select></div>
           <div className="field"><label htmlFor="ro-t">Send to</label><select className="inp" id="ro-t" value={target} onChange={(e) => setTarget(e.target.value as typeof target)}>
             <option value="all">All devices</option><option value="serials">Chosen serial numbers</option><option value="from_version">Devices on a firmware version</option></select></div>
           {target === 'serials' && <div className="field"><label htmlFor="ro-s">Serials</label><textarea className="inp mono" id="ro-s" rows={2} value={serials} onChange={(e) => setSerials(e.target.value)} placeholder="ARG-24A0012, ARG-24A0013" /><span className="hint">Listed devices update even if they turned automatic updates off.</span></div>}
