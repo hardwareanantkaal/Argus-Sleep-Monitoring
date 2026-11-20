@@ -171,8 +171,10 @@ export interface List<T> { items: T[]; nextCursor?: string | null; total?: numbe
 export interface Dashboard {
   counts: { registered: number; online: number; offline: number; unclaimed: number; disabled: number; customers: number;
     registeredThisWeek: number; customersThisWeek: number; rolloutsRunning: number };
+  /** 013/014: per product */
+  byProduct?: Record<Product, { registered: number; online: number }>;
   onlineHourly: { hour: string; online: number }[];
-  fwVersions: { version: string; count: number }[];
+  fwVersions: { version: string; count: number; product?: Product }[];
   recentAudit?: AuditItem[];
 }
 export interface AdminDeviceRow {
@@ -222,12 +224,12 @@ export interface FirmwareRelease {
 
 // Manufacturing station (API.md §9b)
 export interface FactoryRelease {
-  id: number; version: string; channel: 'stable' | 'beta'; chipModel: string; notes: string | null; isDefault: boolean;
+  id: number; version: string; channel: 'stable' | 'beta'; chipModel: string; product?: Product; notes: string | null; isDefault: boolean;
   factory: { fileSize: number; sha256: string; flashSize: string; address: number; sameAsOta: boolean };
 }
 export type FactoryResult = 'running' | 'pass' | 'fail' | 'aborted';
 export interface FactoryRun {
-  id: number; mac: string; chip: string; releaseId: number | null; fwVersion: string | null; flashed: boolean; flashMs: number | null;
+  id: number; mac: string; chip: string; product?: Product; releaseId: number | null; fwVersion: string | null; flashed: boolean; flashMs: number | null;
   result: FactoryResult; failReason: string | null; station: string | null; operatorName: string; serial: string | null;
   deviceId: string | null; startedAt: string; finishedAt: string | null;
   checks?: { id: string; ok: boolean | null; value?: string; ms?: number }[]; notes?: string | null; logTail?: string | null;
@@ -238,7 +240,7 @@ export interface FactoryRunList {
     byOperator: { operatorName: string; pass: number; fail: number }[]; byReason: { reason: string; n: number }[] };
 }
 export interface Rollout {
-  id: string; version: string; target: string; createdBy: string; createdAt: string;
+  id: string; version: string; product?: Product; target: string; createdBy: string; createdAt: string;
   status: 'running' | 'paused' | 'finished' | 'cancelled';
   counts: { done: number; downloading: number; waiting: number; failed: number; /** waiting: sleep session active */ deferred?: number };
 }

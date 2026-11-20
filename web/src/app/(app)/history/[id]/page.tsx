@@ -6,7 +6,7 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BarChart } from '@/components/charts';
 import { Icon } from '@/components/Icon';
 import { Async, ErrorBox, Head, Legend, PH, ScoreRing, StageBar, TzTag, useApi } from '@/components/ui';
@@ -22,8 +22,11 @@ export default function HistoryPage() {
   const router = useRouter();
   const [period, setPeriod] = useState<Period>('week');
   const devs = useApi<{ items: DeviceCard[] }>('/devices');
-  const q = useApi<NightsResponse>(`/devices/${id}/nights?days=${PERIODS[period].days}`);
-  const list = (devs.data?.items || []).filter((d) => d.myPermissions.includes('history.view'));
+  // Sleep monitors only: a fall detector's history (its falls) is on its device page.
+  const isFall = devs.data?.items.some((d) => d.id === id && d.product === 'fall');
+  useEffect(() => { if (isFall) router.replace(`/devices/${id}`); }, [isFall, id, router]);
+  const q = useApi<NightsResponse>(!devs.data || isFall ? null : `/devices/${id}/nights?days=${PERIODS[period].days}`);
+  const list = (devs.data?.items || []).filter((d) => d.product !== 'fall' && d.myPermissions.includes('history.view'));
   const dev = list.find((d) => d.id === id);
 
   return (

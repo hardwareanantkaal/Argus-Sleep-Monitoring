@@ -45,9 +45,10 @@ function emitSync(deviceId, s) {
 // down the sensor still gets them on the next republish (online / reconnect).
 async function publish(deviceId) {
   const s = await db.one(
-    `SELECT ds.*, d.mqtt_username FROM device_settings ds JOIN devices d ON d.id = ds.device_id WHERE ds.device_id = $1`,
+    `SELECT ds.*, d.mqtt_username, d.product FROM device_settings ds JOIN devices d ON d.id = ds.device_id WHERE ds.device_id = $1`,
     [deviceId]);
   if (!s) return null;
+  if (s.product === 'fall') return s;   // 013: C1001 settings are for sleep monitors only
   try {
     await mqtt.publish(s.mqtt_username, 'settings/set', payload(s, await minSessionMin()), { qos: 1, retain: true });
     await db.query('UPDATE device_settings SET sent_at = now() WHERE device_id = $1', [deviceId]);

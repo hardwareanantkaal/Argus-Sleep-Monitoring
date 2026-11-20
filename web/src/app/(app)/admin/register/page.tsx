@@ -17,12 +17,10 @@ import { RequireStaff } from '@/components/Shell';
 import { Async, Head, useApi } from '@/components/ui';
 import { errText, post, qs } from '@/lib/api';
 import { timeIn, browserTz } from '@/lib/format';
+import { CHIPS_BY_PRODUCT, HW_BY_PRODUCT, PRODUCTS, productLabel, productOfHw } from '@/lib/products';
 import type { AdminDeviceRow, List, Product, RegisterResult } from '@/lib/types';
 
-const CHIPS = ['ESP32-S3', 'ESP32', 'ESP32-C3', 'ESP32-C6', 'ESP8266'];
-// Two products (013): sleep monitor (C1001) and fall detector (IWR6843AOP).
-const PRODUCTS: [Product, string][] = [['sleep', 'Sleep monitor'], ['fall', 'Fall detector']];
-const HW_BY_PRODUCT: Record<Product, string[]> = { sleep: ['ARG-S1 rev B', 'ARG-S1 rev A'], fall: ['ARG-F1 rev A'] };
+// Two products (013): sleep monitor (C1001) and fall detector (IWR6843AOP, ESP32-S3 only).
 const HW_MODELS = HW_BY_PRODUCT.sleep;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -84,6 +82,7 @@ function Single({ usb, onDone }: { usb: boolean; onDone(): void }) {
     e.preventDefault();
     const mac = normMac(f.mac);
     if (!mac) return setErr('The MAC must be 12 hex digits, e.g. 34:85:18:A1:0F:22');
+    if (!CHIPS_BY_PRODUCT[f.product].includes(f.chip)) return setErr(`A ${productLabel(f.product).toLowerCase()} is built on ${CHIPS_BY_PRODUCT[f.product].join(' / ')}, this board is ${f.chip}.`);
     setErr(''); setBusy(true);
     try {
       const r = await post<RegisterResult>('/admin/devices', {
@@ -122,8 +121,9 @@ function Single({ usb, onDone }: { usb: boolean; onDone(): void }) {
               {!usb && <span className="hint">The base (Wi-Fi station) MAC. Colons optional.</span>}</div>
             <div className="field"><label htmlFor="rg-chip">Chip</label>
               {usb ? <input className="inp mono" id="rg-chip" value={f.chip} readOnly />
-                : <select className="inp mono" id="rg-chip" value={f.chip} onChange={(e) => setF({ ...f, chip: e.target.value })}>{CHIPS.map((c) => <option key={c}>{c}</option>)}</select>}</div>
-            <div className="field"><label htmlFor="rg-product">Product</label><select className="inp" id="rg-product" value={f.product} onChange={(e) => { const p = e.target.value as Product; setF({ ...f, product: p, hwModel: HW_BY_PRODUCT[p][0] }); }}>{PRODUCTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+                : <select className="inp mono" id="rg-chip" value={f.chip} onChange={(e) => setF({ ...f, chip: e.target.value })}>{CHIPS_BY_PRODUCT[f.product].map((c) => <option key={c}>{c}</option>)}</select>}
+              {!CHIPS_BY_PRODUCT[f.product].includes(f.chip) && <span className="err">A {productLabel(f.product).toLowerCase()} is built on {CHIPS_BY_PRODUCT[f.product].join(' / ')}.</span>}</div>
+            <div className="field"><label htmlFor="rg-product">Product</label><select className="inp" id="rg-product" value={f.product} onChange={(e) => { const p = e.target.value as Product; setF({ ...f, product: p, hwModel: HW_BY_PRODUCT[p][0], chip: usb || CHIPS_BY_PRODUCT[p].includes(f.chip) ? f.chip : CHIPS_BY_PRODUCT[p][0] }); }}>{PRODUCTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
             <div className="field"><label htmlFor="rg-hw">Hardware model</label><select className="inp" id="rg-hw" value={f.hwModel} onChange={(e) => setF({ ...f, hwModel: e.target.value })}>{HW_BY_PRODUCT[f.product].map((h) => <option key={h}>{h}</option>)}</select></div>
             <div className="field"><label htmlFor="rg-batch">Batch (optional)</label><input className="inp" id="rg-batch" value={f.batch} onChange={(e) => setF({ ...f, batch: e.target.value })} placeholder="B-2026-11-A" /></div>
             <div className="field"><label htmlFor="rg-date">Made on</label><input className="inp" type="date" id="rg-date" value={f.manufacturedAt} onChange={(e) => setF({ ...f, manufacturedAt: e.target.value })} /></div>
@@ -200,6 +200,8 @@ function parseCsv(text: string): { rows: BulkRow[]; errors: string[] } {
     const mac = normMac(c[0] || '');
     if (!mac) return errors.push(`Line ${i + 1}: “${c[0]}” is not a MAC address`);
     const chip = c[1] || 'ESP32-S3';
+    const hw = c[2] || HW_MODELS[0];
+    if (productOfHw(hw) === 'fall' && !CHIPS_BY_PRODUCT.fall.includes(chip)) return errors.push(`Line ${i + 1}: ${hw} is a fall detector, it needs an ESP32-S3 (not ${chip})`);
     rows.push({ line: i + 1, mac, chip, hwModel: c[2] || HW_MODELS[0], batch: c[3] || undefined, manufacturedAt: c[4] || undefined, fwOnBoard: c[5] || undefined });
   });
   const seen = new Set<string>();
@@ -220,7 +222,7 @@ function Bulk({ onDone }: { onDone(): void }) {
     // One request per board: there is no bulk endpoint, and this keeps each serial under the server's lock.
     for (const row of parsed.rows) {
       try {
-        const r = await post<RegisterResult>('/admin/devices', { mac: row.mac, chip: row.chip, hwModel: row.hwModel, batch: row.batch, manufacturedAt: row.manufacturedAt, fwOnBoard: row.fwOnBoard });
+        const r = await post<RegisterResult>('/admin/devices', { mac: row.mac, chip: row.chip, hwModel: row.hwModel, product: productOfHw(row.hwModel), batch: row.batch, manufacturedAt: row.manufacturedAt, fwOnBoard: row.fwOnBoard });
         out.push({ row, ok: true, s: { id: r.device.id, serial: r.serial, claimCode: r.claimCode, qrPayload: r.qrPayload, qrPngBase64: r.qrPngBase64, mac: row.mac } });
       } catch (e) { out.push({ row, ok: false, error: errText(e) }); }
       setProgress(out.length); setResults([...out]);
@@ -232,7 +234,7 @@ function Bulk({ onDone }: { onDone(): void }) {
   return (
     <div className="card stack" style={{ gap: 14 }}>
       <div className="stack" style={{ gap: 4 }}><h2>Register many at once</h2>
-        <p className="small muted">One board per line: <span className="mono">mac, chip, hwModel, batch, madeOn, fw</span>. Only the MAC is required (chip defaults to ESP32-S3). A header line is fine.</p></div>
+        <p className="small muted">One board per line: <span className="mono">mac, chip, hwModel, batch, madeOn, fw</span>. Only the MAC is required (chip defaults to ESP32-S3). The hardware model sets the product: <span className="mono">ARG-F…</span> = fall detector, else sleep monitor. A header line is fine.</p></div>
       <div className="field"><label htmlFor="csv-file">CSV file</label>
         <input className="inp" type="file" id="csv-file" accept=".csv,text/csv,text/plain" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setText(await f.text()); }} /></div>
       <div className="field"><label htmlFor="csv-text">Or paste the lines</label>

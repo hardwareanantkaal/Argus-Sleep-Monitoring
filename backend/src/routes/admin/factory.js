@@ -15,6 +15,7 @@ const router = express.Router();
 const normMac = (s) => String(s || '').toLowerCase().replace(/[^0-9a-f]/g, '');
 const mac = z.string().transform(normMac).refine((m) => m.length === 12, 'MAC must be 6 bytes, e.g. 34:85:18:A1:0F:22');
 const chip = z.string().trim().toUpperCase().min(2).max(40);
+const product = z.enum(['sleep', 'fall']);   // 013/014: sleep monitor or fall detector
 
 // Staff with ANY of these permissions (requireStaff takes one).
 function requireAny(...perms) {
@@ -32,16 +33,16 @@ const LOG_TAIL_MAX = 16384;
 
 // 9.24
 router.get('/factory/releases', requireStaff('factory.flash'), async (req, res) => {
-  const q = parse(z.object({ chip: chip.optional() }), req.query);
+  const q = parse(z.object({ chip: chip.optional(), product: product.optional() }), req.query);
   const rows = await db.many(
-    `SELECT id, version, channel, chip_model, notes, factory_file_size, factory_sha256, factory_flash_size, factory_default,
+    `SELECT id, version, channel, chip_model, product, notes, factory_file_size, factory_sha256, factory_flash_size, factory_default,
             factory_file_path = file_path AS same_as_ota
        FROM firmware_releases
-      WHERE factory_file_path IS NOT NULL AND ($1::text IS NULL OR chip_model = $1)
-      ORDER BY factory_default DESC, created_at DESC`, [q.chip || null]);
+      WHERE factory_file_path IS NOT NULL AND ($1::text IS NULL OR chip_model = $1) AND ($2::text IS NULL OR product = $2)
+      ORDER BY factory_default DESC, created_at DESC`, [q.chip || null, q.product || null]);
   res.json({
     items: rows.map((r) => ({
-      id: r.id, version: r.version, channel: r.channel, chipModel: r.chip_model, notes: r.notes, isDefault: r.factory_default,
+      id: r.id, version: r.version, channel: r.channel, chipModel: r.chip_model, product: r.product, notes: r.notes, isDefault: r.factory_default,
       factory: { fileSize: r.factory_file_size, sha256: r.factory_sha256, flashSize: r.factory_flash_size,
         address: 0, sameAsOta: r.same_as_ota },
     })),
@@ -63,11 +64,11 @@ router.get('/factory/releases/:id/image', requireStaff('factory.flash'), async (
   fs.createReadStream(r.factory_file_path).pipe(res);
 });
 
-const RUN_COLS = `r.id, r.mac::text AS mac, r.chip, r.release_id, r.fw_version, r.flashed, r.flash_ms, r.checks, r.result,
+const RUN_COLS = `r.id, r.mac::text AS mac, r.chip, r.product, r.release_id, r.fw_version, r.flashed, r.flash_ms, r.checks, r.result,
   r.fail_reason, r.notes, r.station, r.device_id, r.operator_id, r.operator_name, r.started_at, r.finished_at, d.serial_no`;
 function outRun(r, full) {
   const o = {
-    id: r.id, mac: r.mac, chip: r.chip, releaseId: r.release_id, fwVersion: r.fw_version, flashed: r.flashed,
+    id: r.id, mac: r.mac, chip: r.chip, product: r.product, releaseId: r.release_id, fwVersion: r.fw_version, flashed: r.flashed,
     flashMs: r.flash_ms, result: r.result, failReason: r.fail_reason, station: r.station,
     operatorName: r.operator_name, serial: r.serial_no || null, deviceId: r.device_id,
     startedAt: r.started_at, finishedAt: r.finished_at,
@@ -80,16 +81,23 @@ function outRun(r, full) {
 router.post('/factory/runs', requireAny(...ANY_FACTORY), async (req, res) => {
   const b = parse(z.object({
     mac, chip,
+    product: product.default('sleep'),
     releaseId: z.number().int().optional(),
     station: z.string().trim().max(40).optional(),
   }), req.body);
+  if (b.product === 'fall' && b.chip.toUpperCase().replace(/[^A-Z0-9]/g, '') !== 'ESP32S3') {
+    throw E.invalid('WRONG_CHIP', `A fall detector is built on an ESP32-S3, this board is ${b.chip}`, 'chip');
+  }
   let rel = null;
   if (b.releaseId != null) {
     if (!has(req, 'factory.flash')) throw E.forbidden('FORBIDDEN', 'Flashing needs factory.flash');
-    rel = await db.one('SELECT id, version, chip_model, factory_file_path FROM firmware_releases WHERE id = $1', [b.releaseId]);
+    rel = await db.one('SELECT id, version, chip_model, product, factory_file_path FROM firmware_releases WHERE id = $1', [b.releaseId]);
     if (!rel || !rel.factory_file_path) throw E.notFound('No factory image for this release');
     if (rel.chip_model !== b.chip) {
       throw E.invalid('CHIP_MISMATCH', `This board is ${b.chip} but release ${rel.version} is for ${rel.chip_model}`, 'releaseId');
+    }
+    if (rel.product !== b.product) {
+      throw E.invalid('WRONG_PRODUCT', `Release ${rel.version} is ${rel.product === 'fall' ? 'fall detector' : 'sleep monitor'} firmware`, 'releaseId');
     }
   }
   const history = await db.one(
@@ -98,12 +106,16 @@ router.post('/factory/runs', requireAny(...ANY_FACTORY), async (req, res) => {
             (SELECT fail_reason FROM factory_runs WHERE mac = $1 ORDER BY started_at DESC LIMIT 1) AS last_reason,
             max(started_at) AS last_at
        FROM factory_runs WHERE mac = $1`, [b.mac]);
-  const dev = await db.one('SELECT id, serial_no FROM devices WHERE mac = $1', [b.mac]);
+  const dev = await db.one('SELECT id, serial_no, product FROM devices WHERE mac = $1', [b.mac]);
+  // A registered board is re-tested as what it was registered as.
+  if (dev && dev.product !== b.product) {
+    throw E.invalid('WRONG_PRODUCT', `This board is registered as ${dev.serial_no}, a ${dev.product === 'fall' ? 'fall detector' : 'sleep monitor'}`, 'product');
+  }
   const row = await db.one(
-    `INSERT INTO factory_runs (mac, chip, release_id, fw_version, station, operator_id, operator_name, device_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    `INSERT INTO factory_runs (mac, chip, release_id, fw_version, station, operator_id, operator_name, device_id, product)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
     [b.mac, b.chip, rel ? rel.id : null, rel ? rel.version : null, b.station || null, req.user.id, req.user.full_name,
-      dev ? dev.id : null]); // a re-test of a registered board is linked to it straight away
+      dev ? dev.id : null, b.product]); // a re-test of a registered board is linked to it straight away
   const run = await db.one(`SELECT ${RUN_COLS}, r.log_tail FROM factory_runs r LEFT JOIN devices d ON d.id = r.device_id WHERE r.id = $1`, [row.id]);
   res.status(201).json({
     run: outRun(run, true),
@@ -180,6 +192,7 @@ router.get('/factory/runs', requireAny(...LOG_VIEW), async (req, res) => {
   const q = parse(z.object({
     q: z.string().trim().max(40).optional(),
     result: z.enum(['running', 'pass', 'fail', 'aborted']).optional(),
+    product: product.optional(),
     operatorId: z.uuid().optional(),
     station: z.string().max(40).optional(),
     releaseId: z.coerce.number().int().optional(),
@@ -200,6 +213,7 @@ router.get('/factory/runs', requireAny(...LOG_VIEW), async (req, res) => {
     }
   }
   if (q.result) add('r.result = ?::factory_result', q.result);
+  if (q.product) add('r.product = ?', q.product);
   if (q.operatorId) add('r.operator_id = ?', q.operatorId);
   if (q.station) add('r.station = ?', q.station);
   if (q.releaseId) add('r.release_id = ?', q.releaseId);

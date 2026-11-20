@@ -456,7 +456,8 @@ on('GET', '/admin/dashboard', () => {
   const u = me(); needStaff(u);
   const hourly = Array.from({ length: 24 }, (_, i) => ({ hour: new Date(Date.now() - (23 - i) * 3600000).toISOString(), online: [383, 381, 379, 378, 377, 377, 376, 378, 380, 384, 386, 388, 389, 390, 391, 390, 389, 390, 392, 393, 393, 391, 391, 391][i] }));
   return { counts: { registered: 438, online: 391, offline: 27, unclaimed: 20, disabled: 0, customers: 312, registeredThisWeek: 12, customersThisWeek: 9, rolloutsRunning: db.rollouts.filter((r) => r.status === 'running').length },
-    onlineHourly: hourly, fwVersions: db.firmware.map((f) => ({ version: f.version, count: f.deviceCount })),
+    byProduct: { sleep: { registered: 436, online: 389 }, fall: { registered: db.devices.filter((d) => d.product === 'fall').length, online: 1 } },
+    onlineHourly: hourly, fwVersions: db.firmware.map((f) => ({ version: f.version, count: f.deviceCount, product: f.product || 'sleep' })),
     recentAudit: staffPerms(u).includes('audit.view') ? db.audit.slice(0, 5) : undefined };
 });
 on('GET', '/admin/devices', (_m, _b, q) => {
@@ -567,7 +568,11 @@ on('DELETE', '/admin/devices/([^/]+)', (m) => {
 });
 
 /* ---------- 9. firmware, team, audit, sleep rules ---------- */
-on('GET', '/admin/firmware', () => { needStaff(me(), 'firmware.view'); return { items: db.firmware }; });
+on('GET', '/admin/firmware', (_m, _b, q) => {
+  needStaff(me(), 'firmware.view');
+  const p = q.get('product');
+  return { items: db.firmware.filter((f) => !p || (f.product || 'sleep') === p) };
+});
 on('POST', '/admin/firmware', (_m, b) => {
   const u = me(); needStaff(u, 'firmware.upload');
   const fd = b as FormData;
@@ -583,7 +588,18 @@ on('POST', '/admin/firmware', (_m, b) => {
 });
 on('PATCH', '/admin/firmware/([^/]+)', (m, b) => { needStaff(me(), 'firmware.upload'); const f = db.firmware.find((x) => x.id === m[1]); if (!f) fail(404, 'NOT_FOUND', 'Not found'); Object.assign(f!, b); return f; });
 on('DELETE', '/admin/firmware/([^/]+)', (m) => { needStaff(me(), 'firmware.upload'); const f = db.firmware.find((x) => x.id === m[1]); if (db.rollouts.some((r) => r.version === f?.version && r.status === 'running')) fail(409, 'IN_USE', 'A running rollout uses this version'); db.firmware = db.firmware.filter((x) => x.id !== m[1]); return undefined; });
-on('GET', '/admin/ota/rollouts', () => { needStaff(me(), 'firmware.view'); return { items: db.rollouts }; });
+on('GET', '/admin/ota/rollouts', (_m, _b, q) => {
+  needStaff(me(), 'firmware.view');
+  const p = q.get('product');
+  const prodOf = (v: string) => db.firmware.find((f) => f.version === v)?.product || 'sleep';
+  return { items: db.rollouts.filter((r) => !p || prodOf(r.version) === p) };
+});
+on('GET', '/admin/devices/([^/]+)/falls', (m) => {
+  needStaff(me(), 'devices.view');
+  const d = db.devices.find((x) => x.id === m[1]);
+  if (!d || d.product !== 'fall') throw new ApiError(404, 'NOT_FOUND', 'Not a fall detector');
+  return { device: { tz: d.tz!, place: d.place }, items: d.falls || [], nextCursor: null };
+});
 on('POST', '/admin/ota/rollouts', (_m, b) => {
   const u = me(); needStaff(u, 'firmware.rollout');
   const f = db.firmware.find((x) => x.id === b.releaseId); if (!f) fail(400, 'VALIDATION', 'Pick a version', 'releaseId');

@@ -899,6 +899,7 @@ CREATE TABLE factory_runs (
   log_tail       TEXT           CHECK (octet_length(log_tail) <= 16384),  -- last 16 KB of serial output
   notes          TEXT,
   station        TEXT,                             -- bench label typed once per PC, e.g. 'Bench 2'
+  product        TEXT           NOT NULL DEFAULT 'sleep',  -- 'sleep' | 'fall': firmware, tests and registration (014)
   device_id      UUID           REFERENCES devices(id) ON DELETE SET NULL,  -- set when registered
   operator_id    UUID           REFERENCES users(id) ON DELETE SET NULL,
   operator_name  TEXT           NOT NULL,          -- copied, like audit_log
@@ -906,12 +907,14 @@ CREATE TABLE factory_runs (
   finished_at    TIMESTAMPTZ,
   CONSTRAINT factory_runs_finished CHECK ((result = 'running') = (finished_at IS NULL)),
   CONSTRAINT factory_runs_flashed_version CHECK (NOT flashed OR fw_version IS NOT NULL),
-  CONSTRAINT factory_runs_checks_array CHECK (jsonb_typeof(checks) = 'array')
+  CONSTRAINT factory_runs_checks_array CHECK (jsonb_typeof(checks) = 'array'),
+  CONSTRAINT factory_runs_product CHECK (product IN ('sleep', 'fall'))
 );
 CREATE INDEX factory_runs_mac_idx      ON factory_runs (mac, started_at DESC);
 CREATE INDEX factory_runs_started_idx  ON factory_runs (started_at DESC);
 CREATE INDEX factory_runs_result_idx   ON factory_runs (result, started_at DESC);
 CREATE INDEX factory_runs_operator_idx ON factory_runs (operator_id, started_at DESC);
+CREATE INDEX factory_runs_product_idx  ON factory_runs (product, started_at DESC);
 
 -- ---------------------------------------------------------------------
 -- Fall Detection product (migration 013). Only FALL / RECOVERED events

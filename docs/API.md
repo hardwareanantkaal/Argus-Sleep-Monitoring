@@ -347,11 +347,11 @@ How to use it: [MANUFACTURING.md](MANUFACTURING.md).
 ### Station and bench runs (screen: Manufacturing)
 | # | Method | Path | Needs | Body → Response |
 |---|---|---|---|---|
-| 9.24 | GET | `/admin/factory/releases?chip` | `factory.flash` | → `{items: [{id, version, channel, chipModel, notes, isDefault, factory: {fileSize, sha256, flashSize, address: 0, sameAsOta}}]}`. Only releases with a factory image, the default first. |
+| 9.24 | GET | `/admin/factory/releases?chip&product` | `factory.flash` | → `{items: [{id, version, channel, chipModel, product, notes, isDefault, factory: {fileSize, sha256, flashSize, address: 0, sameAsOta}}]}`. Only releases with a factory image, the default first. |
 | 9.25 | GET | `/admin/factory/releases/:id/image` | `factory.flash` | → the image (`application/octet-stream`, header `x-sha256`). The browser checks the sha256 before flashing and keeps the image in memory for the next boards. |
-| 9.26 | POST | `/admin/factory/runs` | `factory.flash` or `factory.monitor` | `{mac, chip, releaseId?, station?}` → `201 {run, history: {previousRuns, lastResult, lastReason, lastAt, device: {id, serial} \| null}}`. `releaseId` (going to flash) needs `factory.flash`; `422 CHIP_MISMATCH` when the board is another chip. A run on an already registered board is linked to it at once. |
+| 9.26 | POST | `/admin/factory/runs` | `factory.flash` or `factory.monitor` | `{mac, chip, product?, releaseId?, station?}` (`product` `sleep` default / `fall`, 014) → `201 {run, history: {previousRuns, lastResult, lastReason, lastAt, device: {id, serial} \| null}}`. `releaseId` (going to flash) needs `factory.flash`; `422 CHIP_MISMATCH` when the board is another chip; `422 WRONG_PRODUCT` when the release is another product's firmware or the board is already registered as the other product; `422 WRONG_CHIP` for a fall detector that is not an ESP32-S3. A run on an already registered board is linked to it at once. |
 | 9.27 | PATCH | `/admin/factory/runs/:id` | the operator who started it | `{flashed?, flashMs?, checks?, result?, failReason?, logTail?, notes?}` → run. `checks` = the full list `[{id, ok, value?, ms?}]`. A `result` (`pass`/`fail`/`aborted`) finishes the run and writes the audit row `factory.run`. `pass` with a failed check → `422 CHECKS_FAILED`; a finished run → `409 RUN_FINISHED`. `logTail` keeps the last 16 KB. |
-| 9.28 | GET | `/admin/factory/runs?q&result&operatorId&station&releaseId&from&to&limit&cursor` | `factory.flash`, `factory.monitor` or `devices.view` | `q` = MAC (any format) or serial. → `{items, summary: {pass, fail, aborted, running, byOperator: [{operatorName, pass, fail}], byReason: [{reason, n}]}, nextCursor}`. The summary covers the whole filter. |
+| 9.28 | GET | `/admin/factory/runs?q&product&result&operatorId&station&releaseId&from&to&limit&cursor` | `factory.flash`, `factory.monitor` or `devices.view` | `q` = MAC (any format) or serial. → `{items, summary: {pass, fail, aborted, running, byOperator: [{operatorName, pass, fail}], byReason: [{reason, n}]}, nextCursor}`. The summary covers the whole filter. |
 | 9.29 | GET | `/admin/factory/runs/:id` | as 9.28 | → run with `checks`, `logTail`, `notes`. Helper: `GET /admin/factory/operators`. |
 | 8.4 (extra field) | POST | `/admin/devices` | `devices.register` | optional `factoryRunId`: the run must be for this MAC (`422 RUN_MAC_MISMATCH`) and the code must be flashed with at least one check passed (`422 RUN_NOT_READY`). The test may still be running. The run is then linked to the new device. |
 
@@ -614,3 +614,19 @@ The device itself (live, history, settings, alerts) uses the normal §3, §4 and
 - **Leaving (3.10):** a grant holder may leave (ends the grant). Vendor team members get 422 `VENDOR_DEVICE`.
 - **Remove / unclaim (3.9, 8.7):** a device in vendor stock has no person owner, so 3.9 is not available; support can unclaim it with 8.7. A sold device: the customer (owner) can remove it with 3.9. Both send the device back to `factory` (history, grants and the vendor link deleted, as for any device); the admin issues a new code (8.6) before anyone can claim it again.
 - **Data visibility (v2.1, replaces v2):** once sold, the vendor has **no access** to the device (no live, history, alerts, settings, temporary access); it only keeps the sales record (15.2b `sold`, 15.2e). `sharing.manage` stays owner-only.
+
+## 014. Product separation (added 20 Nov 2026, migration 014)
+
+Every part that differs between the sleep monitor and the fall detector checks the product:
+
+| Where | Rule | Error |
+|---|---|---|
+| `GET /admin/firmware?product`, `GET /admin/ota/rollouts?product` | list one product only (rollouts now carry `product`) | |
+| `POST /admin/firmware` | the app `.bin` must contain `Fall Detection` (its boot banner) for `product=fall`, and must not for `sleep`; fall firmware is ESP32-S3 only | `422 WRONG_PRODUCT_IMAGE`, `422 WRONG_CHIP` |
+| `POST /admin/devices` | fall detector = ESP32-S3; hardware model `ARG-F*` = fall, `ARG-S*` = sleep; a linked bench run must be the same product | `422 WRONG_CHIP`, `422 WRONG_PRODUCT` |
+| `factory_runs.product` | the station saves the product of every bench run | |
+| Device: `sensor-settings`, `recalibrate`, `end-session`, `nights`, `nights/:date` | sleep monitor only | `409 NOT_FOR_PRODUCT` |
+| Admin command `recalibrate`, `end_session` | sleep monitor only | `409 NOT_FOR_PRODUCT` |
+| `PUT /devices/:id/alert-rules` | a fall detector only has `device_offline` | `422 BAD_RULE` |
+| `GET /admin/dashboard` | adds `byProduct: {sleep: {registered, online}, fall: {…}}`; `fwVersions[].product` | |
+| Settings sync | no `settings/set` is published to a fall detector | |

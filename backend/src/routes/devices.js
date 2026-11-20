@@ -41,6 +41,12 @@ function device(permission) {
   };
 }
 
+// Sleep-monitor-only routes (C1001 settings, sleep commands, nights): 409 for a fall detector (013).
+function sleepOnly(req, res, next) {
+  if (req.device.product === 'fall') throw E.conflict('NOT_FOR_PRODUCT', 'This is for sleep monitors only');
+  next();
+}
+
 const tz = z.string().trim().min(1).max(60);
 // API.md: an unknown IANA zone is 422 INVALID_TIMEZONE (not a plain 400).
 function checkTz(v) {
@@ -224,11 +230,11 @@ router.patch('/:id', device('settings.edit'), async (req, res) => {
 });
 
 // 3.6 / 3.7 Sensor settings (sent to the sensor, retained + versioned).
-router.get('/:id/sensor-settings', device('settings.edit'), async (req, res) => {
+router.get('/:id/sensor-settings', device('settings.edit'), sleepOnly, async (req, res) => {
   res.json(await settingsSync.get(req.device.id));
 });
 
-router.patch('/:id/sensor-settings', device('settings.edit'), async (req, res) => {
+router.patch('/:id/sensor-settings', device('settings.edit'), sleepOnly, async (req, res) => {
   const body = parse(z.object({
     exitS: z.number().int().min(30).max(3600).optional(),
     liveS: z.number().int().min(1).max(60).optional(),
@@ -254,7 +260,7 @@ router.post('/:id/wifi-setup', device('settings.edit'), async (req, res) => {
 });
 
 // 3.8b "Recalibrate" = recalibrate command (radar reset ~11 s; expires after 30 s offline).
-router.post('/:id/recalibrate', device('settings.edit'), async (req, res) => {
+router.post('/:id/recalibrate', device('settings.edit'), sleepOnly, async (req, res) => {
   const c = await commands.createNow(req.device.id, 'recalibrate', req.user.id);
   await audit(req, { action: 'device.command.recalibrate', targetType: 'device', targetId: req.device.id,
     targetLabel: req.device.serial_no, detail: commands.apiStatus(c.status) });
@@ -263,7 +269,7 @@ router.post('/:id/recalibrate', device('settings.edit'), async (req, res) => {
 
 // 3.8c "End session" = end_session command (firmware 2.5.1): the sensor closes
 // the running sleep session and sends it now. Expires after 30 s offline.
-router.post('/:id/end-session', device('settings.edit'), async (req, res) => {
+router.post('/:id/end-session', device('settings.edit'), sleepOnly, async (req, res) => {
   const c = await commands.createNow(req.device.id, 'end_session', req.user.id);
   await audit(req, { action: 'device.command.end_session', targetType: 'device', targetId: req.device.id,
     targetLabel: req.device.serial_no, detail: commands.apiStatus(c.status) });
@@ -273,7 +279,7 @@ router.post('/:id/end-session', device('settings.edit'), async (req, res) => {
 // 4.1 Nights (main sleeps) for the last `days` sleep dates, or from..to.
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
   .refine((v) => DateTime.fromISO(v).isValid, 'Not a real date');
-router.get('/:id/nights', device('history.view'), async (req, res) => {
+router.get('/:id/nights', device('history.view'), sleepOnly, async (req, res) => {
   const q = parse(z.object({
     days: z.coerce.number().int().min(1).max(90).optional(),
     from: isoDate.optional(),
@@ -294,7 +300,7 @@ router.get('/:id/nights', device('history.view'), async (req, res) => {
 });
 
 // 4.2 One night in detail.
-router.get('/:id/nights/:sleepDate', device('history.view'), async (req, res) => {
+router.get('/:id/nights/:sleepDate', device('history.view'), sleepOnly, async (req, res) => {
   const date = parse(z.object({ sleepDate: isoDate }), req.params).sleepDate;
   const [n] = await sleep.nights(req.device.id, date, date);
   if (!n) throw E.notFound('No sleep recorded for that night');

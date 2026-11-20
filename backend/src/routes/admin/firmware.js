@@ -71,10 +71,14 @@ const releaseView = (r) => ({
 
 // 9.1 Releases, newest first, with how many devices run each one.
 router.get('/firmware', requireStaff('firmware.view'), async (req, res) => {
+  const q = parse(z.object({ product: z.enum(['sleep', 'fall']).optional() }), req.query);   // 014
   const rows = await db.many(
     `SELECT f.*, u.full_name AS uploaded_by_name,
-            (SELECT count(*)::int FROM device_state s WHERE s.fw_version = f.version) AS device_count
-       FROM firmware_releases f LEFT JOIN users u ON u.id = f.uploaded_by ORDER BY f.created_at DESC, f.id DESC`);
+            (SELECT count(*)::int FROM device_state s JOIN devices d ON d.id = s.device_id
+              WHERE s.fw_version = f.version AND d.product = f.product) AS device_count
+       FROM firmware_releases f LEFT JOIN users u ON u.id = f.uploaded_by
+      WHERE ($1::text IS NULL OR f.product = $1)
+      ORDER BY f.created_at DESC, f.id DESC`, [q.product || null]);
   res.json({ items: rows.map(releaseView) });
 });
 
@@ -95,6 +99,18 @@ router.post('/firmware', requireStaff('firmware.upload'), async (req, res) => {
   const file = req.file;
   if (!file || !file.size) throw E.bad('VALIDATION', 'Attach the firmware .bin as "file"', 'file');
   if (file.buffer[0] !== 0xE9) throw E.invalid('NOT_ESP_IMAGE', 'This is not an ESP32 firmware image (first byte must be 0xE9)', 'file');
+  // 014: the boot banner names the product ("Argus Fall Detection" / "Argus Sleep Monitoring",
+  // docs/MANUFACTURING.md §2a), so sleep firmware can't be uploaded as a fall detector release or the other way round.
+  const isFallImage = file.buffer.includes('Fall Detection');
+  if (body.product === 'fall' && !isFallImage) {
+    throw E.invalid('WRONG_PRODUCT_IMAGE', 'This .bin is not fall detector firmware (its banner must say "Argus Fall Detection")', 'file');
+  }
+  if (body.product === 'sleep' && isFallImage) {
+    throw E.invalid('WRONG_PRODUCT_IMAGE', 'This .bin is fall detector firmware. Pick "Fall detector" as the product', 'file');
+  }
+  if (body.product === 'fall' && chip !== 'ESP32-S3') {
+    throw E.invalid('WRONG_CHIP', 'Fall detector firmware is built for the ESP32-S3', 'chipModel');
+  }
   const sha256 = sha(file.buffer);
   const merged = req.factoryFile;
   if (merged && chip === 'ESP8266') throw E.bad('VALIDATION', 'ESP8266 needs only the one .bin', 'factoryFile');
@@ -268,11 +284,11 @@ router.post('/ota/rollouts', requireStaff('firmware.rollout'), async (req, res) 
 });
 
 const rolloutCols = `r.id, r.target, r.target_percent, r.target_from_version, r.window_from, r.window_to, r.status,
-  r.notes, r.created_at, r.finished_at, f.version, f.id AS release_id, u.full_name AS created_by_name`;
+  r.notes, r.created_at, r.finished_at, f.version, f.product, f.id AS release_id, u.full_name AS created_by_name`;
 const rolloutFrom = `FROM ota_rollouts r JOIN firmware_releases f ON f.id = r.release_id LEFT JOIN users u ON u.id = r.created_by`;
 async function rolloutView(r) {
   return {
-    id: r.id, releaseId: r.release_id, version: r.version, target: r.target, percent: r.target_percent,
+    id: r.id, releaseId: r.release_id, version: r.version, product: r.product, target: r.target, percent: r.target_percent,
     fromVersion: r.target_from_version,
     installWindow: r.window_from ? { from: r.window_from.slice(0, 5), to: r.window_to.slice(0, 5) } : null,
     createdBy: r.created_by_name, createdAt: r.created_at, finishedAt: r.finished_at, status: r.status, notes: r.notes,
@@ -282,7 +298,9 @@ async function rolloutView(r) {
 
 // 9.6 List
 router.get('/ota/rollouts', requireStaff('firmware.view'), async (req, res) => {
-  const rows = await db.many(`SELECT ${rolloutCols} ${rolloutFrom} ORDER BY r.id DESC LIMIT 100`);
+  const q = parse(z.object({ product: z.enum(['sleep', 'fall']).optional() }), req.query);   // 014
+  const rows = await db.many(`SELECT ${rolloutCols} ${rolloutFrom} WHERE ($1::text IS NULL OR f.product = $1)
+    ORDER BY r.id DESC LIMIT 100`, [q.product || null]);
   res.json({ items: await Promise.all(rows.map(rolloutView)) });
 });
 

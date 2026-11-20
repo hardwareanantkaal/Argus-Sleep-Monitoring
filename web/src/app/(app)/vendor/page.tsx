@@ -10,6 +10,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { FallCardBody } from '@/components/FallDevice';
 import { useAuth, useToast } from '@/components/Providers';
 import { RequireVendor } from '@/components/Shell';
 import { Async, Head, StatusPill, TzSelect, useApi } from '@/components/ui';
@@ -86,7 +87,7 @@ function Inner() {
             if (d.stage !== 'in_use') return (
               <div className="card dcard" key={d.id}>
                 <div className="between" style={{ alignItems: 'flex-start' }}>
-                  <div className="stack" style={{ gap: 2, minWidth: 0 }}><h2 className="mono">{d.serial}</h2><span className="xs muted">In stock since {day(d.stockedAt)}</span></div>
+                  <div className="stack" style={{ gap: 2, minWidth: 0 }}><h2 className="mono">{d.serial}</h2><span className="xs muted">{d.product === 'fall' ? 'Fall detector · ' : ''}In stock since {day(d.stockedAt)}</span></div>
                   <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><StagePill stage="stock" /><StatusPill online={on} /></div>
                 </div>
                 {using === d.id
@@ -106,11 +107,11 @@ function Inner() {
                 <div className="between" style={{ alignItems: 'flex-start' }}>
                   <div className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <h2>{label(d)}</h2>
-                    <span className="xs muted">{[d.room, d.serial].filter(Boolean).join(' · ')}</span>
+                    <span className="xs muted">{[d.product === 'fall' ? 'Fall detector' : null, d.room, d.serial].filter(Boolean).join(' · ')}</span>
                   </div>
                   <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><StagePill stage="in_use" /><StatusPill online={on} /></div>
                 </div>
-                {on && lv ? (
+                {d.product === 'fall' ? <FallCardBody on={on} canLive lv={lv} lastSeen={status[d.id]?.lastSeenAt ?? d.status.lastSeenAt} /> : on && lv ? (
                   <div className="vitals">
                     <div className="vital"><span>Heart</span><b>{lv.hr || '—'}<span> bpm</span></b></div>
                     <div className="vital"><span>Breath</span><b>{lv.br || '—'}<span> /min</span></b></div>
@@ -129,7 +130,8 @@ function Inner() {
                   </div>
                   <div className="row" style={{ gap: 6 }}>
                     <Link className="btn ghost sm" href={`/vendor/access?device=${d.id}`}>Access</Link>
-                    <Link className="btn ghost sm" href={`/history/${d.id}`}>History</Link>
+                    {d.product === 'fall' ? <Link className="btn ghost sm" href={`/devices/${d.id}`}>Falls</Link>
+                      : <Link className="btn ghost sm" href={`/history/${d.id}`}>History</Link>}
                     <Link className="btn sm" href={`/devices/${d.id}`}>Live</Link>
                   </div>
                 </div>

@@ -70,6 +70,10 @@ const ruleBody = z.object({
 
 rules.put('/:id/alert-rules', device('settings.edit'), async (req, res) => {
   const body = parse(z.object({ rules: z.array(ruleBody).min(1).max(TYPES.length) }), req.body);
+  // 013: a fall detector has no sleep values, so only the offline rule applies
+  if (req.device.product === 'fall' && body.rules.some((r) => r.type !== 'device_offline')) {
+    throw E.invalid('BAD_RULE', 'A fall detector only has the offline rule', 'type');
+  }
   for (const r of body.rules) {
     if (r.type === 'breath_low' && r.low == null) throw E.invalid('BAD_RULE', 'Breathing rule needs a low value', 'low');
     if (r.type === 'hr_out_of_range' && (r.low == null || r.high == null || r.low >= r.high)) {

@@ -135,7 +135,7 @@ test('falls endpoint: fall devices only, needs history.view', async () => {
 
 test('register a fall detector; claiming it creates only the offline alert rule', async () => {
   const admin = await staff('Owner');
-  const reg = await registerDevice(admin.c, { product: 'fall' });
+  const reg = await registerDevice(admin.c, { product: 'fall', hwModel: 'ARG-F1 rev A' });
   assert.equal(reg.device.product, 'fall');
   const list = await admin.c.get('/admin/devices?product=fall&limit=100');
   assert.ok(list.body.items.some((x) => x.id === reg.device.id && x.product === 'fall'));

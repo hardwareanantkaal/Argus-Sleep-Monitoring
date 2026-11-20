@@ -3,7 +3,7 @@
 // Small building blocks shared by the screens, matching the mockup markup and classes.
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { errText, get } from '@/lib/api';
 import { COUNTRIES, placeName, sameZone } from '@/lib/format';
@@ -24,13 +24,23 @@ export function useApi<T>(path: string | null) {
   const [data, setData] = useState<T | undefined>(undefined);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(!!path);
+  // Only the answer for the latest path counts: when the path changes (e.g. a product tab), a slower
+  // answer for the old path must not overwrite the new one.
+  const latest = useRef(path);
+  latest.current = path;
   const load = useCallback(async () => {
     if (!path) return;
     setLoading(true);
     setError(null);
-    try { setData(await get<T>(path)); } catch (e) { setError(e); } finally { setLoading(false); }
+    try { const r = await get<T>(path); if (latest.current === path) setData(r); }
+    catch (e) { if (latest.current === path) setError(e); }
+    finally { if (latest.current === path) setLoading(false); }
   }, [path]);
-  useEffect(() => { load(); }, [load]);
+  const shown = useRef(path);
+  useEffect(() => {
+    if (shown.current !== path) { shown.current = path; setData(undefined); }   // a new path: don't show the old one's data
+    load();
+  }, [load, path]);
   return { data, setData, error, loading, reload: load };
 }
 

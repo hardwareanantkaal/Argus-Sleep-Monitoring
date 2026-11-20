@@ -4,6 +4,7 @@
 
 import Link from 'next/link';
 import { Icon } from '@/components/Icon';
+import { FallCardBody } from '@/components/FallDevice';
 import { Async, Head, ScoreRing, StatusPill, useApi } from '@/components/ui';
 import { ago, dur, presenceText } from '@/lib/format';
 import { whenLocal } from '@/components/vendor';
@@ -100,13 +101,3 @@ export default function DevicesPage() {
 }
 
 /** Fall detector card: room occupied + radar health from the "alive" message (live only). */
-function FallCardBody({ on, canLive, lv, lastSeen }: { on: boolean; canLive: boolean; lv: LiveValues | null | undefined; lastSeen: string | null }) {
-  if (!on) return <div className="note"><Icon name="off" /><span>Last seen {ago(lastSeen).toLowerCase()}. Check that it is plugged in and on Wi-Fi.</span></div>;
-  if (!canLive || !lv) return <div className="note"><Icon name="info" /><span>{canLive ? 'Waiting for the first report…' : 'Open it to see falls.'}</span></div>;
-  return (
-    <div className="vitals">
-      <div className="vital"><span>Presence</span><b style={{ fontSize: 15, paddingBlock: 3 }}>{lv.pr == null ? '—' : lv.pr ? 'Yes' : 'No'}</b></div>
-      <div className="vital"><span>Radar</span><b style={{ fontSize: 15, paddingBlock: 3 }}>{lv.radar == null ? '—' : lv.radar ? 'OK' : 'Not responding'}</b></div>
-    </div>
-  );
-}

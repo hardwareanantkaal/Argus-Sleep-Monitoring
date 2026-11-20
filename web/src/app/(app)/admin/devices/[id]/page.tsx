@@ -8,12 +8,13 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { AdminStatusPill, printStickers, Sticker, useAdminSocket, type StickerData } from '@/components/admin';
 import { Icon } from '@/components/Icon';
+import { FallTable } from '@/components/FallDevice';
 import { useAuth, useToast } from '@/components/Providers';
 import { RequireStaff } from '@/components/Shell';
 import { Async, ErrorBox, Head, useApi } from '@/components/ui';
 import { ApiError, del, errText, get, patch, post } from '@/lib/api';
 import { ago, dateTime, day, prettyPhone, uptime } from '@/lib/format';
-import type { AdminDeviceDetail, CommandRow, CommandType, DeviceEvent, List } from '@/lib/types';
+import type { AdminDeviceDetail, CommandRow, CommandType, DeviceEvent, FallList, List } from '@/lib/types';
 
 const CMDS: [CommandType, string][] = [
   ['reboot', 'Restart the sensor'],
@@ -23,6 +24,8 @@ const CMDS: [CommandType, string][] = [
   ['recalibrate', 'Recalibrate radar (about 11 s)'],
   ['end_session', 'End the running sleep session now (fw 2.5.1+)'],
 ];
+// Commands only the sleep monitor (C1001) understands; the server refuses them for a fall detector.
+const SLEEP_ONLY = new Set<CommandType>(['recalibrate', 'end_session']);
 const STATUS_PILL: Record<CommandRow['status'], [string, string]> = {
   queued: ['Queued', ''], sent: ['Sent', 'warn'], acked: ['Acked', 'ok'], done: ['Done', 'ok'], failed: ['Failed', 'bad'], expired: ['Expired', 'bad'],
 };
@@ -94,7 +97,7 @@ function Inner() {
               <dt>Last seen</dt><dd>{c.online ? 'Now' : ago(c.lastSeenAt)}</dd>
               <dt>Firmware</dt><dd className="mono">{c.fw || '—'}</dd>
               <dt>Time zone</dt><dd className="mono">{d.tz || '—'}</dd>
-              <dt>New night at</dt><dd className="num">{d.sleepCutoff}</dd>
+              {d.product !== 'fall' && <><dt>New night at</dt><dd className="num">{d.sleepCutoff}</dd></>}
               <dt>IP</dt><dd className="mono">{c.ip || '—'}</dd>
               <dt>Wi-Fi</dt><dd>{c.wifiSsid || '—'}</dd>
               <dt>Signal</dt><dd className="num">{c.rssi != null ? `${c.rssi} dBm` : '—'}</dd>
@@ -108,7 +111,7 @@ function Inner() {
                 <span className="small">{d.shares.length} {d.shares.length === 1 ? 'person' : 'people'} shared</span>
                 {d.shares.map((s) => <span key={s.phone} className="xs muted">· {s.fullName}</span>)}
               </div> : <p className="small muted">Not claimed yet. {d.claimCodeActive ? 'Its claim code is on the sticker.' : 'No active claim code: make a new one.'}</p>}
-              {d.sensorSettings && <>
+              {d.product !== 'fall' && d.sensorSettings && <>
                 <div className="divider" style={{ marginBlock: 12 }} />
                 <dl className="kv xs">
                   <dt>Bed-exit timeout</dt><dd className="num">{d.sensorSettings.exitS} s</dd>
@@ -119,13 +122,15 @@ function Inner() {
             </div>
           </div>
 
+          {d.product === 'fall' && <AdminFalls id={d.id} tz={d.tz} />}
+
           <div className="g2">
             <div className="card">
               <div className="ch"><div className="t"><h2>Send a command</h2><span className="xs muted">Goes to the device over MQTT</span></div></div>
-              {!c.online && <div className="note" style={{ marginBottom: 12 }}><Icon name="off" /><span>Device is offline. Commands wait up to 24 h until it reconnects; <span className="mono">config_mode</span> and <span className="mono">recalibrate</span> expire after 30 s.</span></div>}
+              {!c.online && <div className="note" style={{ marginBottom: 12 }}><Icon name="off" /><span>Device is offline. Commands wait up to 24 h until it reconnects; <span className="mono">config_mode</span>{d.product !== 'fall' && <> and <span className="mono">recalibrate</span></>} expire after 30 s.</span></div>}
               {pending && <div className="confirm" style={{ marginBottom: 12 }}><span>Send <b className="mono">{pending}</b> to {d.serial}?</span><span className="sp" />
                 <button className="btn sm" onClick={() => send(pending)}>Send</button><button className="btn ghost sm" onClick={() => setPending(null)}>Cancel</button></div>}
-              <div className="cmds">{CMDS.map(([k, t]) => <button key={k} className="cmd" disabled={!cmdOk || d.isDisabled} onClick={() => setPending(k)}><b>{k}</b><span>{t}</span></button>)}</div>
+              <div className="cmds">{CMDS.filter(([k]) => d.product !== 'fall' || !SLEEP_ONLY.has(k)).map(([k, t]) => <button key={k} className="cmd" disabled={!cmdOk || d.isDisabled} onClick={() => setPending(k)}><b>{k}</b><span>{t}</span></button>)}</div>
               {!cmdOk && <p className="xs muted" style={{ marginTop: 10 }}>Your role cannot send commands (needs devices.command).</p>}
             </div>
             <div className="card"><h2 style={{ marginBottom: 12 }}>Command history</h2>
@@ -205,5 +210,16 @@ function Inner() {
         </div>
       );
     }}</Async>
+  );
+}
+
+/** Fall detector: its stored falls (API.md §4b, admin copy). */
+function AdminFalls({ id, tz }: { id: string; tz: string | null }) {
+  const q = useApi<FallList>(`/admin/devices/${id}/falls?limit=50`);
+  return (
+    <div className="card" style={{ marginBottom: 18 }}><h2 style={{ marginBottom: 12 }}>Falls</h2>
+      <Async q={q}>{(r) => r.items.some((e) => e.kind === 'fall') ? <FallTable items={r.items} tz={tz || 'UTC'} />
+        : <p className="small muted">No falls recorded.</p>}</Async>
+    </div>
   );
 }

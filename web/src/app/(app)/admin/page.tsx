@@ -30,8 +30,10 @@ function Inner() {
         const fwTotal = d.fwVersions.reduce((a, f) => a + f.count, 0) || 1;
         return <>
           <div className="tiles">
-            <div className="card tile"><span className="label">Registered devices</span><div className="v">{c.registered}</div><span className="xs muted">+{c.registeredThisWeek} this week</span></div>
-            <div className="card tile"><span className="label">Online now</span><div className="v" style={{ color: 'var(--ok)' }}>{c.online}</div><span className="xs muted">{Math.round((c.online / claimed) * 100)}% · {c.offline} offline, {c.unclaimed} not claimed{c.disabled ? `, ${c.disabled} disabled` : ''}</span></div>
+            <div className="card tile"><span className="label">Registered devices</span><div className="v">{c.registered}</div><span className="xs muted">+{c.registeredThisWeek} this week</span>
+              {d.byProduct && <div className="xs muted" style={{ marginTop: 4 }}>Sleep monitors {d.byProduct.sleep.registered} · Fall detectors {d.byProduct.fall.registered}</div>}</div>
+            <div className="card tile"><span className="label">Online now</span><div className="v" style={{ color: 'var(--ok)' }}>{c.online}</div><span className="xs muted">{Math.round((c.online / claimed) * 100)}% · {c.offline} offline, {c.unclaimed} not claimed{c.disabled ? `, ${c.disabled} disabled` : ''}</span>
+              {d.byProduct && <div className="xs muted" style={{ marginTop: 4 }}>Online: sleep {d.byProduct.sleep.online} · fall {d.byProduct.fall.online}</div>}</div>
             <div className="card tile"><span className="label">Customers</span><div className="v">{c.customers}</div><span className="xs muted">+{c.customersThisWeek} this week</span></div>
             <div className="card tile"><span className="label">OTA updates</span><div className="v">{c.rolloutsRunning}<small>running</small></div>{can('firmware.view') && <Link className="xs" href="/admin/firmware">See OTA updates</Link>}</div>
           </div>
@@ -47,8 +49,8 @@ function Inner() {
               <h2 style={{ marginBottom: 14 }}>Firmware in the field</h2>
               <div className="stagelist">
                 {d.fwVersions.map((f) => (
-                  <div className="r" key={f.version} style={{ gridTemplateColumns: '88px minmax(0,1fr) 40px' }}>
-                    <span className="mono small">{f.version}</span>
+                  <div className="r" key={`${f.product}-${f.version}`} style={{ gridTemplateColumns: '88px minmax(0,1fr) 40px' }}>
+                    <span className="mono small" title={f.product === 'fall' ? 'Fall detector' : 'Sleep monitor'}>{f.version}{f.product === 'fall' ? <span className="xs muted"> fall</span> : null}</span>
                     <div className="track"><i style={{ width: `${(f.count / fwTotal) * 100}%`, background: 'var(--accent)' }} /></div>
                     <b className="num" style={{ textAlign: 'right' }}>{f.count}</b>
                   </div>

@@ -24,7 +24,8 @@ test('a good board passes every check once presence is seen', () => {
   c.startPresence(10);
   c.feed('radar:OK  presence:1  bed:in  radarState:ok  motion:some  range:80', 14);
   assert.equal(c.allPassed(), true);
-  assert.deepEqual(c.toList().map((x) => x.ok), [true, true, true, true, true, true]);
+  assert.deepEqual(c.toList().map((x) => x.ok), [true, true, true, true, true, true, true]);
+  assert.equal(c.ck.product.value, 'Sleep Monitoring');
 });
 
 test('wrong version, wrong MAC, low heap and crash fail; time limits apply', () => {
@@ -61,4 +62,39 @@ test('test only (not flashed): version is shown, or compared with the selected r
   const c2 = createChecker({ version: null, mac: '348518a10f22' });
   c2.tick(11);
   assert.equal(c2.ck.boot.state, 'bad');
+});
+
+// 014: the fall detector (docs/MANUFACTURING.md §2a serial contract)
+const FALL_BOOT = [
+  '===== Argus Fall Detection v0.1.0 booting (partition app0) =====',
+  '[Argus] deviceId: 348518a10f22',
+  '[RADAR] cfg sent (centermount1.cfg, 48 lines)',
+  '[RADAR] link up',
+  '[FALL] radar:OK presence:0 tracks:0 preset:MED heap:182344 mqtt:connected',
+];
+
+test('fall detector: same core tests, fall tiles, presence from tracking', () => {
+  const c = createChecker({ version: '0.1.0', mac: '348518a10f22', product: 'fall' });
+  assert.equal(c.list.find((x) => x.id === 'radar')!.hint, 'IWR6843 sends frames within 60 s');
+  FALL_BOOT.forEach((l, i) => c.feed(l, 1 + i));
+  for (const id of ['boot', 'product', 'version', 'mac', 'heap', 'radar'] as const) assert.equal(c.ck[id].state, 'ok', id);
+  assert.deepEqual([c.vals.tracks, c.vals.preset, c.vals.mqtt], [0, 'MED', 'connected']);
+  c.startPresence(8);
+  c.feed('[FALL] radar:OK presence:1 tracks:1 preset:MED heap:182000 mqtt:connected', 12);
+  assert.equal(c.allPassed(), true);
+  assert.equal(c.vals.tracks, 1);
+});
+
+test('wrong product firmware fails the board (both ways)', () => {
+  const f = createChecker({ version: null, mac: '348518a10f22', product: 'fall' });
+  BOOT.forEach((l, i) => f.feed(l, i));
+  assert.equal(f.ck.product.state, 'bad');
+  assert.equal(f.ck.product.value, 'Sleep Monitoring firmware, not Fall Detection');
+  assert.equal(f.firstFailed(), 'product');
+  const s = createChecker({ version: null, mac: '348518a10f22', product: 'sleep' });
+  FALL_BOOT.forEach((l, i) => s.feed(l, i));
+  assert.equal(s.ck.product.state, 'bad');
+  const n = createChecker({ version: null, mac: '348518a10f22', product: 'fall' });
+  n.tick(11);
+  assert.equal(n.ck.product.state, 'bad');
 });

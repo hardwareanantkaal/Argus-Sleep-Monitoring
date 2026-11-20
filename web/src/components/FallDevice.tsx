@@ -84,7 +84,7 @@ export function FallDevice({ d, online, lastSeen, lv, links, sub, back, until }:
   );
 }
 
-function FallTable({ items, tz }: { items: FallEvent[]; tz: string }) {
+export function FallTable({ items, tz }: { items: FallEvent[]; tz: string }) {
   const falls = items.filter((e) => e.kind === 'fall');
   return (
     <div className="tbl"><table>
@@ -98,5 +98,17 @@ function FallTable({ items, tz }: { items: FallEvent[]; tz: string }) {
         </tr>
       ))}</tbody>
     </table></div>
+  );
+}
+
+/** The fall detector's body on a device card (customer and vendor lists). */
+export function FallCardBody({ on, canLive, lv, lastSeen }: { on: boolean; canLive: boolean; lv: LiveValues | null | undefined; lastSeen: string | null }) {
+  if (!on) return <div className="note"><Icon name="off" /><span>Last seen {ago(lastSeen).toLowerCase()}. Check that it is plugged in and on Wi-Fi.</span></div>;
+  if (!canLive || !lv) return <div className="note"><Icon name="info" /><span>{canLive ? 'Waiting for the first report…' : 'Open it to see falls.'}</span></div>;
+  return (
+    <div className="vitals">
+      <div className="vital"><span>Presence</span><b style={{ fontSize: 15, paddingBlock: 3 }}>{lv.pr == null ? '—' : lv.pr ? 'Yes' : 'No'}</b></div>
+      <div className="vital"><span>Radar</span><b style={{ fontSize: 15, paddingBlock: 3 }}>{lv.radar == null ? '—' : lv.radar ? 'OK' : 'Not responding'}</b></div>
+    </div>
   );
 }

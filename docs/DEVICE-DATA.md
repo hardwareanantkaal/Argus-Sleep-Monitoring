@@ -229,6 +229,8 @@ EMA-smoothed height, peak-to-now drop, `LOW` / `MED` / `HIGH` presets). The serv
 - **Still on the shared `argus/<d>/` topics:** `info` (publish), `cmd` / `cmd/ack`, `logs`, `ota` / `ota/status`.
   A fall device may NOT publish `argus/<d>/state`, `event`, `session` or `settings/ack` (broker ACL refuses),
   and a sleep device may not use `fall/<d>/...`.
+- **Boot banner and serial output:** `===== Argus Fall Detection vX.Y.Z booting =====` and the lines in
+  `docs/MANUFACTURING.md` §2a. The firmware upload and the station tests check the words `Fall Detection`.
 - **Hardware status:** the radar module is not available yet (the old one is damaged), so these messages
   are the contract for the firmware. Fields marked *optional* may be left out if the hardware can't give them.
 

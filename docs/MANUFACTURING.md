@@ -28,7 +28,7 @@ Upload limit through Nginx is 8 MB per request: fine for 4 MB-flash boards (1.3 
 
 ## 2. Factory team: the Manufacturing screen
 
-Menu **Manufacturing**. First press **Connect board** (top card) and pick the board's COM port; close Arduino IDE first. The card then shows the chip, the MAC and what was done to the board. Then use any of the three tabs, in any order:
+Menu **Manufacturing**. First pick the **Product** (Sleep monitor / Fall detector): the firmware list, the tests, the live values and the hardware models all follow it, and it is locked while a board is being flashed or tested (press **Next board** to change). Then press **Connect board** (top card) and pick the board's COM port; close Arduino IDE first. The card then shows the chip, the MAC and what was done to the board. Then use any of the three tabs, in any order:
 
 - **Flash firmware.** The default release for that chip is selected. **Erase and flash** writes the whole image from `0x0` (also erases old Wi-Fi settings and data), about 30–60 s for 4 MB. The image downloads once per release (sha256 checked).
 - **Serial monitor & test.** **Open serial monitor** resets the board and shows its output at 115200 baud, with live values (radar, presence, heart rate, heap…). The tests tick by themselves:
@@ -36,6 +36,7 @@ Menu **Manufacturing**. First press **Connect board** (top card) and pick the bo
   | Test | Pass when | Limit |
   |---|---|---|
   | Boots | `===== … vX.Y.Z booting` appears | 10 s |
+  | Firmware type | the banner names the product picked above (`Argus Sleep Monitoring` / `Argus Fall Detection`) | 10 s |
   | Firmware version | the version in the banner = the release flashed on this screen. Not flashed here (or the board was replugged): compared with the release picked on the Flash tab, a different version is only a warning | 10 s |
   | Device ID | `[Argus] deviceId:` = the MAC read over USB | 15 s |
   | Free memory | `heap:` in the telemetry ≥ 40 000 | 25 s |
@@ -47,7 +48,32 @@ Menu **Manufacturing**. First press **Connect board** (top card) and pick the bo
 
 **Next board** (top card) saves the test result with the last 16 KB of the serial log (pass if every test passed, fail if one failed) and clears the screen. Unplugging the board saves it as aborted.
 
+**Checks by product (014).** A fall detector must be an ESP32-S3. A board already registered as the other product shows a warning with a **Switch** button; flash, test and register stay blocked until the product matches. The server refuses the same mistakes (`WRONG_PRODUCT`, `WRONG_CHIP`).
+
 A board without USB, or many at once: the Register tab links to the old screen (type the MAC or upload a CSV).
+
+## 2a. Fall detector: serial output the station expects
+
+The fall firmware is not written yet; it must print these lines at 115200 baud so the tests work:
+
+```
+===== Argus Fall Detection v0.1.0 booting (partition app0) =====
+[Argus] deviceId: 348518a10f22
+[RADAR] cfg sent (centermount1.cfg, 48 lines)
+[RADAR] link up                       ← the first good IWR6843 frame (magic word + TLVs)
+[FALL] radar:OK presence:1 tracks:1 preset:MED heap:182344 mqtt:connected   ← every 5 s
+```
+
+| Test | Pass when | Limit |
+|---|---|---|
+| Boots | the banner appears | 10 s |
+| Firmware type | the banner says **Fall Detection** (sleep firmware on a fall board fails, and the other way round; the sleep banner is `Argus Sleep Monitoring`) | 10 s |
+| Firmware version, Device ID, Free memory | same as the sleep monitor | |
+| Radar link | `[RADAR] link up` or `radar:OK` | 60 s |
+| Presence | press **Start**, walk in front of the radar; `presence:1` | 30 s (can be skipped) |
+
+Live tiles: Radar, Presence, People tracked (`tracks:`), Sensitivity (`preset:`), Free heap, MQTT.
+The firmware upload also checks the banner text: a fall release must contain `Fall Detection`.
 
 ## 3. Who can do what
 

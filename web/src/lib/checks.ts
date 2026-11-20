@@ -1,17 +1,32 @@
-// Bench checks for the manufacturing station (docs/API.md §9b, docs/MANUFACTURING.md §4).
+// Bench checks for the manufacturing station (docs/API.md §9b, docs/MANUFACTURING.md §2).
 // Fed with the board's serial output, line by line. Matches what firmware/sleeplamp prints
-// (sleeplamp.ino setup() and printTelemetry(), Sensor.ino "[RADAR] link up").
-// No browser APIs, so it can be tested with plain Node (web/test/checks.test.mjs).
+// (sleeplamp.ino setup() and printTelemetry(), Sensor.ino "[RADAR] link up"), and the serial
+// contract for the fall detector firmware (docs/MANUFACTURING.md §2a):
+//   ===== Argus Fall Detection v0.1.0 booting (partition app0) =====
+//   [Argus] deviceId: 348518a10f22
+//   [RADAR] link up                      (first good IWR6843 frame after the cfg was sent)
+//   [FALL] radar:OK presence:1 tracks:1 preset:MED heap:182344 mqtt:connected   (every 5 s)
+// No browser APIs, so it can be tested with plain Node (web/test/checks.test.mts).
 
-export type CheckId = 'boot' | 'version' | 'mac' | 'heap' | 'radar' | 'presence';
-export const CHECKS: { id: CheckId; label: string; hint: string }[] = [
-  { id: 'boot', label: 'Boots', hint: 'Banner line within 10 s' },
-  { id: 'version', label: 'Firmware version', hint: 'Same as the flashed release' },
-  { id: 'mac', label: 'Device ID', hint: 'Same MAC as read over USB' },
-  { id: 'heap', label: 'Free memory', hint: 'At least 40 000 bytes' },
-  { id: 'radar', label: 'Radar link', hint: 'C1001 answers within 60 s' },
-  { id: 'presence', label: 'Presence', hint: 'Sit or wave in front, within 30 s' },
-];
+export type Product = 'sleep' | 'fall';
+export type CheckId = 'boot' | 'product' | 'version' | 'mac' | 'heap' | 'radar' | 'presence';
+export interface CheckDef { id: CheckId; label: string; hint: string }
+const PRODUCT_NAME: Record<Product, string> = { sleep: 'Sleep Monitoring', fall: 'Fall Detection' };
+/** The tests for one product, in the order they are shown and saved. */
+export function checksFor(product: Product): CheckDef[] {
+  const fall = product === 'fall';
+  return [
+    { id: 'boot', label: 'Boots', hint: 'Banner line within 10 s' },
+    { id: 'product', label: 'Firmware type', hint: `Banner says “${PRODUCT_NAME[product]}”` },
+    { id: 'version', label: 'Firmware version', hint: 'Same as the flashed release' },
+    { id: 'mac', label: 'Device ID', hint: 'Same MAC as read over USB' },
+    { id: 'heap', label: 'Free memory', hint: 'At least 40 000 bytes' },
+    { id: 'radar', label: 'Radar link', hint: fall ? 'IWR6843 sends frames within 60 s' : 'C1001 answers within 60 s' },
+    { id: 'presence', label: 'Presence', hint: fall ? 'Walk in front of the radar, within 30 s' : 'Sit or wave in front, within 30 s' },
+  ];
+}
+/** Sleep monitor tests (kept for older callers). */
+export const CHECKS = checksFor('sleep');
 
 export const LIMITS = { bootS: 10, macS: 15, heapS: 25, radarS: 60, presenceS: 30, minHeap: 40000 };
 
@@ -23,18 +38,23 @@ const RE = {
   vitals: /HR:(\d+)\s*bpm\s+resp:(\d+)/,
   heap: /heap:(\d+)/,
   mqtt: /mqtt:(\w+)/,
+  tracks: /tracks:(\d+)/,
+  preset: /preset:(LOW|MED|HIGH)\b/,
+  fallBanner: /Fall Detection/i,
   crash: /Guru Meditation|Backtrace:|abort\(\) was called|Brownout detector/i,
 };
 
 export type CheckState = 'wait' | 'run' | 'ok' | 'bad' | 'skip';
 export interface CheckStatus { ok: boolean | null; state: CheckState; value: string; ms?: number }
-export interface LiveVals { radar?: string; pr?: number; hr?: number; br?: number; heap?: number; mqtt?: string }
+export interface LiveVals { radar?: string; pr?: number; hr?: number; br?: number; heap?: number; mqtt?: string; tracks?: number; preset?: string }
 export interface CheckResult { id: CheckId; ok: boolean | null; value?: string; ms?: number }
 
 /** expect.version: the release the board should run. `from` says where it comes from: 'flashed' (flashed on
  *  this screen) or 'selected' (not flashed here: compared with the release chosen on the Flash tab).
  *  null: nothing to compare with, so the version read from the banner is only shown. */
-export function createChecker(expect: { version: string | null; mac: string; from?: 'flashed' | 'selected' }) {
+export function createChecker(expect: { version: string | null; mac: string; from?: 'flashed' | 'selected'; product?: Product }) {
+  const product: Product = expect.product || 'sleep';
+  const CHECKS = checksFor(product);
   const macId = (expect.mac || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
   const ck = Object.fromEntries(CHECKS.map((c) => [c.id, { ok: null, state: 'wait', value: '' }])) as Record<CheckId, CheckStatus>;
   ck.boot.state = 'run';
@@ -52,6 +72,8 @@ export function createChecker(expect: { version: string | null; mac: string; fro
   };
 
   return {
+    product,
+    list: CHECKS,
     ck,
     vals,
     versionHint,
@@ -60,6 +82,9 @@ export function createChecker(expect: { version: string | null; mac: string; fro
       let m: RegExpMatchArray | null;
       if ((m = line.match(RE.banner))) {
         set('boot', true, `${t.toFixed(1)} s`, t);
+        // Sleep firmware on a fall detector board (or the other way round) fails the board.
+        const got: Product = RE.fallBanner.test(line) ? 'fall' : 'sleep';
+        set('product', got === product, got === product ? PRODUCT_NAME[got] : `${PRODUCT_NAME[got]} firmware, not ${PRODUCT_NAME[product]}`, t);
         if (expect.version && m[1] === expect.version) set('version', true, `v${m[1]}`, t);
         // Flashed here and another version boots: fail. Not flashed here: only a warning, the board may run an older build.
         else if (expect.version && expect.from !== 'selected') set('version', false, `v${m[1]}, expected v${expect.version}`, t);
@@ -84,6 +109,8 @@ export function createChecker(expect: { version: string | null; mac: string; fro
         set('heap', vals.heap >= LIMITS.minHeap, `${vals.heap.toLocaleString('en-US')} B`, t);
       }
       if ((m = line.match(RE.mqtt))) vals.mqtt = m[1];
+      if ((m = line.match(RE.tracks))) vals.tracks = Number(m[1]);
+      if ((m = line.match(RE.preset))) vals.preset = m[1];
       // A crash, even after a good boot, fails the board.
       if (RE.crash.test(line)) Object.assign(ck.boot, { ok: false, state: 'bad', value: 'crashed' });
     },
@@ -91,6 +118,7 @@ export function createChecker(expect: { version: string | null; mac: string; fro
     tick(t: number) {
       if (ck.boot.state === 'run' && t > LIMITS.bootS) set('boot', false, `no banner in ${LIMITS.bootS} s`, t);
       if (ck.version.state === 'run' && t > LIMITS.bootS) set('version', false, 'no banner', t);
+      if (ck.product.state === 'wait' && t > LIMITS.bootS) set('product', false, 'no banner', t);
       if ((ck.mac.state === 'wait' || ck.mac.state === 'run') && t > LIMITS.macS) set('mac', false, 'no deviceId line', t);
       if (ck.heap.state === 'wait' && t > LIMITS.heapS) set('heap', false, 'no telemetry line', t);
       if (ck.radar.state === 'run' && t > LIMITS.radarS) set('radar', false, `no answer in ${LIMITS.radarS} s`, t);

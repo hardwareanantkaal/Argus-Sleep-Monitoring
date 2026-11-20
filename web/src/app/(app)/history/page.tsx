@@ -11,7 +11,7 @@ import type { DeviceCard } from '@/lib/types';
 export default function HistoryIndex() {
   const q = useApi<{ items: DeviceCard[] }>('/devices');
   const router = useRouter();
-  const first = q.data?.items.find((d) => d.myPermissions.includes('history.view'));
+  const first = q.data?.items.find((d) => d.product !== 'fall' && d.myPermissions.includes('history.view'));
   useEffect(() => { if (first) router.replace(`/history/${first.id}`); }, [first, router]);
   return (
     <div className="wrap">

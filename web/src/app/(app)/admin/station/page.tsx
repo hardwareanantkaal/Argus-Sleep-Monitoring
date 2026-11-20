@@ -14,16 +14,14 @@ import { useAuth } from '@/components/Providers';
 import { RequireStaff } from '@/components/Shell';
 import { Head } from '@/components/ui';
 import { ApiError, errText, get, patch, post, qs, refreshSession } from '@/lib/api';
-import { CHECKS, createChecker, type Checker } from '@/lib/checks';
+import { createChecker, type Checker } from '@/lib/checks';
 import { bytes } from '@/lib/format';
 import { connectBoard, flashImage, leaveBootloader, Monitor, releaseBoard, serialSupported, type Board } from '@/lib/serial';
-import type { FactoryRelease, FactoryRun, FactoryRunList, RegisterResult } from '@/lib/types';
+import { CHIPS_BY_PRODUCT, HW_BY_PRODUCT, PRODUCTS, productLabel } from '@/lib/products';
+import type { FactoryRelease, FactoryRun, FactoryRunList, Product, RegisterResult } from '@/lib/types';
 
 const LOG_TAIL = 16384;
 const MAX_LINES = 1500;
-// ARG-S* = sleep monitor, ARG-F* = fall detector (013): the model picks the product.
-const HW_MODELS = ['ARG-S1 rev B', 'ARG-S1 rev A', 'ARG-F1 rev A'];
-const productOf = (hw: string) => (hw.startsWith('ARG-F') ? 'fall' : 'sleep');
 
 const store = {
   get: (k: string, d: string) => { try { return localStorage.getItem(`argus.${k}`) ?? d; } catch { return d; } },
@@ -73,7 +71,10 @@ function Inner() {
   const [run, setRun] = useState<FactoryRun | null>(null);
   const [paused, setPaused] = useState(false);
   const [reg, setReg] = useState<(StickerData & { id: string }) | null>(null);
-  const [hw, setHw] = useState(HW_MODELS[0]);
+  // 014: the product is picked first. Firmware, tests, live values and registration all follow it.
+  const [product, setProduct] = useState<Product>('sleep');
+  const [regProduct, setRegProduct] = useState<Product | null>(null); // product of the earlier registration
+  const [hw, setHw] = useState(HW_BY_PRODUCT.sleep[0]);
   const [batch, setBatch] = useState('');
   const [, setTick] = useState(0);
   const [sendLine, setSendLine] = useState('');
@@ -89,10 +90,38 @@ function Inner() {
   const termRef = useRef<HTMLDivElement>(null);
   runRef.current = run;
 
-  useEffect(() => { setHw(store.get('hwModel', HW_MODELS[0])); setBatch(store.get('batch', '')); }, []);
   useEffect(() => {
-    if (canFlash) get<{ items: FactoryRelease[] }>('/admin/factory/releases').then((r) => setReleases(r.items)).catch((e) => setErr(errText(e)));
-  }, [canFlash]);
+    const p: Product = store.get('product', 'sleep') === 'fall' ? 'fall' : 'sleep';
+    const h = store.get(`hwModel.${p}`, HW_BY_PRODUCT[p][0]);
+    setProduct(p); setHw(HW_BY_PRODUCT[p].includes(h) ? h : HW_BY_PRODUCT[p][0]); setBatch(store.get('batch', ''));
+  }, []);
+  useEffect(() => {
+    if (!canFlash) return;
+    setReleases([]);
+    get<{ items: FactoryRelease[] }>(`/admin/factory/releases${qs({ product })}`).then((r) => setReleases(r.items)).catch((e) => setErr(errText(e)));
+  }, [canFlash, product]);
+  // The default release of this product for the board's chip
+  useEffect(() => {
+    if (!board) { setRelId(null); return; }
+    const mine = releases.filter((r) => r.chipModel === board.chip && (r.product ?? 'sleep') === product);
+    setRelId((mine.find((r) => r.isDefault) || mine[0])?.id ?? null);
+  }, [board, releases, product]);
+
+  const running = run?.result === 'running';
+  const productLocked = !!flash || link === 'monitor' || running || !!reg;
+  const pl = productLabel(product).toLowerCase();
+  // Board and product don't fit: nothing may be flashed, tested or registered until it is fixed.
+  const blocked = !board ? ''
+    : !CHIPS_BY_PRODUCT[product].includes(board.chip) ? `A ${pl} is built on ${CHIPS_BY_PRODUCT[product].join(' / ')}. This board is ${board.chip}.`
+      : regProduct && regProduct !== product ? `This board is registered as ${regSerial}, a ${productLabel(regProduct).toLowerCase()}. Switch the product above to test it.`
+        : '';
+  function pickProduct(p: Product) {
+    if (productLocked || p === product) return;
+    setProduct(p); store.set('product', p);
+    const h = store.get(`hwModel.${p}`, HW_BY_PRODUCT[p][0]);
+    setHw(HW_BY_PRODUCT[p].includes(h) ? h : HW_BY_PRODUCT[p][0]);
+    lines.current = []; partial.current = ''; checker.current = null; setErr('');
+  }
 
   const sec = () => (performance.now() - t0.current) / 1000;
   const addLine = useCallback((text: string, cls = '') => {
@@ -163,7 +192,7 @@ function Inner() {
     if (link === 'monitor' && mon.current) return;
     if (conn.current) { await leaveBootloader(conn.current); await releaseBoard(conn.current); conn.current = null; }
     lines.current = []; partial.current = '';
-    checker.current = createChecker({ ...expect, mac: board!.mac });
+    checker.current = createChecker({ ...expect, mac: board!.mac, product });
     const m = new Monitor(port.current, onSerialText);
     await m.open(115200);
     mon.current = m;
@@ -180,9 +209,9 @@ function Inner() {
       conn.current = b; port.current = b.port; setLink('boot');
       setBoard({ chip: b.chip, desc: b.desc, mac: b.mac });
       const h = await get<FactoryRunList>(`/admin/factory/runs${qs({ q: b.mac, limit: 5 })}`).catch(() => null);
-      setRegSerial(h?.items.find((r) => r.serial)?.serial || null);
-      const mine = releases.filter((r) => r.chipModel === b.chip);
-      setRelId((mine.find((r) => r.isDefault) || mine[0])?.id ?? null);
+      const prev = h?.items.find((r) => r.serial);
+      setRegSerial(prev?.serial || null);
+      setRegProduct(prev ? prev.product ?? 'sleep' : null);
     } catch (e) {
       if (conn.current) await releaseBoard(conn.current);
       conn.current = null; port.current = null;
@@ -196,13 +225,13 @@ function Inner() {
     await mon.current?.close(); mon.current = null;
     if (conn.current) await releaseBoard(conn.current);
     conn.current = null; port.current = null;
-    setLink('none'); setBoard(null); setRegSerial(null); setFlash(null); setRun(null);
+    setLink('none'); setBoard(null); setRegSerial(null); setRegProduct(null); setFlash(null); setRun(null);
     setReg(null); setPaused(false); setErr(''); setBusy('');
     lines.current = []; partial.current = ''; checker.current = null;
   }
 
   async function newRun(releaseId: number | null) {
-    const r = await post<{ run: FactoryRun }>('/admin/factory/runs', { mac: board!.mac, chip: board!.chip, ...(releaseId ? { releaseId } : {}) });
+    const r = await post<{ run: FactoryRun }>('/admin/factory/runs', { mac: board!.mac, chip: board!.chip, product, ...(releaseId ? { releaseId } : {}) });
     setRun(r.run); runRef.current = r.run;
     return r.run;
   }
@@ -210,6 +239,8 @@ function Inner() {
   async function doFlash() {
     const rel = releases.find((r) => r.id === relId);
     if (!rel || !board) return;
+    if (blocked) { setErr(blocked); return; }
+    if ((rel.product ?? 'sleep') !== product) { setErr(`Release ${rel.version} is not ${productLabel(product).toLowerCase()} firmware.`); return; }
     setErr('');
     let r: FactoryRun | null = null;
     const t = performance.now();
@@ -246,6 +277,7 @@ function Inner() {
   }
 
   async function openMonitor() {
+    if (blocked) { setErr(blocked); return; }
     setErr(''); setBusy('Opening the serial monitor…');
     try {
       // Same board record as the flash just before; otherwise a new "test only" record
@@ -264,13 +296,15 @@ function Inner() {
   async function register(e: React.FormEvent) {
     e.preventDefault();
     if (!board || !canRegister || regSerial || reg) return;
-    store.set('hwModel', hw); store.set('batch', batch);
+    if (blocked) { setErr(blocked); return; }
+    if (!HW_BY_PRODUCT[product].includes(hw)) { setErr(`Pick a ${productLabel(product).toLowerCase()} hardware model.`); return; }
+    store.set(`hwModel.${product}`, hw); store.set('batch', batch);
     setBusy('Registering…'); setErr('');
     try {
       // Link the bench record when the board was flashed and tested here (saves the tests so far first)
       if (tested && run?.result === 'running' && c) await patch(`/admin/factory/runs/${run.id}`, { checks: c.toList() });
       const r = await post<RegisterResult>('/admin/devices', {
-        mac: board.mac, chip: board.chip, hwModel: hw, product: productOf(hw), batch: batch.trim() || undefined,
+        mac: board.mac, chip: board.chip, hwModel: hw, product, batch: batch.trim() || undefined,
         fwOnBoard: run?.flashed ? run.fwVersion || undefined : undefined,
         ...(tested && run ? { factoryRunId: run.id } : {}),
       });
@@ -286,13 +320,26 @@ function Inner() {
 
   const ck = c?.ck;
   const vals = c?.vals || {};
-  const mine = board ? releases.filter((r) => r.chipModel === board.chip) : [];
+  const mine = board ? releases.filter((r) => r.chipModel === board.chip && (r.product ?? 'sleep') === product) : [];
+  const list = c?.list || [];
   const tabs: [Tab, string, boolean][] = [['flash', 'Flash firmware', canFlash], ['monitor', 'Serial monitor & test', true], ['register', 'Register', canRegister]];
 
   return (
     <div className="wrap">
-      <Head title="Manufacturing" sub="Connect a board by USB, then flash it, test it on the serial monitor, or register it." />
+      <Head title="Manufacturing" sub="Pick the product, connect a board by USB, then flash it, test it on the serial monitor, or register it." />
       {err && <div className="banner" role="alert"><Icon name="alert" /><span>{err}</span></div>}
+
+      {/* ---------- product first: firmware, tests and registration follow it ---------- */}
+      <div className="row" style={{ alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span className="small"><b>Product</b></span>
+        <div className="seg" role="radiogroup" aria-label="Product">
+          {PRODUCTS.map(([v, l]) => (
+            <button key={v} role="radio" aria-checked={product === v} className={product === v ? 'on' : ''} disabled={productLocked && product !== v}
+              title={productLocked && product !== v ? 'Finish this board first (Next board)' : ''} onClick={() => pickProduct(v)}>
+              <Icon name={v === 'fall' ? 'person' : 'moon'} size={14} /> {l}</button>))}
+        </div>
+        <span className="xs muted">{product === 'fall' ? 'ESP32-S3 + IWR6843AOP radar · models ARG-F*' : 'ESP32 + C1001 radar · models ARG-S*'}</span>
+      </div>
 
       {/* ---------- the board on USB (shared by all three) ---------- */}
       <div className="card" style={{ marginBottom: 18 }}>
@@ -301,14 +348,17 @@ function Inner() {
           <span className="small muted">Plug the board in by USB and pick its port. Close Arduino IDE first. If it fails: hold <b>BOOT</b>, press <b>RESET</b>, let go, try again.</span>
         </div> : <div className="between" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div className="row small">
-            <span className="pill acc"><Icon name="chip" size={14} /> <span className="mono">{board.chip}</span></span>
+            <span className="pill acc"><Icon name={product === 'fall' ? 'person' : 'moon'} size={14} /> {productLabel(product)}</span>
+            <span className={`pill ${CHIPS_BY_PRODUCT[product].includes(board.chip) ? '' : 'bad'}`}><Icon name="chip" size={14} /> <span className="mono">{board.chip}</span></span>
             <span className="pill"><span className="mono">{macUpper(board.mac)}</span></span>
-            {(reg?.serial || regSerial) && <span className="pill warn">Registered as {reg?.serial || regSerial}</span>}
+            {(reg?.serial || regSerial) && <span className="pill warn">Registered as {reg?.serial || regSerial}{regProduct && regProduct !== product ? ` (${productLabel(regProduct).toLowerCase()})` : ''}</span>}
             {run?.flashed && <span className="pill ok"><Icon name="check" size={14} /> Firmware {run.fwVersion} flashed</span>}
-            {c && <span className="pill">{c.allPassed() ? 'All tests passed' : c.firstFailed() ? `Test failed: ${CHECKS.find((k) => k.id === c.firstFailed())?.label}` : 'Testing…'}</span>}
+            {c && <span className="pill">{c.allPassed() ? 'All tests passed' : c.firstFailed() ? `Test failed: ${list.find((k) => k.id === c.firstFailed())?.label}` : 'Testing…'}</span>}
           </div>
           <button className="btn ghost sm" onClick={nextBoard} disabled={!!busy || !!flash}>Next board</button>
-        </div>}
+ </div>}
+        {blocked && <div className="banner warn" style={{ margin: '12px 0 0' }}><Icon name="alert" /><span>{blocked}
+          {regProduct && regProduct !== product && <> <button className="btn ghost sm" disabled={productLocked} onClick={() => pickProduct(regProduct)}>Switch to {productLabel(regProduct).toLowerCase()}</button></>}</span></div>}
       </div>
 
       <div className="seg" role="tablist" style={{ marginBottom: 16 }}>
@@ -331,11 +381,11 @@ function Inner() {
                 <div className="progress"><i style={{ width: `${flash.pct}%`, background: 'var(--accent)' }} /></div>
                 <p className="xs muted">Don&apos;t unplug the board.</p></div>
                 : <>
-                  <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={doFlash}><Icon name="bolt" /> Erase and flash</button>
+                  <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={doFlash} disabled={!!blocked}><Icon name="bolt" /> Erase and flash</button>
                   <p className="xs muted">Writes the whole firmware from address 0x0 and erases saved Wi-Fi and old data. About 30–60 s.</p>
                   {run?.flashed && run.result === 'running' && <div className="banner ok" style={{ margin: 0 }}><Icon name="check" /><span>Flashed {run.fwVersion}. Open <b>Serial monitor &amp; test</b> to check it.</span></div>}
                 </>}
-            </> : <div className="banner warn" style={{ margin: 0 }}><Icon name="alert" /><span>No firmware for {board.chip} is ready to flash. Upload it on <Link className="link" href="/admin/firmware">Firmware</Link> (the .bin and the merged .bin) and press <b>Make default</b>.</span></div>}
+            </> : <div className="banner warn" style={{ margin: 0 }}><Icon name="alert" /><span>No {pl} firmware for {board.chip} is ready to flash. Upload it on <Link className="link" href={`/admin/firmware?product=${product}`}>Firmware</Link> (product: {productLabel(product)}) (the .bin and the merged .bin) and press <b>Make default</b>.</span></div>}
         </div>
       )}
 
@@ -343,8 +393,13 @@ function Inner() {
       {tab === 'monitor' && (!board ? <div className="card"><p className="small muted">Connect a board first (button above).</p></div>
         : !c || link !== 'monitor' ? <div className="card stack" style={{ gap: 12, maxWidth: 760 }}>
           <h2>Serial monitor &amp; test</h2>
-          <p className="small muted">Resets the board and shows its output at 115200 baud. The tests tick by themselves.</p>
-          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={openMonitor} disabled={!!busy || !!flash}>{busy || 'Open serial monitor'}</button>
+          <p className="small muted">Resets the board and shows its output at 115200 baud. The {pl} tests tick by themselves.</p>
+          <ul className="xs muted" style={{ margin: 0, paddingLeft: 18 }}>
+            {(product === 'fall'
+              ? ['Boots and prints “Argus Fall Detection”', 'Device ID matches the USB MAC', 'IWR6843 radar sends frames (60 s)', 'A person walking in front is tracked (30 s, can be skipped)']
+              : ['Boots and prints “Argus Sleep Monitoring”', 'Device ID matches the USB MAC', 'C1001 radar answers (60 s)', 'Presence when someone sits or waves (30 s, can be skipped)']).map((x) => <li key={x}>{x}</li>)}
+          </ul>
+          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={openMonitor} disabled={!!busy || !!flash || !!blocked}>{busy || 'Open serial monitor'}</button>
         </div>
           : ck && <div className="g21">
             <div className="card">
@@ -364,15 +419,20 @@ function Inner() {
               <div className="stiles" style={{ marginTop: 14 }}>
                 {([['Radar', vals.radar ? <span style={{ color: vals.radar === 'OK' ? 'var(--ok)' : 'var(--warn)' }}>{vals.radar}</span> : '—'],
                   ['Presence', vals.pr === undefined ? '—' : vals.pr ? 'Yes' : 'No'],
-                  ['Heart rate', vals.hr ? <>{vals.hr}<small className="xs muted"> bpm</small></> : '—'],
-                  ['Breathing', vals.br ? <>{vals.br}<small className="xs muted"> /min</small></> : '—'],
+                  ...(c!.product === 'fall' ? [
+                    ['People tracked', vals.tracks ?? '—'],
+                    ['Sensitivity', vals.preset || '—'],
+                  ] : [
+                    ['Heart rate', vals.hr ? <>{vals.hr}<small className="xs muted"> bpm</small></> : '—'],
+                    ['Breathing', vals.br ? <>{vals.br}<small className="xs muted"> /min</small></> : '—'],
+                  ]),
                   ['Free heap', vals.heap ? <>{Math.round(vals.heap / 1024)}<small className="xs muted"> KB</small></> : '—'],
                   ['MQTT', vals.mqtt || '—']] as [string, React.ReactNode][]).map(([l, v]) => (
                   <div className="stile" key={l}><span className="xs muted">{l}</span><b>{v}</b></div>))}
               </div>
             </div>
-            <div className="card"><h2 style={{ marginBottom: 6 }}>Tests</h2>
-              {CHECKS.map((k) => { const s = ck[k.id]; return (
+            <div className="card"><h2 style={{ marginBottom: 6 }}>Tests <span className="xs muted" style={{ fontWeight: 400 }}>· {productLabel(c!.product)}</span></h2>
+              {list.map((k) => { const s = ck[k.id]; return (
                 <div key={k.id} className={`ck ${s.state === 'ok' ? 'ok' : s.state === 'bad' ? 'bad' : s.state === 'run' ? 'run' : ''}`}>
                   <span className="st">{s.state === 'ok' ? <Icon name="check" size={14} /> : s.state === 'bad' ? '✕' : s.state === 'run' ? <span className="dot pulse" /> : s.state === 'skip' ? '–' : ''}</span>
                   <span className="stack" style={{ gap: 0 }}><b className="small">{k.label}</b><span className="xs muted">{k.id === 'version' && c ? c.versionHint : k.hint}</span></span>
@@ -400,14 +460,14 @@ function Inner() {
               <button className="btn ghost" onClick={nextBoard}><Icon name="usb" /> Next board</button></div>
           </> : regSerial ? <p className="small muted">This board is already registered as <b>{regSerial}</b>. Reprint its sticker from its device page.</p>
             : <form className="form" onSubmit={register}>
-              <p className="small muted">{tested ? 'Flashed and tested here: the test result is saved with the device.' : 'Not flashed and tested here. You can still register it.'}</p>
+              <p className="small muted">Registers this board as a <b>{pl}</b>. {tested ? 'Flashed and tested here: the test result is saved with the device.' : 'Not flashed and tested here. You can still register it.'}</p>
               <div className="fields2">
                 <div className="field"><label htmlFor="st-hw">Hardware model</label>
-                  <select className="inp" id="st-hw" value={hw} onChange={(e) => setHw(e.target.value)}>{HW_MODELS.map((m) => <option key={m} value={m}>{m}{productOf(m) === 'fall' ? ' (fall detector)' : ''}</option>)}</select></div>
+                  <select className="inp" id="st-hw" value={hw} onChange={(e) => setHw(e.target.value)}>{HW_BY_PRODUCT[product].map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
                 <div className="field"><label htmlFor="st-batch">Batch</label>
                   <input className="inp" id="st-batch" value={batch} onChange={(e) => setBatch(e.target.value)} maxLength={40} placeholder="B-2026-11-A" /></div>
               </div>
-              <button className="btn" type="submit" disabled={!!busy} style={{ alignSelf: 'flex-start' }}>{busy || 'Register and make sticker'}</button>
+              <button className="btn" type="submit" disabled={!!busy || !!blocked} style={{ alignSelf: 'flex-start' }}>{busy || `Register ${pl} and make sticker`}</button>
             </form>}
         </div>
       )}

@@ -27,7 +27,7 @@ export default function SettingsPage() {
       <Head title="Device settings" sub={d ? <>{d.name} · <span className="mono">{d.serial}</span></> : undefined} back={[`/devices/${id}`, d?.name || 'Device']} />
       <Async q={q}>{(d) => canEdit ? <>
         <General d={d} onSaved={(x) => q.setData(x)} />
-        <Sensor id={d.id} online={d.status.online} />
+        {d.product !== 'fall' && <Sensor id={d.id} online={d.status.online} />}
         <WifiFirmware d={d} onSaved={(x) => q.setData(x)} />
         <Danger d={d} />
       </> : <>
@@ -61,10 +61,10 @@ function General({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail): vo
           <div className="field"><label htmlFor="ds-room">Room</label><input className="inp" id="ds-room" value={f.room} onChange={set('room')} /></div>
         </div>
         <div className="fields2">
-          <div className="field"><label htmlFor="ds-tz">Time zone</label><TzSelect id="ds-tz" value={f.tz} onChange={(tz) => setF({ ...f, tz })} options={TIMEZONES} /><span className="hint">All times for this sensor are shown in this zone. A change applies to new nights only.</span></div>
+          <div className="field"><label htmlFor="ds-tz">Time zone</label><TzSelect id="ds-tz" value={f.tz} onChange={(tz) => setF({ ...f, tz })} options={TIMEZONES} /><span className="hint">All times for this sensor are shown in this zone. {d.product === 'fall' ? '' : 'A change applies to new nights only.'}</span></div>
           <div className="field"><label htmlFor="ds-place">Town or city (optional)</label><input className="inp" id="ds-place" value={f.place} onChange={set('place')} placeholder="Surat" /><span className="hint">Used in labels like “{f.place.trim() || 'Surat'} time”. If empty, the time zone is used (“{placeName(f.tz, null)} time”).</span></div>
         </div>
-        <div className="field"><label htmlFor="ds-cut">A new night starts at</label><input className="inp" type="time" id="ds-cut" value={f.sleepCutoff} onChange={set('sleepCutoff')} style={{ maxWidth: 160 }} /><span className="hint">Sleep before this time counts toward the night before. Noon (12:00) suits most people; change it for night-shift workers.</span></div>
+        {d.product !== 'fall' && <div className="field"><label htmlFor="ds-cut">A new night starts at</label><input className="inp" type="time" id="ds-cut" value={f.sleepCutoff} onChange={set('sleepCutoff')} style={{ maxWidth: 160 }} /><span className="hint">Sleep before this time counts toward the night before. Noon (12:00) suits most people; change it for night-shift workers.</span></div>}
         {err && <p className="err" role="alert">{err}</p>}
         <button className="btn" type="submit" style={{ alignSelf: 'flex-start' }} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       </form>
@@ -181,6 +181,7 @@ function WifiFirmware({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail
       toast(r.status === 'sent' ? 'Sensor is now in Wi-Fi setup mode. Connect your phone to its setup network.' : 'The sensor is offline, so it can’t be switched. Hold its button 5 times to open setup.');
     } catch (e) { toast(errText(e)); } finally { setBusy(false); }
   };
+  const fall = d.product === 'fall';
   return (
     <div className="card"><h2 style={{ marginBottom: 12 }}>Wi-Fi and firmware</h2>
       <dl className="kv">
@@ -191,20 +192,23 @@ function WifiFirmware({ d, onSaved }: { d: DeviceDetail; onSaved(d: DeviceDetail
         <dt>Model</dt><dd>{d.hwModel}</dd>
       </dl>
       <div className="divider" style={{ marginBlock: 12 }} />
-      <label className="tog"><span className="t"><span>Install updates automatically</span><span className="xs muted">Updates install during the day, never at night</span></span>
+      <label className="tog"><span className="t"><span>Install updates automatically</span><span className="xs muted">{fall ? 'Updates install during the day' : 'Updates install during the day, never at night'}</span></span>
         <input type="checkbox" className="sw" checked={d.autoUpdate} onChange={(e) => setAuto(e.target.checked)} /></label>
       <div className="row" style={{ marginTop: 8 }}>
         <button className="btn ghost" onClick={wifi} disabled={busy}><Icon name="wifi" /> Change Wi-Fi network</button>
-        <button className="btn ghost" onClick={() => setPlacing(!placing)} aria-expanded={placing}><Icon name="person" /> Placement check</button>
-        <button className="btn ghost" onClick={recalibrate} disabled={recal === 'running'}><Icon name="activity" /> {recal === 'running' ? 'Recalibrating…' : 'Recalibrate sensor'}</button>
-        {recal === 'done' && <span className="pill ok">Recalibrated ✓</span>}
-        {recal === 'failed' && <span className="pill bad">Didn’t recalibrate</span>}
+        {/* Placement check and recalibrate are for the C1001 sleep sensor only */}
+        {!fall && <>
+          <button className="btn ghost" onClick={() => setPlacing(!placing)} aria-expanded={placing}><Icon name="person" /> Placement check</button>
+          <button className="btn ghost" onClick={recalibrate} disabled={recal === 'running'}><Icon name="activity" /> {recal === 'running' ? 'Recalibrating…' : 'Recalibrate sensor'}</button>
+          {recal === 'done' && <span className="pill ok">Recalibrated ✓</span>}
+          {recal === 'failed' && <span className="pill bad">Didn’t recalibrate</span>}
+        </>}
       </div>
       <div className="stack" style={{ gap: 6, marginTop: 10 }}>
         <HowTo label="How to change the Wi-Fi network" steps={WIFI_STEPS} done={WIFI_DONE} />
-        <HowTo label="How to recalibrate" steps={RECAL_STEPS} done={RECAL_DONE} />
+        {!fall && <HowTo label="How to recalibrate" steps={RECAL_STEPS} done={RECAL_DONE} />}
       </div>
-      {placing && <Placement id={d.id} online={d.status.online} />}
+      {placing && !fall && <Placement id={d.id} online={d.status.online} />}
     </div>
   );
 }
@@ -237,7 +241,7 @@ function Danger({ d }: { d: DeviceDetail }) {
   );
   return (
     <div className="card"><h2 style={{ marginBottom: 6 }}>Remove device</h2>
-      <p className="small muted" style={{ marginBottom: 12 }}>Removes it from your account and from everyone you shared it with. <b>Sleep history is deleted.</b> To add it again you need a new claim code from support.</p>
+      <p className="small muted" style={{ marginBottom: 12 }}>Removes it from your account and from everyone you shared it with. <b>{d.product === 'fall' ? 'Its fall history is deleted.' : 'Sleep history is deleted.'}</b> To add it again you need a new claim code from support.</p>
       {!open ? <button className="btn danger" onClick={() => setOpen(true)}>Remove {d.name}</button> : (
         <form className="form" onSubmit={async (e) => {
           e.preventDefault(); setErr('');

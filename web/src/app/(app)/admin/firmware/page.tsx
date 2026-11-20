@@ -2,8 +2,9 @@
 
 // Firmware & OTA (API.md 9.1–9.8). Upload .bin (firmware.upload), start / pause / resume / cancel / retry
 // rollouts (firmware.rollout), live progress from Socket.IO rollout:progress.
+// 014: split by product. Each tab shows, uploads and rolls out only that product's firmware.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAdminSocket } from '@/components/admin';
 import { Icon } from '@/components/Icon';
 import { useAuth, useToast } from '@/components/Providers';
@@ -11,11 +12,13 @@ import { RequireStaff } from '@/components/Shell';
 import { Async, Head, useApi } from '@/components/ui';
 import { del, errText, patch, post, put } from '@/lib/api';
 import { ago, bytes, day } from '@/lib/format';
-import type { FirmwareRelease, Rollout } from '@/lib/types';
+import { CHIPS_BY_PRODUCT, PRODUCTS, productLabel } from '@/lib/products';
+import type { FirmwareRelease, Product, Rollout } from '@/lib/types';
 
 const MAX = 4 * 1024 * 1024;
 const FACTORY_MAX = 16 * 1024 * 1024;
-const CHIPS = ['ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-S2', 'ESP32-C6', 'ESP8266'];
+const CHIPS: Record<Product, string[]> = { sleep: ['ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-S2', 'ESP32-C6', 'ESP8266'], fall: CHIPS_BY_PRODUCT.fall };
+const SKETCH: Record<Product, string> = { sleep: 'sleeplamp', fall: 'argus_fall' };
 
 export default function FirmwarePage() {
   return <RequireStaff perm="firmware.view"><Inner /></RequireStaff>;
@@ -24,8 +27,12 @@ export default function FirmwarePage() {
 function Inner() {
   const { can } = useAuth();
   const toast = useToast();
-  const rel = useApi<{ items: FirmwareRelease[] }>('/admin/firmware');
-  const ro = useApi<{ items: Rollout[] }>('/admin/ota/rollouts');
+  const [product, setProduct] = useState<Product>('sleep');
+  useEffect(() => {   // ?product=fall (link from the Manufacturing screen)
+    if (new URLSearchParams(window.location.search).get('product') === 'fall') setProduct('fall');
+  }, []);
+  const rel = useApi<{ items: FirmwareRelease[] }>(`/admin/firmware?product=${product}`);
+  const ro = useApi<{ items: Rollout[] }>(`/admin/ota/rollouts?product=${product}`);
   const [newRollout, setNewRollout] = useState(false);
   const canRoll = can('firmware.rollout');
   const up = can('firmware.upload');
@@ -58,15 +65,19 @@ function Inner() {
     <div className="wrap">
       <Head title="Firmware and OTA" sub="Upload builds, then send them to devices over the air"
         actions={canRoll && <button className="btn" onClick={() => { setNewRollout(!newRollout); setTimeout(() => document.getElementById('ota')?.scrollIntoView({ behavior: 'smooth' }), 50); }}><Icon name="upload" /> New OTA update</button>} />
+      <div className="seg" role="tablist" aria-label="Product" style={{ marginBottom: 16 }}>
+        {PRODUCTS.map(([v, l]) => <button key={v} role="tab" aria-selected={product === v} className={product === v ? 'on' : ''}
+          onClick={() => { setProduct(v); setNewRollout(false); window.history.replaceState(null, '', v === 'fall' ? '?product=fall' : window.location.pathname); }}>
+          <Icon name={v === 'fall' ? 'person' : 'moon'} size={14} /> {l}</button>)}
+      </div>
       <div className="g21">
-        <div className="card"><h2 style={{ marginBottom: 12 }}>Versions</h2>
-          <Async q={rel}>{(d) => (
+        <div className="card"><h2 style={{ marginBottom: 12 }}>{productLabel(product)} versions</h2>
+          <Async q={rel}>{(d) => !d.items.length ? <p className="small muted">No {productLabel(product).toLowerCase()} firmware uploaded yet.</p> : (
             <div className="tbl"><table>
-              <thead><tr><th>Version</th><th>Product</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
+              <thead><tr><th>Version</th><th>Channel</th><th>Chip</th><th>Uploaded</th><th>Size</th><th>On devices</th><th>Factory image</th><th>sha256</th><th>Notes</th>{up && <th />}</tr></thead>
               <tbody>{d.items.map((f) => (
                 <tr key={f.id}>
                   <td className="mono"><b>{f.version}</b></td>
-                  <td>{f.product === 'fall' ? <span className="pill warn">Fall</span> : <span className="pill">Sleep</span>}</td>
                   <td>{f.channel === 'beta' ? <span className="pill warn">beta</span> : <span className="pill ok">stable</span>}</td>
                   <td className="mono">{f.chipModel}</td>
                   <td className="muted">{day(f.createdAt)} · {f.uploadedBy}</td>
@@ -74,7 +85,7 @@ function Inner() {
                   <td>{f.factory ? <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
                     {f.factory.isDefault ? <span className="pill acc" title="The manufacturing station picks this one for new boards">Factory default</span>
                       : <span className="pill">{f.factory.sameAsOta ? 'same .bin' : `${bytes(f.factory.fileSize)} · ${f.factory.flashSize}`}</span>}
-                    {up && !f.factory.isDefault && <button className="btn ghost sm" onClick={() => relAct(() => patch(`/admin/firmware/${f.id}`, { factoryDefault: true }), `${f.version} is now the factory default for ${f.chipModel}`)}>Make default</button>}
+                    {up && !f.factory.isDefault && <button className="btn ghost sm" onClick={() => relAct(() => patch(`/admin/firmware/${f.id}`, { factoryDefault: true }), `${f.version} is now the factory default for ${productLabel(product).toLowerCase()} on ${f.chipModel}`)}>Make default</button>}
                     {up && !f.factory.sameAsOta && <button className="btn ghost sm" onClick={() => { if (confirm(`Remove the factory image of ${f.version}? The OTA file stays.`)) relAct(() => del(`/admin/firmware/${f.id}/factory-image`), 'Factory image removed'); }}>Remove</button>}
                   </div> : up && f.chipModel !== 'ESP8266' ? <button className="btn ghost sm" onClick={() => { setFacFor(f); facInput.current?.click(); }}><Icon name="upload" size={15} /> Add</button> : <span className="muted">—</span>}</td>
                   <td className="mono xs muted" title={f.sha256}>{f.sha256.slice(0, 12)}</td>
@@ -88,14 +99,14 @@ function Inner() {
             </table></div>
           )}</Async>
           <input ref={facInput} type="file" accept=".bin" hidden onChange={addFactory} />
-          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing screen writes at 0x0 on new boards. <b>Make default</b> picks it for that chip.</p>
+          <p className="xs muted" style={{ marginTop: 10 }}>Factory image = the whole-flash file (Arduino&apos;s <span className="mono">*.ino.merged.bin</span>) the Manufacturing screen writes at 0x0 on new boards. <b>Make default</b> picks it for that chip, for {productLabel(product).toLowerCase()} boards only.</p>
         </div>
-        <Upload onDone={() => rel.reload()} />
+        <Upload key={product} product={product} onDone={() => rel.reload()} />
       </div>
 
       <div id="ota" />
-      {newRollout && rel.data && <NewRollout releases={rel.data.items} onDone={() => { setNewRollout(false); ro.reload(); }} onCancel={() => setNewRollout(false)} />}
-      <div className="card"><div className="ch"><h2>OTA updates</h2></div>
+      {newRollout && rel.data && <NewRollout product={product} releases={rel.data.items} onDone={() => { setNewRollout(false); ro.reload(); }} onCancel={() => setNewRollout(false)} />}
+      <div className="card"><div className="ch"><h2>{productLabel(product)} OTA updates</h2></div>
         <Async q={ro}>{(d) => d.items.length ? (
           <div className="stack" style={{ gap: 18 }}>
             {d.items.map((r, i) => {
@@ -133,20 +144,19 @@ function Inner() {
               );
             })}
           </div>
-        ) : <p className="small muted">No OTA updates yet.</p>}</Async>
+        ) : <p className="small muted">No {productLabel(product).toLowerCase()} OTA updates yet.</p>}</Async>
       </div>
     </div>
   );
 }
 
-function Upload({ onDone }: { onDone(): void }) {
+function Upload({ product, onDone }: { product: Product; onDone(): void }) {
   const { can } = useAuth();
   const toast = useToast();
   const up = can('firmware.upload');
   const [file, setFile] = useState<File | null>(null);
   const [fac, setFac] = useState<File | null>(null);
-  const [chip, setChip] = useState('ESP32');
-  const [product, setProduct] = useState<'sleep' | 'fall'>('sleep');
+  const [chip, setChip] = useState(product === 'fall' ? 'ESP32-S3' : 'ESP32');
   const [version, setVersion] = useState('');
   const [channel, setChannel] = useState('beta');
   const [notes, setNotes] = useState('');
@@ -162,6 +172,11 @@ function Upload({ onDone }: { onDone(): void }) {
     const first = new Uint8Array(await file.slice(0, 1).arrayBuffer())[0];
     if (first !== 0xe9) return setErr('This is not an ESP32 app image (it should start with byte 0xE9). Upload the app .bin, not the merged or bootloader file.');
     if (!/^\d+\.\d+\.\d+([-.][0-9A-Za-z.]+)?$/.test(version.trim())) return setErr('Enter a version like 1.4.4 or 1.4.4-beta');
+    if (!CHIPS[product].includes(chip)) return setErr(`A ${productLabel(product).toLowerCase()} is built on ${CHIPS[product].join(' / ')}.`);
+    // The boot banner names the product (docs/MANUFACTURING.md §2a); the server checks this too.
+    const isFall = new TextDecoder('latin1').decode(new Uint8Array(await file.arrayBuffer())).includes('Fall Detection');
+    if (product === 'fall' && !isFall) return setErr('This .bin is not fall detector firmware: its boot banner must say “Argus Fall Detection”.');
+    if (product === 'sleep' && isFall) return setErr('This .bin is fall detector firmware. Upload it on the Fall detector tab.');
     if (fac && fac.size > FACTORY_MAX) return setErr(`The factory image is ${bytes(fac.size)}; the limit is 16 MB.`);
     const fd = new FormData();
     fd.append('file', file); fd.append('version', version.trim()); fd.append('channel', channel); fd.append('notes', notes.trim());
@@ -173,17 +188,16 @@ function Upload({ onDone }: { onDone(): void }) {
   };
 
   return (
-    <div className="card"><h2 style={{ marginBottom: 14 }}>Upload a build</h2>
+    <div className="card"><h2 style={{ marginBottom: 6 }}>Upload {productLabel(product).toLowerCase()} build</h2>
+      <p className="xs muted" style={{ marginBottom: 12 }}>OTA updates and the Manufacturing screen use it only for {productLabel(product).toLowerCase()}s.</p>
       <form className="form" onSubmit={submit}>
-        <div className="field"><label htmlFor="fw-prod">Product</label><select className="inp" id="fw-prod" value={product} onChange={(e) => setProduct(e.target.value as 'sleep' | 'fall')} disabled={!up}><option value="sleep">Sleep monitor</option><option value="fall">Fall detector</option></select>
-          <span className="hint">An OTA update only goes to devices of this product.</span></div>
-        <div className="field"><label htmlFor="fw-chip">Chip</label><select className="inp mono" id="fw-chip" value={chip} onChange={(e) => setChip(e.target.value)} disabled={!up}>{CHIPS.map((c) => <option key={c}>{c}</option>)}</select></div>
+        <div className="field"><label htmlFor="fw-chip">Chip</label><select className="inp mono" id="fw-chip" value={chip} onChange={(e) => setChip(e.target.value)} disabled={!up || CHIPS[product].length === 1}>{CHIPS[product].map((c) => <option key={c}>{c}</option>)}</select></div>
         <div className="field"><label htmlFor="fw-file">Firmware file (.bin, max 4 MB)</label><input key={key} className="inp" type="file" id="fw-file" accept=".bin,application/octet-stream" disabled={!up} onChange={(e) => setFile(e.target.files?.[0] || null)} />
-          {file ? <span className="hint">{file.name} · {bytes(file.size)}</span> : <span className="hint">Arduino: <span className="mono">sleeplamp.ino.bin</span> (used for OTA)</span>}</div>
+          {file ? <span className="hint">{file.name} · {bytes(file.size)}</span> : <span className="hint">Arduino: <span className="mono">{SKETCH[product]}.ino.bin</span> (used for OTA)</span>}</div>
         {chip === 'ESP8266' ? <p className="hint">ESP8266: one file is enough. Its .bin already holds the bootloader, so the station flashes the same file at 0x0.</p>
           : <div className="field"><label htmlFor="fw-fac">Factory image (optional, merged .bin)</label><input key={`f${key}`} className="inp" type="file" id="fw-fac" accept=".bin,application/octet-stream" disabled={!up} onChange={(e) => setFac(e.target.files?.[0] || null)} />
-            <span className="hint">Arduino: <span className="mono">sleeplamp.ino.merged.bin</span>. Needed to flash new boards on the Manufacturing screen. Its app part must be the same build as the file above.</span></div>}
-        <div className="field"><label htmlFor="fw-v">Version</label><input className="inp mono" id="fw-v" placeholder="1.4.4" value={version} onChange={(e) => setVersion(e.target.value)} disabled={!up} /></div>
+            <span className="hint">Arduino: <span className="mono">{SKETCH[product]}.ino.merged.bin</span>. Needed to flash new boards on the Manufacturing screen. Its app part must be the same build as the file above.</span></div>}
+        <div className="field"><label htmlFor="fw-v">Version</label><input className="inp mono" id="fw-v" placeholder={product === 'fall' ? '0.1.0' : '1.4.4'} value={version} onChange={(e) => setVersion(e.target.value)} disabled={!up} /></div>
         <div className="field"><label htmlFor="fw-ch">Channel</label><select className="inp" id="fw-ch" value={channel} onChange={(e) => setChannel(e.target.value)} disabled={!up}><option>beta</option><option>stable</option></select></div>
         <div className="field"><label htmlFor="fw-n">What changed</label><textarea className="inp" id="fw-n" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!up} /></div>
         {err && <p className="err" role="alert">{err}</p>}
@@ -194,7 +208,7 @@ function Upload({ onDone }: { onDone(): void }) {
   );
 }
 
-function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[]; onDone(): void; onCancel(): void }) {
+function NewRollout({ product, releases, onDone, onCancel }: { product: Product; releases: FirmwareRelease[]; onDone(): void; onCancel(): void }) {
   const toast = useToast();
   const [releaseId, setReleaseId] = useState(releases[0]?.id || '');
   const [target, setTarget] = useState<'all' | 'serials' | 'from_version'>('all');
@@ -211,7 +225,8 @@ function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[
     const list = serials.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
     if (target === 'serials' && !list.length) return setErr('List at least one serial');
     const rel = releases.find((r) => r.id === releaseId);
-    if (!confirm(`Start the OTA update to ${rel?.version}?`)) return;
+    if (rel && (rel.product ?? 'sleep') !== product) return setErr(`${rel.version} is not ${productLabel(product).toLowerCase()} firmware.`);
+    if (!confirm(`Start the OTA update to ${rel?.version}? Only ${productLabel(product).toLowerCase()}s get it.`)) return;
     setBusy(true);
     try {
       const r = await post<{ rolloutId: string; devices: number }>('/admin/ota/rollouts', {
@@ -223,18 +238,18 @@ function NewRollout({ releases, onDone, onCancel }: { releases: FirmwareRelease[
   };
 
   return (
-    <div className="card"><h2 style={{ marginBottom: 14 }}>New OTA update</h2>
+    <div className="card"><h2 style={{ marginBottom: 14 }}>New {productLabel(product).toLowerCase()} OTA update</h2>
       <form className="form" onSubmit={submit}>
         <div className="fields2">
-          <div className="field"><label htmlFor="ro-v">Version</label><select className="inp mono" id="ro-v" value={releaseId} onChange={(e) => setReleaseId(e.target.value)}>{releases.map((f) => <option key={f.id} value={f.id}>{f.version} ({f.product === 'fall' ? 'fall detector, ' : ''}{f.channel})</option>)}</select></div>
+          <div className="field"><label htmlFor="ro-v">Version</label><select className="inp mono" id="ro-v" value={releaseId} onChange={(e) => setReleaseId(e.target.value)}>{releases.map((f) => <option key={f.id} value={f.id}>{f.version} ({f.channel})</option>)}</select></div>
           <div className="field"><label htmlFor="ro-t">Send to</label><select className="inp" id="ro-t" value={target} onChange={(e) => setTarget(e.target.value as typeof target)}>
-            <option value="all">All devices</option><option value="serials">Chosen serial numbers</option><option value="from_version">Devices on a firmware version</option></select></div>
+            <option value="all">All {productLabel(product).toLowerCase()}s</option><option value="serials">Chosen serial numbers</option><option value="from_version">Devices on a firmware version</option></select></div>
           {target === 'serials' && <div className="field"><label htmlFor="ro-s">Serials</label><textarea className="inp mono" id="ro-s" rows={2} value={serials} onChange={(e) => setSerials(e.target.value)} placeholder="ARG-24A0012, ARG-24A0013" /><span className="hint">Listed devices update even if they turned automatic updates off.</span></div>}
           {target === 'from_version' && <div className="field"><label htmlFor="ro-f">Devices now on</label><select className="inp mono" id="ro-f" value={fromVersion} onChange={(e) => setFromVersion(e.target.value)}>{releases.map((f) => <option key={f.id}>{f.version}</option>)}</select></div>}
           <div className="field"><label htmlFor="ro-w">Install window (device local time)</label>
             <label className="tog" style={{ paddingTop: 0 }}><span className="t"><span className="small">Only during the day</span></span><input type="checkbox" className="sw" id="ro-w" checked={windowOn} onChange={(e) => setWindowOn(e.target.checked)} /></label>
             {windowOn && <div className="row" style={{ flexWrap: 'nowrap' }}><input className="inp" type="time" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From" /><span className="muted">to</span><input className="inp" type="time" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" /></div>}
-            <span className="hint">Never during sleep. Devices with automatic updates off are skipped unless listed by serial.</span></div>
+            <span className="hint">{product === 'sleep' ? 'Never during sleep. ' : ''}Devices with automatic updates off are skipped unless listed by serial.</span></div>
         </div>
         {err && <p className="err" role="alert">{err}</p>}
         <div className="row"><button className="btn" type="submit" disabled={busy || !releaseId}>{busy ? 'Starting…' : 'Start OTA update'}</button><button className="btn ghost" type="button" onClick={onCancel}>Cancel</button></div>

@@ -16,6 +16,8 @@ const fall = require('../../services/fall');
 const { E } = require('../../errors');
 
 const router = express.Router();
+// Commands only the sleep monitor (C1001) understands (013).
+const SLEEP_ONLY_COMMANDS = new Set(['recalibrate', 'end_session']);
 const isUuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 // "34:85:18:A1:0F:22", "34-85-18-a1-0f-22" or "348518a10f22" -> "348518a10f22"
@@ -51,12 +53,17 @@ router.get('/dashboard', requireStaff(), async (req, res) => {
            (SELECT count(*) FROM users WHERE staff_role_id IS NULL AND deleted_at IS NULL
                                        AND created_at > now() - interval '7 days')::int AS customers_week,
            (SELECT count(*) FROM ota_rollouts WHERE status = 'running')::int AS rollouts_running`);
+  // 013: devices per product (registered / online)
+  const byProduct = await db.many(
+    `SELECT d.product, count(*)::int AS registered, count(*) FILTER (WHERE s.is_online)::int AS online
+       FROM devices d LEFT JOIN device_state s ON s.device_id = d.id GROUP BY d.product`);
   const hourly = await db.many(
     `SELECT hour, devices_online AS online FROM fleet_stats_hourly
       WHERE hour > now() - interval '24 hours' ORDER BY hour`);
   const fw = await db.many(
-    `SELECT fw_version AS version, count(*)::int AS count FROM device_state
-      WHERE fw_version IS NOT NULL GROUP BY fw_version ORDER BY count DESC, version DESC`);
+    `SELECT s.fw_version AS version, d.product, count(*)::int AS count
+       FROM device_state s JOIN devices d ON d.id = s.device_id
+      WHERE s.fw_version IS NOT NULL GROUP BY s.fw_version, d.product ORDER BY count DESC, version DESC`);
   const recentAudit = req.staffPerms.has('audit.view')
     ? await db.many(`SELECT id, created_at AS at, actor_name AS "actorName", action, target_type AS "targetType",
                             target_label AS "targetLabel", detail FROM audit_log ORDER BY created_at DESC LIMIT 5`)
@@ -68,6 +75,10 @@ router.get('/dashboard', requireStaff(), async (req, res) => {
       unclaimed: c.unclaimed, disabled: c.disabled, customers: c.customers,
       registeredThisWeek: c.registered_week, customersThisWeek: c.customers_week, rolloutsRunning: c.rollouts_running,
     },
+    byProduct: Object.fromEntries(['sleep', 'fall'].map((p) => {
+      const r = byProduct.find((x) => x.product === p);
+      return [p, { registered: r?.registered || 0, online: r?.online || 0 }];
+    })),
     onlineHourly: hourly,
     fwVersions: fw,
     recentAudit,
@@ -175,6 +186,18 @@ async function codeResponse(serial, code) {
   return { serial, claimCode: claim.formatCode(code), qrPayload: claim.qrPayload(code), qrPngBase64: await claim.qrPng(code) };
 }
 
+// 014: the fall detector is built only on the ESP32-S3, and hardware models ARG-F* are fall detectors,
+// ARG-S* sleep monitors. A mismatch is a typo or the wrong board on the bench: refuse it.
+function checkProductHardware(product, chip, hwModel) {
+  if (product === 'fall' && chip.toUpperCase().replace(/[^A-Z0-9]/g, '') !== 'ESP32S3') {
+    throw E.invalid('WRONG_CHIP', `A fall detector is built on an ESP32-S3, this board is ${chip}`, 'chip');
+  }
+  const hwFall = /^ARG-F/i.test(hwModel), hwSleep = /^ARG-S/i.test(hwModel);
+  if ((product === 'fall' && hwSleep) || (product === 'sleep' && hwFall)) {
+    throw E.invalid('WRONG_PRODUCT', `Hardware model ${hwModel} is not a ${product === 'fall' ? 'fall detector' : 'sleep monitor'}`, 'hwModel');
+  }
+}
+
 // 8.4 Register a board read over USB (Web Serial in the browser).
 router.post('/devices', requireStaff('devices.register'), async (req, res) => {
   const body = parse(z.object({
@@ -187,6 +210,7 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     fwOnBoard: z.string().trim().max(40).nullable().optional(),
     factoryRunId: z.number().int().positive().optional(),   // the manufacturing station's bench run (§9b)
   }), req.body);
+  checkProductHardware(body.product, body.chip, body.hwModel);
   const code = claim.newCode();
   const device = await db.tx(async (c) => {
     // One registration at a time hands out serials, so two never collide.
@@ -197,11 +221,14 @@ router.post('/devices', requireStaff('devices.register'), async (req, res) => {
     let run = null;
     if (body.factoryRunId) {
       ({ rows: [run] } = await c.query(
-        `SELECT id, replace(mac::text, ':', '') AS mac, result, fw_version, flashed,
+        `SELECT id, replace(mac::text, ':', '') AS mac, result, fw_version, flashed, product,
                 EXISTS (SELECT 1 FROM jsonb_array_elements(checks) c WHERE c->>'ok' = 'true') AS any_ok
            FROM factory_runs WHERE id = $1 FOR UPDATE`, [body.factoryRunId]));
       if (!run) throw E.notFound('Factory run not found');
       if (run.mac !== body.mac) throw E.invalid('RUN_MAC_MISMATCH', 'This bench run is for another board', 'factoryRunId');
+      if (run.product !== body.product) {
+        throw E.invalid('WRONG_PRODUCT', `This board was flashed and tested as a ${run.product === 'fall' ? 'fall detector' : 'sleep monitor'}`, 'product');
+      }
       // Owner rule (13 Nov 2026): the code must be flashed on the bench and at least one check must have passed.
       // The test may still be running; it is finished (pass / fail) on its own afterwards.
       if (!run.flashed || !run.any_ok) {
@@ -308,6 +335,9 @@ router.delete('/devices/:id', requireStaff('devices.register'), async (req, res)
 router.post('/devices/:id/commands', requireStaff('devices.command'), async (req, res) => {
   const body = parse(z.object({ type: z.enum(['reboot', 'config_mode', 'ota_check', 'logs', 'recalibrate', 'end_session']) }), req.body);
   const d = await loadDevice(req.params.id);
+  if (d.product === 'fall' && SLEEP_ONLY_COMMANDS.has(body.type)) {
+    throw E.conflict('NOT_FOR_PRODUCT', 'This command is for sleep monitors only');
+  }
   const c = await commands.create(d.id, body.type, req.user.id);
   await audit(req, { action: `device.command.${body.type}`, targetType: 'device', targetId: d.id,
     targetLabel: d.serial_no, detail: commands.apiStatus(c.status) });
