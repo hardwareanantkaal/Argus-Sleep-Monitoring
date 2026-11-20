@@ -25,7 +25,7 @@
 // DEV  : plain MQTT to the PC running the Docker stack (port 1885, see docker-compose.yml)
 // PROD : TLS on 8883 to the VPS domain, e.g. "mqtts://mqtt.example.com:8883"
 //        (the server cert is checked against the ESP-IDF root bundle).
-#define MQTT_URI          "mqtts://argus.ecobridgers.com:8884"   // Contabo prod (8883 = Water Tank)
+#define MQTT_URI          "mqtts://argus.anantkaal.com:8884"   // Contabo prod (8883 = Water Tank)
 #define MQTT_PREFIX       "argus"          // <p> in docs/API.md
 #define MQTT_DUMMY_PASS   "x"              // broker ignores it (MAC-only login), must be non-empty
 #define MQTT_KEEPALIVE_S  15

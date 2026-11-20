@@ -17,6 +17,8 @@ ESP32 ────8884 (TLS)──────────► mosquitto ──au
 
 The water project keeps 8883 / 8088, so nothing clashes. **Check step 1 before you trust this table.**
 
+Live address: **https://argus.anantkaal.com** (moved from argus.ecobridgers.com, see [docs/DOMAIN-MOVE.md](docs/DOMAIN-MOVE.md)).
+
 Run every command as the server's sudo user. After each step, check that the step worked before moving on.
 
 ---

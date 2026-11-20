@@ -1,6 +1,6 @@
 # Argus: progress checklist
 
-Updated 4 Nov 2026. Live site: https://argus.ecobridgers.com
+Updated 4 Nov 2026. Live site: https://argus.anantkaal.com
 
 - [x] = done and tested
 - [~] = done but uses sample data on the website, or is not tried by hand yet
@@ -56,7 +56,7 @@ Updated 4 Nov 2026. Live site: https://argus.ecobridgers.com
 ## 4. Server (Contabo, shared with Water Tank)
 - [x] Code in `/opt/argus`; secrets generated on the server only
 - [x] Database, backend, web, gateway running; `/health` all OK
-- [x] Domain `argus.ecobridgers.com` + HTTPS (auto-renew)
+- [x] Domain `argus.anantkaal.com` + HTTPS (auto-renew)
 - [x] Device MQTT over TLS on port 8884 (unknown devices refused)
 - [x] Nightly backup at 03:20
 - [x] Owner admin account

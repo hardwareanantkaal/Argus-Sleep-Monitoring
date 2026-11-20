@@ -3,7 +3,7 @@
 Owner approved on 5 Nov 2026. **Built on 5 Nov 2026** (migration 008; see `docs/VENDOR.md` §v2 and `docs/API.md` §15). Not deployed to prod yet.
 Read first: `CLAUDE.md`, `docs/VENDOR.md` (v1, already built and live), `docs/API.md` §15, `docs/CHECKLIST.md`.
 
-## 1. Current state (v1, live on argus.ecobridgers.com)
+## 1. Current state (v1, live on argus.anantkaal.com)
 
 **Admin:**
 - creates a vendor (`POST /admin/vendors`)

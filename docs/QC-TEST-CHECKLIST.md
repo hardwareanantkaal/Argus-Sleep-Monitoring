@@ -1,6 +1,6 @@
 # Argus: QC test checklist
 
-- **Site:** https://argus.ecobridgers.com
+- **Site:** https://argus.anantkaal.com
 - **Status:** as of 4 Nov 2026
 - **Test data only.** Use test phone numbers and test device names. Logins are shared through a separate safe channel, never by email.
 
