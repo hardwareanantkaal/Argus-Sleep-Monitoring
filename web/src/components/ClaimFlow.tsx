@@ -131,55 +131,117 @@ function NameStep({ found, k, onBack, onDone }: { found: Found; k: Key; onBack()
   );
 }
 
-/* ---- QR camera: uses the browser's built-in BarcodeDetector (Chrome / Edge on Android, desktop Chrome).
-   Where it's missing (Safari, Firefox) we say so and offer the typed code. Nothing is recorded. ---- */
+/* ---- QR camera. Chrome / Edge on Android have a built-in BarcodeDetector; Safari (iPhone, iPad, Mac) and
+   Firefox don't, so there we read the frames ourselves with jsQR (loaded only when needed).
+   iPhone notes: the camera needs HTTPS and a tap to start, and the <video> must be muted + playsinline or
+   iOS won't play it inline. Nothing is recorded. ---- */
 
 interface BarcodeDetectorLike { detect(src: CanvasImageSource): Promise<{ rawValue: string }[]> }
 declare global { interface Window { BarcodeDetector?: new (o: { formats: string[] }) => BarcodeDetectorLike } }
 
+type Reader = (v: HTMLVideoElement) => Promise<string | null>;
+
+/** The built-in detector when it exists and knows QR codes, otherwise jsQR on a scaled-down canvas frame. */
+async function makeReader(): Promise<Reader> {
+  try {
+    const BD = window.BarcodeDetector as (Window['BarcodeDetector'] & { getSupportedFormats?: () => Promise<string[]> }) | undefined;
+    if (BD && (!BD.getSupportedFormats || (await BD.getSupportedFormats()).includes('qr_code'))) {
+      const det = new BD({ formats: ['qr_code'] });
+      return async (v) => (await det.detect(v))[0]?.rawValue || null;
+    }
+  } catch { /* fall through to jsQR */ }
+  const jsQR = (await import('jsqr')).default;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  return async (v) => {
+    if (!ctx || !v.videoWidth) return null;
+    const scale = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight));
+    const w = Math.round(v.videoWidth * scale), h = Math.round(v.videoHeight * scale);
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    ctx.drawImage(v, 0, 0, w, h);
+    return jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' })?.data || null;
+  };
+}
+
+type CamState = 'idle' | 'starting' | 'on' | 'unsupported' | 'insecure' | 'denied' | 'nocam';
+
 function QrScanner({ onResult, onTypeInstead, busy }: { onResult(text: string): void; onTypeInstead(): void; busy: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
-  const [state, setState] = useState<'idle' | 'on' | 'unsupported' | 'denied'>('idle');
+  const [state, setState] = useState<CamState>('idle');
   const stream = useRef<MediaStream | null>(null);
   const done = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const stop = () => { stream.current?.getTracks().forEach((t) => t.stop()); stream.current = null; };
+  const stop = () => {
+    done.current = true;
+    if (timer.current) clearTimeout(timer.current);
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+    if (video.current) video.current.srcObject = null;
+  };
   useEffect(() => stop, []);
 
+  // Must run straight from the button tap: iOS only opens the camera from a user gesture.
   const start = async () => {
-    if (!window.BarcodeDetector || !navigator.mediaDevices?.getUserMedia) return setState('unsupported');
-    try {
-      stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-    } catch { return setState('denied'); }
-    setState('on');
+    if (!window.isSecureContext) return setState('insecure');
+    if (!navigator.mediaDevices?.getUserMedia) return setState('unsupported');
+    setState('starting');
     done.current = false;
-    const det = new window.BarcodeDetector({ formats: ['qr_code'] });
-    requestAnimationFrame(async function loop() {
+    try {
+      try {
+        stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      } catch (e) {
+        if ((e as Error)?.name === 'NotAllowedError' || (e as Error)?.name === 'SecurityError') throw e;
+        stream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); // e.g. no back camera
+      }
+    } catch (e) {
+      stream.current = null;
+      const n = (e as Error)?.name;
+      return setState(n === 'NotAllowedError' || n === 'SecurityError' ? 'denied' : n === 'NotFoundError' || n === 'OverconstrainedError' ? 'nocam' : 'denied');
+    }
+    let read: Reader;
+    try { read = await makeReader(); } catch { stop(); return setState('unsupported'); }
+    if (done.current || !stream.current) return; // stopped while loading
+    setState('on');
+
+    const tick = async () => {
       const v = video.current;
       if (!stream.current || done.current) return;
-      if (v && v.srcObject !== stream.current) { v.srcObject = stream.current; v.play().catch(() => {}); }
+      if (v && v.srcObject !== stream.current) {
+        // Set these as properties too: React's `muted` prop doesn't always reach the element, and iOS checks it.
+        v.muted = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.playsInline = true;
+        v.srcObject = stream.current;
+        v.play().catch(() => {});
+      }
       if (v && v.readyState >= 2) {
         try {
-          const r = await det.detect(v);
-          if (r[0]?.rawValue) { done.current = true; stop(); setState('idle'); onResult(r[0].rawValue); return; }
+          const text = await read(v);
+          if (text && !done.current) { stop(); setState('idle'); onResult(text); return; }
         } catch { /* frame not ready */ }
       }
-      setTimeout(() => requestAnimationFrame(loop), 250);
-    });
+      timer.current = setTimeout(tick, 200);
+    };
+    tick();
   };
+
+  const msg = (text: string) => <><p className="small muted" style={{ maxWidth: '40ch' }}>{text}</p><div className="row" style={{ justifyContent: 'center' }}><button className="btn" onClick={onTypeInstead}>Type the code</button><button className="btn ghost" onClick={start}>Try again</button></div></>;
 
   return (
     <div className="stack" style={{ alignItems: 'center', textAlign: 'center', gap: 16 }}>
       <div className="scan">
         {state === 'on'
-          ? <><video ref={video} playsInline muted /><span className="c c1" /><span className="c c2" /><span className="c c3" /><span className="c c4" /><span className="ln" /></>
+          ? <><video ref={video} autoPlay playsInline muted /><span className="c c1" /><span className="c c2" /><span className="c c3" /><span className="c c4" /><span className="ln" /></>
           : <span className="muted"><Icon name="cam" size={44} /></span>}
       </div>
       {busy && <p className="small muted">Checking the code…</p>}
-      {state === 'on' && <><p className="small muted">Point at the sticker…</p><button className="btn ghost sm" onClick={() => { stop(); setState('idle'); }}>Stop camera</button></>}
+      {state === 'starting' && <p className="small muted">Opening the camera…</p>}
+      {state === 'on' && <><p className="small muted">Point at the sticker. Hold it about 15 cm away.</p><button className="btn ghost sm" onClick={() => { stop(); setState('idle'); }}>Stop camera</button></>}
       {state === 'idle' && !busy && <><p className="small muted" style={{ maxWidth: '40ch' }}>We need the camera to read the sticker. Nothing is recorded.</p><button className="btn" onClick={start}><Icon name="cam" /> Turn on camera</button></>}
-      {state === 'unsupported' && <><p className="small muted" style={{ maxWidth: '40ch' }}>This browser can&apos;t read QR codes. Use Chrome on Android, or type the code from the sticker.</p><button className="btn" onClick={onTypeInstead}>Type the code</button></>}
-      {state === 'denied' && <><p className="small muted" style={{ maxWidth: '40ch' }}>The camera is blocked. Allow it in the browser settings, or type the code from the sticker.</p><button className="btn" onClick={onTypeInstead}>Type the code</button></>}
+      {state === 'insecure' && msg('The camera only works on a secure (https://) address. Open the site with https://, or type the code from the sticker.')}
+      {state === 'unsupported' && msg('This browser can’t open the camera. If you opened the link inside WhatsApp or another app, open it in Safari or Chrome instead, or type the code from the sticker.')}
+      {state === 'nocam' && msg('No camera was found on this device. Type the code from the sticker instead.')}
+      {state === 'denied' && msg('The camera is blocked. On iPhone: Settings › Safari › Camera › Allow (or tap “aA” in the address bar › Website Settings). Then try again, or type the code.')}
     </div>
   );
 }
